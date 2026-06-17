@@ -3,12 +3,15 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import type Konva from 'konva'
 import {
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   Download,
   Eye,
   EyeOff,
   FolderOpen,
+  Image,
   Layers,
+  Plus,
   Redo2,
   Save,
   Trash2,
@@ -31,26 +34,32 @@ import { exportImage, fileUrl, type LibraryRecord } from '@/lib/backend'
 import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
+type NodeRef = { getNode: () => Konva.Node }
+type KonvaEvent = { target: Konva.Node; cancelBubble?: boolean }
+
 const editor = useEditorStore()
 const stageRef = ref<{ getNode: () => Konva.Stage }>()
 const transformerRef = ref<{ getNode: () => Konva.Transformer }>()
-const layerNodeRefs = reactive<Record<string, { getNode: () => Konva.Node } | undefined>>({})
+const layerNodeRefs = reactive<Record<string, NodeRef | undefined>>({})
 const imageElements = reactive<Record<string, HTMLImageElement>>({})
-const assetSearch = ref('')
-const fontSearch = ref('')
-const assetTags = ref('')
-const fontTags = ref('')
+
+const newProjectTitle = ref('Untitled handout')
 const projectPathInput = ref('')
 const exportPathInput = ref('')
+const backgroundTags = ref('')
+const assetTags = ref('')
+const fontTags = ref('')
+const backgroundSearch = ref('')
+const assetSearch = ref('')
+const fontSearch = ref('')
+const isDraggingBackground = ref(false)
+const isDraggingAsset = ref(false)
+const isDraggingFont = ref(false)
 
 const stageScale = computed(() => {
   const maxWidth = 920
   const maxHeight = 620
-  return Math.min(
-    maxWidth / editor.document.canvas.width,
-    maxHeight / editor.document.canvas.height,
-    1,
-  )
+  return Math.min(maxWidth / editor.document.canvas.width, maxHeight / editor.document.canvas.height, 1)
 })
 
 const stageConfig = computed(() => ({
@@ -60,26 +69,46 @@ const stageConfig = computed(() => ({
   scaleY: stageScale.value,
 }))
 
-const backgroundAsset = computed(() => editor.resolveAsset(editor.document.canvas.backgroundAssetId))
+const backgroundAsset = computed(() => editor.resolveBackground(editor.document.canvas.backgroundAssetId))
 const backgroundImage = computed(() =>
   backgroundAsset.value ? imageElements[backgroundAsset.value.id] : undefined,
 )
 
-const filteredAssets = computed(() => {
-  const query = assetSearch.value.trim().toLowerCase()
-  if (!query) return editor.library.assets
-  return editor.library.assets.filter((asset) =>
-    [asset.name, ...asset.tags].some((part) => part.toLowerCase().includes(query)),
-  )
-})
+const filteredBackgrounds = computed(() => filterRecords(editor.library.backgrounds, backgroundSearch.value))
+const filteredAssets = computed(() => filterRecords(editor.library.assets, assetSearch.value))
+const filteredFonts = computed(() => filterRecords(editor.library.fonts, fontSearch.value))
 
-const filteredFonts = computed(() => {
-  const query = fontSearch.value.trim().toLowerCase()
-  if (!query) return editor.library.fonts
-  return editor.library.fonts.filter((font) =>
-    [font.name, ...font.tags].some((part) => part.toLowerCase().includes(query)),
+function filterRecords(records: LibraryRecord[], queryText: string) {
+  const query = queryText.trim().toLowerCase()
+  if (!query) return records
+  return records.filter((record) =>
+    [record.name, ...record.tags].some((part) => part.toLowerCase().includes(query)),
   )
-})
+}
+
+function recordsForKind(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') return filteredBackgrounds.value
+  if (kind === 'asset') return filteredAssets.value
+  return filteredFonts.value
+}
+
+function tagsForKind(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') return backgroundTags.value
+  if (kind === 'asset') return assetTags.value
+  return fontTags.value
+}
+
+function clearTags(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') backgroundTags.value = ''
+  if (kind === 'asset') assetTags.value = ''
+  if (kind === 'font') fontTags.value = ''
+}
+
+function draggingRef(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') return isDraggingBackground
+  if (kind === 'asset') return isDraggingAsset
+  return isDraggingFont
+}
 
 function layerName(layer: HandoutLayer) {
   if (isTextLayer(layer)) return layer.text || layer.name
@@ -93,7 +122,7 @@ function imageForLayer(layer: ImageLayer) {
 
 function loadImage(record: LibraryRecord) {
   if (imageElements[record.id]) return
-  const image = new Image()
+  const image = new window.Image()
   image.crossOrigin = 'anonymous'
   image.src = fileUrl(record.path)
   image.onload = () => {
@@ -102,6 +131,7 @@ function loadImage(record: LibraryRecord) {
 }
 
 function syncImages() {
+  editor.library.backgrounds.forEach(loadImage)
   editor.library.assets.forEach(loadImage)
 }
 
@@ -117,10 +147,6 @@ function layerConfig(layer: HandoutLayer) {
     visible: layer.visible,
     draggable: !layer.locked,
     globalCompositeOperation: layer.blendMode,
-    blurRadius: layer.effects.blur,
-    brightness: layer.effects.brightness / 100,
-    contrast: layer.effects.contrast,
-    saturation: layer.effects.saturation / 100,
   }
 }
 
@@ -138,15 +164,27 @@ function textConfig(layer: TextLayer) {
   }
 }
 
+function selectCanvasLayer(layerId: string, event?: KonvaEvent) {
+  if (event) event.cancelBubble = true
+  editor.selectLayer(layerId)
+  void updateTransformer()
+}
+
+function handleStagePointer(event: KonvaEvent) {
+  const stage = stageRef.value?.getNode()
+  if (stage && event.target === stage) {
+    editor.selectLayer(undefined)
+    void updateTransformer()
+  }
+}
+
 function onTransformEnd(layer: HandoutLayer) {
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
-
   const scaleX = node.scaleX()
   const scaleY = node.scaleY()
   node.scaleX(1)
   node.scaleY(1)
-
   editor.patchLayer(layer.id, {
     x: Math.round(node.x()),
     y: Math.round(node.y()),
@@ -169,38 +207,48 @@ async function updateTransformer() {
   await nextTick()
   const transformer = transformerRef.value?.getNode()
   if (!transformer) return
-  const selected = editor.selectedLayerId
-    ? layerNodeRefs[editor.selectedLayerId]?.getNode()
-    : undefined
+  const selected = editor.selectedLayerId ? layerNodeRefs[editor.selectedLayerId]?.getNode() : undefined
   transformer.nodes(selected ? [selected] : [])
   transformer.getLayer()?.batchDraw()
 }
 
-async function handleAssetInput(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  await editor.importAssetFile(file, assetTags.value)
-  assetTags.value = ''
+async function importFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[]) {
+  const fileArray = Array.from(files)
+  for (const file of fileArray) {
+    if (kind === 'background') await editor.importBackgroundFile(file, tagsForKind(kind))
+    if (kind === 'asset') await editor.importAssetFile(file, tagsForKind(kind))
+    if (kind === 'font') await editor.importFontFile(file, tagsForKind(kind))
+  }
+  clearTags(kind)
   syncImages()
+}
+
+async function handleFileInput(kind: 'background' | 'asset' | 'font', event: Event) {
+  const files = (event.target as HTMLInputElement).files
+  if (!files?.length) return
+  await importFiles(kind, files)
   ;(event.target as HTMLInputElement).value = ''
 }
 
-async function handleFontInput(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  await editor.importFontFile(file, fontTags.value)
-  fontTags.value = ''
-  ;(event.target as HTMLInputElement).value = ''
+async function handleDrop(kind: 'background' | 'asset' | 'font', event: DragEvent) {
+  event.preventDefault()
+  draggingRef(kind).value = false
+  const files = event.dataTransfer?.files
+  if (!files?.length) return
+  await importFiles(kind, files)
 }
 
-async function openProject() {
+async function createProject() {
+  await editor.createManagedHandout(newProjectTitle.value)
+}
+
+async function openProjectFromPath() {
   if (!projectPathInput.value.trim()) return
   await editor.openProjectFromPath(projectPathInput.value)
 }
 
 async function saveProject() {
-  const saved = await editor.saveCurrentProject()
-  if (!saved) return
+  await editor.saveCurrentProject()
 }
 
 async function exportCurrentImage() {
@@ -227,24 +275,176 @@ function setFont(fontId: string) {
 
 onMounted(async () => {
   try {
-    await editor.refreshLibrary()
+    await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
     syncImages()
   } catch (error) {
     editor.status = String(error)
   }
 })
 
+watch(() => editor.library.backgrounds, syncImages, { deep: true })
 watch(() => editor.library.assets, syncImages, { deep: true })
 watch(() => editor.selectedLayerId, updateTransformer)
 watch(() => editor.document.layers, updateTransformer, { deep: true })
 </script>
 
 <template>
-  <div class="app-shell">
+  <div v-if="editor.view === 'manager'" class="manager-shell">
+    <header class="manager-header">
+      <div>
+        <h1>Handout Generator</h1>
+        <p>Manage handouts, backgrounds, assets, and fonts before opening the canvas editor.</p>
+      </div>
+      <Badge variant="secondary">{{ editor.status }}</Badge>
+    </header>
+
+    <Tabs default-value="handouts" class="manager-tabs">
+      <TabsList class="manager-tab-list">
+        <TabsTrigger value="handouts">Handouts</TabsTrigger>
+        <TabsTrigger value="backgrounds">Backgrounds</TabsTrigger>
+        <TabsTrigger value="assets">Assets</TabsTrigger>
+        <TabsTrigger value="fonts">Fonts</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="handouts" class="manager-tab-content">
+        <section class="project-create">
+          <Input v-model="newProjectTitle" placeholder="New handout title" />
+          <Button @click="createProject">
+            <Plus data-icon="inline-start" />
+            New handout
+          </Button>
+          <Input v-model="projectPathInput" placeholder="/path/to/existing/project-folder" />
+          <Button variant="outline" @click="openProjectFromPath">
+            <FolderOpen data-icon="inline-start" />
+            Open folder
+          </Button>
+        </section>
+
+        <div class="project-grid">
+          <Card v-for="project in editor.latestProjects" :key="project.id" class="project-card">
+            <CardHeader>
+              <CardTitle>{{ project.title }}</CardTitle>
+            </CardHeader>
+            <CardContent class="project-card-content">
+              <span>{{ new Date(project.updatedAt).toLocaleString() }}</span>
+              <Button @click="editor.openManagedHandout(project.id)">Open editor</Button>
+            </CardContent>
+          </Card>
+          <Card v-if="!editor.latestProjects.length" class="empty-card">
+            <CardContent>No handout projects yet.</CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="backgrounds" class="manager-tab-content">
+        <section
+          class="drop-panel"
+          :class="{ dragging: isDraggingBackground }"
+          @dragenter.prevent="isDraggingBackground = true"
+          @dragover.prevent="isDraggingBackground = true"
+          @dragleave.prevent="isDraggingBackground = false"
+          @drop="handleDrop('background', $event)"
+        >
+          <Image />
+          <strong>Drop background images here</strong>
+          <span>Used as full-canvas base images in handout projects.</span>
+          <div class="drop-actions">
+            <Input v-model="backgroundTags" placeholder="tags: map, paper, room" />
+            <Button as="label" variant="outline">
+              <Upload data-icon="inline-start" />
+              Upload
+              <input class="sr-only" type="file" accept="image/*" multiple @change="handleFileInput('background', $event)" />
+            </Button>
+          </div>
+        </section>
+        <Input v-model="backgroundSearch" placeholder="Search backgrounds or tags" />
+        <div class="resource-grid">
+          <button v-for="record in recordsForKind('background')" :key="record.id" class="resource-card" type="button">
+            <img :src="fileUrl(record.path)" alt="" />
+            <strong>{{ record.name }}</strong>
+            <span>{{ record.tags.join(', ') || 'No tags' }}</span>
+          </button>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="assets" class="manager-tab-content">
+        <section
+          class="drop-panel"
+          :class="{ dragging: isDraggingAsset }"
+          @dragenter.prevent="isDraggingAsset = true"
+          @dragover.prevent="isDraggingAsset = true"
+          @dragleave.prevent="isDraggingAsset = false"
+          @drop="handleDrop('asset', $event)"
+        >
+          <Image />
+          <strong>Drop image assets and textures here</strong>
+          <span>Assets can be inserted as movable layers inside a handout.</span>
+          <div class="drop-actions">
+            <Input v-model="assetTags" placeholder="tags: clue, texture, token" />
+            <Button as="label" variant="outline">
+              <Upload data-icon="inline-start" />
+              Upload
+              <input class="sr-only" type="file" accept="image/*" multiple @change="handleFileInput('asset', $event)" />
+            </Button>
+          </div>
+        </section>
+        <Input v-model="assetSearch" placeholder="Search assets or tags" />
+        <div class="resource-grid">
+          <button v-for="record in recordsForKind('asset')" :key="record.id" class="resource-card" type="button">
+            <img :src="fileUrl(record.path)" alt="" />
+            <strong>{{ record.name }}</strong>
+            <span>{{ record.tags.join(', ') || 'No tags' }}</span>
+          </button>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="fonts" class="manager-tab-content">
+        <section
+          class="drop-panel"
+          :class="{ dragging: isDraggingFont }"
+          @dragenter.prevent="isDraggingFont = true"
+          @dragover.prevent="isDraggingFont = true"
+          @dragleave.prevent="isDraggingFont = false"
+          @drop="handleDrop('font', $event)"
+        >
+          <Type />
+          <strong>Drop font files here</strong>
+          <span>Fonts are added to the global font library and can be tagged.</span>
+          <div class="drop-actions">
+            <Input v-model="fontTags" placeholder="tags: serif, handwriting, title" />
+            <Button as="label" variant="outline">
+              <Upload data-icon="inline-start" />
+              Upload
+              <input
+                class="sr-only"
+                type="file"
+                accept=".ttf,.otf,.woff,.woff2,font/*"
+                multiple
+                @change="handleFileInput('font', $event)"
+              />
+            </Button>
+          </div>
+        </section>
+        <Input v-model="fontSearch" placeholder="Search fonts or tags" />
+        <div class="font-grid">
+          <div v-for="font in recordsForKind('font')" :key="font.id" class="font-card">
+            <strong>{{ font.name }}</strong>
+            <span>{{ font.tags.join(', ') || 'No tags' }}</span>
+          </div>
+        </div>
+      </TabsContent>
+    </Tabs>
+  </div>
+
+  <div v-else class="app-shell">
     <aside class="left-rail">
       <div class="brand-strip">
+        <Button variant="outline" size="sm" @click="editor.closeEditor()">
+          <ArrowLeft data-icon="inline-start" />
+          Projects
+        </Button>
         <div>
-          <h1>Handout Generator</h1>
+          <h1>{{ editor.document.title }}</h1>
           <p>Single-page canvas editor</p>
         </div>
       </div>
@@ -257,12 +457,22 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         </TabsList>
 
         <TabsContent value="assets" class="rail-tab-content">
+          <section
+            class="mini-drop"
+            :class="{ dragging: isDraggingAsset }"
+            @dragenter.prevent="isDraggingAsset = true"
+            @dragover.prevent="isDraggingAsset = true"
+            @dragleave.prevent="isDraggingAsset = false"
+            @drop="handleDrop('asset', $event)"
+          >
+            Drop assets here
+          </section>
           <div class="import-row">
             <Input v-model="assetTags" placeholder="tags: paper, clue" />
             <Button as="label" size="sm" variant="outline">
               <Upload data-icon="inline-start" />
               Import
-              <input class="sr-only" type="file" accept="image/*" @change="handleAssetInput" />
+              <input class="sr-only" type="file" accept="image/*" multiple @change="handleFileInput('asset', $event)" />
             </Button>
           </div>
           <Input v-model="assetSearch" placeholder="Search assets or tags" />
@@ -274,9 +484,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               type="button"
               @click="editor.addLayerFromAsset(asset)"
             >
-              <span class="asset-thumb">
-                <img v-if="fileUrl(asset.path)" :src="fileUrl(asset.path)" alt="" />
-              </span>
+              <span class="asset-thumb"><img :src="fileUrl(asset.path)" alt="" /></span>
               <span class="asset-meta">
                 <strong>{{ asset.name }}</strong>
                 <span>{{ asset.tags.join(', ') || 'No tags' }}</span>
@@ -286,6 +494,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         </TabsContent>
 
         <TabsContent value="fonts" class="rail-tab-content">
+          <section
+            class="mini-drop"
+            :class="{ dragging: isDraggingFont }"
+            @dragenter.prevent="isDraggingFont = true"
+            @dragover.prevent="isDraggingFont = true"
+            @dragleave.prevent="isDraggingFont = false"
+            @drop="handleDrop('font', $event)"
+          >
+            Drop fonts here
+          </section>
           <div class="import-row">
             <Input v-model="fontTags" placeholder="tags: serif, title" />
             <Button as="label" size="sm" variant="outline">
@@ -295,7 +513,8 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                 class="sr-only"
                 type="file"
                 accept=".ttf,.otf,.woff,.woff2,font/*"
-                @change="handleFontInput"
+                multiple
+                @change="handleFileInput('font', $event)"
               />
             </Button>
           </div>
@@ -330,7 +549,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               class="layer-row"
               :class="{ selected: editor.selectedLayerId === layer.id }"
               type="button"
-              @click="editor.selectLayer(layer.id)"
+              @click="selectCanvasLayer(layer.id)"
             >
               <Layers class="layer-icon" />
               <span>
@@ -348,12 +567,8 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
     <main class="workspace">
       <header class="topbar">
         <div class="project-fields">
-          <Input
-            v-model="projectPathInput"
-            placeholder="/path/to/project-folder"
-            @change="editor.projectDir = projectPathInput"
-          />
-          <Button variant="outline" @click="openProject">
+          <Input v-model="projectPathInput" placeholder="/path/to/project-folder" />
+          <Button variant="outline" @click="openProjectFromPath">
             <FolderOpen data-icon="inline-start" />
             Open
           </Button>
@@ -383,7 +598,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         </div>
 
         <div class="stage-frame">
-          <v-stage ref="stageRef" :config="stageConfig" @mousedown="editor.selectLayer(undefined)">
+          <v-stage ref="stageRef" :config="stageConfig" @click="handleStagePointer" @tap="handleStagePointer">
             <v-layer>
               <v-rect
                 :config="{
@@ -408,17 +623,21 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               <template v-for="layer in editor.document.layers" :key="layer.id">
                 <v-image
                   v-if="isImageLayer(layer) && imageForLayer(layer)"
-                  :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as any)"
+                  :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="{ ...layerConfig(layer), image: imageForLayer(layer) }"
-                  @mousedown.stop="editor.selectLayer(layer.id)"
+                  @click="selectCanvasLayer(layer.id, $event)"
+                  @tap="selectCanvasLayer(layer.id, $event)"
+                  @dragstart="selectCanvasLayer(layer.id, $event)"
                   @dragend="onDragEnd(layer)"
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-text
                   v-else-if="isTextLayer(layer)"
-                  :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as any)"
+                  :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="textConfig(layer)"
-                  @mousedown.stop="editor.selectLayer(layer.id)"
+                  @click="selectCanvasLayer(layer.id, $event)"
+                  @tap="selectCanvasLayer(layer.id, $event)"
+                  @dragstart="selectCanvasLayer(layer.id, $event)"
                   @dragend="onDragEnd(layer)"
                   @transformend="onTransformEnd(layer)"
                 />
@@ -428,8 +647,8 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                 :config="{
                   rotateEnabled: true,
                   ignoreStroke: true,
-                  boundBoxFunc: (_oldBox: unknown, newBox: { width: number; height: number }) =>
-                    newBox.width < 12 || newBox.height < 12 ? _oldBox : newBox,
+                  boundBoxFunc: (oldBox: unknown, newBox: { width: number; height: number }) =>
+                    newBox.width < 12 || newBox.height < 12 ? oldBox : newBox,
                 }"
               />
             </v-layer>
@@ -440,16 +659,11 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
 
     <aside class="inspector">
       <Card>
-        <CardHeader>
-          <CardTitle>Document</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Document</CardTitle></CardHeader>
         <CardContent class="panel-stack">
           <label>
             Title
-            <Input
-              :model-value="editor.document.title"
-              @update:model-value="(value) => editor.replaceDocument({ ...editor.document, title: String(value) })"
-            />
+            <Input :model-value="editor.document.title" @update:model-value="(value) => editor.renameDocument(String(value))" />
           </label>
           <div class="two-col">
             <label>
@@ -457,13 +671,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               <Input
                 type="number"
                 :model-value="editor.document.canvas.width"
-                @update:model-value="
-                  (value) =>
-                    editor.replaceDocument({
-                      ...editor.document,
-                      canvas: { ...editor.document.canvas, width: Number(value) || 1 },
-                    })
-                "
+                @update:model-value="(value) => editor.patchCanvas({ width: Number(value) || 1 })"
               />
             </label>
             <label>
@@ -471,30 +679,33 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               <Input
                 type="number"
                 :model-value="editor.document.canvas.height"
-                @update:model-value="
-                  (value) =>
-                    editor.replaceDocument({
-                      ...editor.document,
-                      canvas: { ...editor.document.canvas, height: Number(value) || 1 },
-                    })
-                "
+                @update:model-value="(value) => editor.patchCanvas({ height: Number(value) || 1 })"
               />
             </label>
           </div>
+          <section
+            class="mini-drop"
+            :class="{ dragging: isDraggingBackground }"
+            @dragenter.prevent="isDraggingBackground = true"
+            @dragover.prevent="isDraggingBackground = true"
+            @dragleave.prevent="isDraggingBackground = false"
+            @drop="handleDrop('background', $event)"
+          >
+            Drop backgrounds here
+          </section>
           <label>
             Background asset
             <Select
               :model-value="editor.document.canvas.backgroundAssetId"
               @update:model-value="
-                (value) => editor.setBackground(editor.library.assets.find((asset) => asset.id === value))
+                (value) =>
+                  editor.setBackground(editor.library.backgrounds.find((background) => background.id === value))
               "
             >
-              <SelectTrigger>
-                <SelectValue placeholder="No background" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="No background" /></SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="asset in editor.library.assets" :key="asset.id" :value="asset.id">
-                  {{ asset.name }}
+                <SelectItem v-for="background in editor.library.backgrounds" :key="background.id" :value="background.id">
+                  {{ background.name }}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -503,77 +714,45 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Inspector</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Inspector</CardTitle></CardHeader>
         <CardContent v-if="editor.selectedLayer" class="panel-stack">
           <label>
             Name
-            <Input
-              :model-value="editor.selectedLayer.name"
-              @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })"
-            />
+            <Input :model-value="editor.selectedLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
           </label>
-
           <div class="two-col">
             <label>
               X
-              <Input
-                type="number"
-                :model-value="editor.selectedLayer.x"
-                @update:model-value="(value) => editor.patchSelectedLayer({ x: Number(value) || 0 })"
-              />
+              <Input type="number" :model-value="editor.selectedLayer.x" @update:model-value="(value) => editor.patchSelectedLayer({ x: Number(value) || 0 })" />
             </label>
             <label>
               Y
-              <Input
-                type="number"
-                :model-value="editor.selectedLayer.y"
-                @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })"
-              />
+              <Input type="number" :model-value="editor.selectedLayer.y" @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })" />
             </label>
           </div>
-
           <div class="two-col">
             <label>
               Width
-              <Input
-                type="number"
-                :model-value="editor.selectedLayer.width"
-                @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })"
-              />
+              <Input type="number" :model-value="editor.selectedLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
             </label>
             <label>
               Height
-              <Input
-                type="number"
-                :model-value="editor.selectedLayer.height"
-                @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })"
-              />
+              <Input type="number" :model-value="editor.selectedLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
             </label>
           </div>
-
           <label>
             Opacity {{ Math.round(editor.selectedLayer.opacity * 100) }}%
             <Slider
               :model-value="[editor.selectedLayer.opacity * 100]"
               :max="100"
               :step="1"
-              @update:model-value="
-                (value) => editor.patchSelectedLayer({ opacity: ((value?.[0] ?? 100) as number) / 100 })
-              "
+              @update:model-value="(value) => editor.patchSelectedLayer({ opacity: ((value?.[0] ?? 100) as number) / 100 })"
             />
           </label>
-
           <label>
             Blend mode
-            <Select
-              :model-value="editor.selectedLayer.blendMode"
-              @update:model-value="(value) => editor.patchSelectedLayer({ blendMode: value as any })"
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+            <Select :model-value="editor.selectedLayer.blendMode" @update:model-value="(value) => editor.patchSelectedLayer({ blendMode: value as any })">
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="source-over">Normal</SelectItem>
                 <SelectItem value="multiply">Multiply</SelectItem>
@@ -584,39 +763,25 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               </SelectContent>
             </Select>
           </label>
-
           <template v-if="isTextLayer(editor.selectedLayer)">
             <label>
               Text
-              <Textarea
-                :model-value="editor.selectedLayer.text"
-                @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })"
-              />
+              <Textarea :model-value="editor.selectedLayer.text" @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })" />
             </label>
             <div class="two-col">
               <label>
                 Font size
-                <Input
-                  type="number"
-                  :model-value="editor.selectedLayer.fontSize"
-                  @update:model-value="(value) => editor.patchSelectedLayer({ fontSize: Number(value) || 1 })"
-                />
+                <Input type="number" :model-value="editor.selectedLayer.fontSize" @update:model-value="(value) => editor.patchSelectedLayer({ fontSize: Number(value) || 1 })" />
               </label>
               <label>
                 Color
-                <Input
-                  type="color"
-                  :model-value="editor.selectedLayer.fill"
-                  @update:model-value="(value) => editor.patchSelectedLayer({ fill: String(value) })"
-                />
+                <Input type="color" :model-value="editor.selectedLayer.fill" @update:model-value="(value) => editor.patchSelectedLayer({ fill: String(value) })" />
               </label>
             </div>
             <label>
               Font
               <Select :model-value="editor.selectedLayer.fontId" @update:model-value="(value) => setFont(String(value))">
-                <SelectTrigger>
-                  <SelectValue :placeholder="editor.selectedLayer.fontFamily" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue :placeholder="editor.selectedLayer.fontFamily" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem v-for="font in editor.library.fonts" :key="font.id" :value="font.id">
                     {{ font.name }}
@@ -625,9 +790,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               </Select>
             </label>
           </template>
-
           <Separator />
-
           <div class="effect-grid">
             <label>
               Blur {{ editor.selectedLayer.effects.blur }}
@@ -635,12 +798,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                 :model-value="[editor.selectedLayer.effects.blur]"
                 :max="40"
                 :step="1"
-                @update:model-value="
-                  (value) =>
-                    editor.patchSelectedLayer({
-                      effects: { ...editor.selectedLayer!.effects, blur: (value?.[0] ?? 0) as number },
-                    })
-                "
+                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, blur: (value?.[0] ?? 0) as number } })"
               />
             </label>
             <label>
@@ -650,12 +808,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                 :min="-100"
                 :max="100"
                 :step="1"
-                @update:model-value="
-                  (value) =>
-                    editor.patchSelectedLayer({
-                      effects: { ...editor.selectedLayer!.effects, brightness: (value?.[0] ?? 0) as number },
-                    })
-                "
+                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, brightness: (value?.[0] ?? 0) as number } })"
               />
             </label>
             <label>
@@ -665,12 +818,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                 :min="-100"
                 :max="100"
                 :step="1"
-                @update:model-value="
-                  (value) =>
-                    editor.patchSelectedLayer({
-                      effects: { ...editor.selectedLayer!.effects, contrast: (value?.[0] ?? 0) as number },
-                    })
-                "
+                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, contrast: (value?.[0] ?? 0) as number } })"
               />
             </label>
             <label>
@@ -680,16 +828,10 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                 :min="-100"
                 :max="100"
                 :step="1"
-                @update:model-value="
-                  (value) =>
-                    editor.patchSelectedLayer({
-                      effects: { ...editor.selectedLayer!.effects, saturation: (value?.[0] ?? 0) as number },
-                    })
-                "
+                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, saturation: (value?.[0] ?? 0) as number } })"
               />
             </label>
           </div>
-
           <div class="danger-row">
             <Button variant="outline" @click="editor.patchSelectedLayer({ visible: !editor.selectedLayer.visible })">
               <Eye data-icon="inline-start" />
@@ -701,15 +843,11 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             </Button>
           </div>
         </CardContent>
-        <CardContent v-else class="empty-inspector">
-          Select a layer on the canvas or in the layer list.
-        </CardContent>
+        <CardContent v-else class="empty-inspector">Select a layer on the canvas or in the layer list.</CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Export</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Export</CardTitle></CardHeader>
         <CardContent class="panel-stack">
           <Input v-model="exportPathInput" placeholder="/path/to/output.png" />
           <Button @click="exportCurrentImage">

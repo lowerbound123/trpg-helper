@@ -50,7 +50,11 @@ struct LibraryRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct LibraryIndex {
+  #[serde(default)]
+  backgrounds: Vec<LibraryRecord>,
+  #[serde(default)]
   assets: Vec<LibraryRecord>,
+  #[serde(default)]
   fonts: Vec<LibraryRecord>,
 }
 
@@ -68,6 +72,15 @@ struct ProjectPayload {
   metadata: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSummary {
+  id: String,
+  title: String,
+  project_dir: String,
+  updated_at: DateTime<Utc>,
+}
+
 fn app_root(app: &AppHandle) -> Result<PathBuf, AppError> {
   app.path().app_data_dir().map_err(|_| AppError::AppDataDir)
 }
@@ -76,12 +89,17 @@ fn library_root(app: &AppHandle) -> Result<PathBuf, AppError> {
   Ok(app_root(app)?.join("library"))
 }
 
+fn projects_root(app: &AppHandle) -> Result<PathBuf, AppError> {
+  Ok(app_root(app)?.join("projects"))
+}
+
 fn index_path(app: &AppHandle) -> Result<PathBuf, AppError> {
   Ok(library_root(app)?.join("index.json"))
 }
 
 fn ensure_library(app: &AppHandle) -> Result<(), AppError> {
   let root = library_root(app)?;
+  fs::create_dir_all(root.join("backgrounds"))?;
   fs::create_dir_all(root.join("assets"))?;
   fs::create_dir_all(root.join("fonts"))?;
 
@@ -154,6 +172,7 @@ fn import_record(
 
   let mut index = read_index(app)?;
   match bucket {
+    "backgrounds" => index.backgrounds.push(record.clone()),
     "assets" => index.assets.push(record.clone()),
     "fonts" => index.fonts.push(record.clone()),
     _ => {}
@@ -171,9 +190,72 @@ fn decode_data_url(data_url: &str) -> Result<Vec<u8>, AppError> {
   Ok(general_purpose::STANDARD.decode(data)?)
 }
 
+fn project_dir(app: &AppHandle, project_id: &str) -> Result<PathBuf, AppError> {
+  Ok(projects_root(app)?.join(project_id))
+}
+
+fn document_title(document: &Value) -> String {
+  document
+    .get("title")
+    .and_then(Value::as_str)
+    .unwrap_or("Untitled handout")
+    .to_string()
+}
+
+fn write_project_files(root: &Path, document: &Value, metadata: &Value) -> Result<(), AppError> {
+  fs::create_dir_all(root)?;
+  fs::write(root.join("handout.json"), serde_json::to_vec_pretty(document)?)?;
+  fs::write(root.join("metadata.json"), serde_json::to_vec_pretty(metadata)?)?;
+  Ok(())
+}
+
+fn read_project_files(root: &Path) -> Result<ProjectPayload, AppError> {
+  let document = serde_json::from_slice(&fs::read(root.join("handout.json"))?)?;
+  let metadata_path = root.join("metadata.json");
+  let metadata = if metadata_path.exists() {
+    serde_json::from_slice(&fs::read(metadata_path)?)?
+  } else {
+    serde_json::json!({})
+  };
+  Ok(ProjectPayload { document, metadata })
+}
+
+fn project_summary(root: &Path, payload: &ProjectPayload) -> ProjectSummary {
+  let id = root
+    .file_name()
+    .and_then(|value| value.to_str())
+    .unwrap_or("unknown")
+    .to_string();
+  let updated_at = payload
+    .metadata
+    .get("savedAt")
+    .and_then(Value::as_str)
+    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+    .map(|value| value.with_timezone(&Utc))
+    .unwrap_or_else(Utc::now);
+
+  ProjectSummary {
+    id,
+    title: document_title(&payload.document),
+    project_dir: root.to_string_lossy().to_string(),
+    updated_at,
+  }
+}
+
 #[tauri::command]
 fn get_library(app: AppHandle) -> CommandResult<LibraryIndex> {
   read_index(&app).map_err(Into::into)
+}
+
+#[tauri::command]
+fn import_background(
+  app: AppHandle,
+  file_name: String,
+  data: Vec<u8>,
+  tags: Vec<String>,
+  media_type: String,
+) -> CommandResult<ImportResult> {
+  import_record(&app, "backgrounds", file_name, data, tags, media_type).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -201,11 +283,7 @@ fn import_font(
 #[tauri::command]
 fn save_project(project_dir: String, document: Value, metadata: Value) -> CommandResult<ProjectPayload> {
   let root = PathBuf::from(project_dir);
-  fs::create_dir_all(&root).map_err(AppError::from)?;
-  fs::write(root.join("handout.json"), serde_json::to_vec_pretty(&document).map_err(AppError::from)?)
-    .map_err(AppError::from)?;
-  fs::write(root.join("metadata.json"), serde_json::to_vec_pretty(&metadata).map_err(AppError::from)?)
-    .map_err(AppError::from)?;
+  write_project_files(&root, &document, &metadata).map_err(String::from)?;
 
   Ok(ProjectPayload { document, metadata })
 }
@@ -213,15 +291,63 @@ fn save_project(project_dir: String, document: Value, metadata: Value) -> Comman
 #[tauri::command]
 fn open_project(project_dir: String) -> CommandResult<ProjectPayload> {
   let root = PathBuf::from(project_dir);
-  let document = serde_json::from_slice(&fs::read(root.join("handout.json")).map_err(AppError::from)?)
-    .map_err(AppError::from)?;
-  let metadata_path = root.join("metadata.json");
-  let metadata = if metadata_path.exists() {
-    serde_json::from_slice(&fs::read(metadata_path).map_err(AppError::from)?).map_err(AppError::from)?
-  } else {
-    serde_json::json!({})
-  };
+  read_project_files(&root).map_err(String::from)
+}
 
+#[tauri::command]
+fn list_projects(app: AppHandle) -> CommandResult<Vec<ProjectSummary>> {
+  let root = projects_root(&app).map_err(String::from)?;
+  fs::create_dir_all(&root).map_err(AppError::from).map_err(String::from)?;
+  let mut projects = Vec::new();
+
+  for entry in fs::read_dir(root).map_err(AppError::from).map_err(String::from)? {
+    let path = entry.map_err(AppError::from).map_err(String::from)?.path();
+    if !path.is_dir() || !path.join("handout.json").exists() {
+      continue;
+    }
+    let payload = read_project_files(&path).map_err(String::from)?;
+    projects.push(project_summary(&path, &payload));
+  }
+
+  projects.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+  Ok(projects)
+}
+
+#[tauri::command]
+fn create_project(app: AppHandle, title: String, document: Value) -> CommandResult<ProjectPayload> {
+  let id = Uuid::new_v4().to_string();
+  let root = project_dir(&app, &id).map_err(String::from)?;
+  let metadata = serde_json::json!({
+    "id": id,
+    "savedAt": Utc::now().to_rfc3339(),
+    "app": "handout-generator"
+  });
+  let mut next_document = document;
+  if let Some(object) = next_document.as_object_mut() {
+    object.insert("title".to_string(), Value::String(title));
+  }
+  write_project_files(&root, &next_document, &metadata).map_err(String::from)?;
+  Ok(ProjectPayload {
+    document: next_document,
+    metadata,
+  })
+}
+
+#[tauri::command]
+fn open_managed_project(app: AppHandle, project_id: String) -> CommandResult<ProjectPayload> {
+  let root = project_dir(&app, &project_id).map_err(String::from)?;
+  read_project_files(&root).map_err(String::from)
+}
+
+#[tauri::command]
+fn save_managed_project(app: AppHandle, project_id: String, document: Value) -> CommandResult<ProjectPayload> {
+  let root = project_dir(&app, &project_id).map_err(String::from)?;
+  let metadata = serde_json::json!({
+    "id": project_id,
+    "savedAt": Utc::now().to_rfc3339(),
+    "app": "handout-generator"
+  });
+  write_project_files(&root, &document, &metadata).map_err(String::from)?;
   Ok(ProjectPayload { document, metadata })
 }
 
@@ -251,10 +377,15 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       export_image,
+      create_project,
       get_library,
+      import_background,
       import_asset,
       import_font,
+      list_projects,
+      open_managed_project,
       open_project,
+      save_managed_project,
       save_project
     ])
     .run(tauri::generate_context!())

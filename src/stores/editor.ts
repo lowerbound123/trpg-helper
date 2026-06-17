@@ -19,13 +19,19 @@ import { createHistory } from '@/lib/history'
 import {
   emptyLibrary,
   fileUrl,
+  createProject,
   getLibrary,
   importAsset,
+  importBackground,
   importFont,
+  listProjects,
+  openManagedProject,
   openProject,
+  saveManagedProject,
   saveProject,
   type LibraryIndex,
   type LibraryRecord,
+  type ProjectSummary,
 } from '@/lib/backend'
 
 const tagList = (value: string) =>
@@ -38,11 +44,15 @@ export const useEditorStore = defineStore('editor', () => {
   const history = shallowRef(createHistory(createDefaultHandout('Untitled handout')))
   const selectedLayerId = ref<string>()
   const projectDir = ref('')
+  const currentProjectId = ref<string>()
+  const view = ref<'manager' | 'editor'>('manager')
+  const projects = ref<ProjectSummary[]>([])
   const library = ref<LibraryIndex>(emptyLibrary())
   const status = ref('Ready')
 
   const document = computed(() => history.value.current)
   const layers = computed(() => [...document.value.layers].sort((a, b) => b.zIndex - a.zIndex))
+  const latestProjects = computed(() => projects.value)
   const selectedLayer = computed<HandoutLayer | undefined>(() =>
     document.value.layers.find((layer) => layer.id === selectedLayerId.value),
   )
@@ -106,8 +116,20 @@ export const useEditorStore = defineStore('editor', () => {
     commit((doc) => moveLayer(doc, layer.id, layer.zIndex + delta))
   }
 
-  function setBackground(asset?: LibraryRecord) {
-    commit((doc) => updateCanvas(doc, { backgroundAssetId: asset?.id }))
+  function setBackground(background?: LibraryRecord) {
+    commit((doc) => updateCanvas(doc, { backgroundAssetId: background?.id }))
+  }
+
+  function patchCanvas(canvas: Partial<HandoutDocument['canvas']>) {
+    commit((doc) => updateCanvas(doc, canvas))
+  }
+
+  function renameDocument(title: string) {
+    commit((doc) => ({
+      ...doc,
+      title,
+      updatedAt: new Date().toISOString(),
+    }))
   }
 
   function replaceDocument(next: HandoutDocument, dir?: string) {
@@ -129,10 +151,20 @@ export const useEditorStore = defineStore('editor', () => {
     await loadFonts()
   }
 
+  async function refreshProjects() {
+    projects.value = await listProjects()
+  }
+
   async function importAssetFile(file: File, tagText: string) {
     const result = await importAsset(file, tagList(tagText))
     library.value = result.library
     status.value = `Imported asset ${result.record.name}`
+  }
+
+  async function importBackgroundFile(file: File, tagText: string) {
+    const result = await importBackground(file, tagList(tagText))
+    library.value = result.library
+    status.value = `Imported background ${result.record.name}`
   }
 
   async function importFontFile(file: File, tagText: string) {
@@ -155,6 +187,12 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   async function saveCurrentProject() {
+    if (currentProjectId.value) {
+      await saveManagedProject(currentProjectId.value, document.value)
+      await refreshProjects()
+      status.value = `Saved project ${document.value.title}`
+      return true
+    }
     if (!projectDir.value.trim()) {
       status.value = 'Set a project folder path before saving.'
       return false
@@ -167,11 +205,40 @@ export const useEditorStore = defineStore('editor', () => {
   async function openProjectFromPath(path: string) {
     const payload = await openProject(path.trim())
     replaceDocument(payload.document, path.trim())
+    currentProjectId.value = undefined
+    view.value = 'editor'
     status.value = `Opened project from ${path.trim()}`
+  }
+
+  async function createManagedHandout(title: string) {
+    const next = createDefaultHandout(title.trim() || 'Untitled handout')
+    const payload = await createProject(next.title, next)
+    replaceDocument(payload.document)
+    currentProjectId.value = String(payload.metadata.id ?? '')
+    view.value = 'editor'
+    await refreshProjects()
+    status.value = `Created project ${payload.document.title}`
+  }
+
+  async function openManagedHandout(projectId: string) {
+    const payload = await openManagedProject(projectId)
+    replaceDocument(payload.document)
+    currentProjectId.value = projectId
+    view.value = 'editor'
+    status.value = `Opened project ${payload.document.title}`
+  }
+
+  function closeEditor() {
+    selectedLayerId.value = undefined
+    view.value = 'manager'
   }
 
   function resolveAsset(assetId?: string) {
     return library.value.assets.find((asset) => asset.id === assetId)
+  }
+
+  function resolveBackground(backgroundId?: string) {
+    return library.value.backgrounds.find((background) => background.id === backgroundId)
   }
 
   function resolveFont(fontId?: string) {
@@ -185,19 +252,30 @@ export const useEditorStore = defineStore('editor', () => {
     canUndo,
     deleteSelectedLayer,
     document,
+    closeEditor,
+    createManagedHandout,
+    currentProjectId,
+    importBackgroundFile,
     importAssetFile,
     importFontFile,
+    latestProjects,
     layers,
     library,
     moveSelectedLayer,
+    openManagedHandout,
     openProjectFromPath,
     patchLayer,
+    patchCanvas,
     patchSelectedLayer,
+    projects,
     projectDir,
     redo,
+    renameDocument,
     refreshLibrary,
+    refreshProjects,
     replaceDocument,
     resolveAsset,
+    resolveBackground,
     resolveFont,
     selectLayer,
     selectedLayer,
@@ -205,6 +283,7 @@ export const useEditorStore = defineStore('editor', () => {
     setBackground,
     status,
     undo,
+    view,
     saveCurrentProject,
   }
 })

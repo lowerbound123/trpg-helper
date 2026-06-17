@@ -15,8 +15,16 @@ export interface LibraryRecord {
 }
 
 export interface LibraryIndex {
+  backgrounds: LibraryRecord[]
   assets: LibraryRecord[]
   fonts: LibraryRecord[]
+}
+
+export interface ProjectSummary {
+  id: string
+  title: string
+  projectDir: string
+  updatedAt: string
 }
 
 export interface ProjectPayload {
@@ -30,6 +38,7 @@ export interface ImportResult {
 }
 
 export const emptyLibrary = (): LibraryIndex => ({
+  backgrounds: [],
   assets: [],
   fonts: [],
 })
@@ -54,6 +63,18 @@ export async function importAsset(file: File, tags: string[]): Promise<ImportRes
     throw new Error('Asset import requires the Tauri desktop runtime.')
   }
   return invoke<ImportResult>('import_asset', {
+    fileName: file.name,
+    data: Array.from(new Uint8Array(await file.arrayBuffer())),
+    tags,
+    mediaType: file.type || 'application/octet-stream',
+  })
+}
+
+export async function importBackground(file: File, tags: string[]): Promise<ImportResult> {
+  if (!isTauriRuntime()) {
+    throw new Error('Background import requires the Tauri desktop runtime.')
+  }
+  return invoke<ImportResult>('import_background', {
     fileName: file.name,
     data: Array.from(new Uint8Array(await file.arrayBuffer())),
     tags,
@@ -95,6 +116,47 @@ export async function openProject(projectDir: string): Promise<ProjectPayload> {
     throw new Error('Opening projects requires the Tauri desktop runtime.')
   }
   return invoke<ProjectPayload>('open_project', { projectDir })
+}
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  if (!isTauriRuntime()) return []
+  return invoke<ProjectSummary[]>('list_projects')
+}
+
+export async function createProject(title: string, document: HandoutDocument): Promise<ProjectPayload> {
+  if (!isTauriRuntime()) {
+    return {
+      document: { ...document, title },
+      metadata: {
+        id: `preview-${Date.now()}`,
+        savedAt: new Date().toISOString(),
+      },
+    }
+  }
+  return invoke<ProjectPayload>('create_project', { title, document })
+}
+
+export async function openManagedProject(projectId: string): Promise<ProjectPayload> {
+  if (!isTauriRuntime()) {
+    throw new Error('Opening projects requires the Tauri desktop runtime.')
+  }
+  return invoke<ProjectPayload>('open_managed_project', { projectId })
+}
+
+export async function saveManagedProject(
+  projectId: string,
+  document: HandoutDocument,
+): Promise<ProjectPayload> {
+  if (!isTauriRuntime()) {
+    return {
+      document,
+      metadata: {
+        id: projectId,
+        savedAt: new Date().toISOString(),
+      },
+    }
+  }
+  return invoke<ProjectPayload>('save_managed_project', { projectId, document })
 }
 
 export async function exportImage(filePath: string, dataUrl: string): Promise<string> {

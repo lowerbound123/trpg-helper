@@ -7,7 +7,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -15,8 +15,8 @@ type CommandResult<T> = Result<T, String>;
 
 #[derive(Debug, Error)]
 enum AppError {
-  #[error("failed to resolve app data directory")]
-  AppDataDir,
+  #[error("failed to resolve local data directory")]
+  DataDir,
   #[error("io error: {0}")]
   Io(#[from] std::io::Error),
   #[error("json error: {0}")]
@@ -81,8 +81,14 @@ struct ProjectSummary {
   updated_at: DateTime<Utc>,
 }
 
-fn app_root(app: &AppHandle) -> Result<PathBuf, AppError> {
-  app.path().app_data_dir().map_err(|_| AppError::AppDataDir)
+fn app_root(_app: &AppHandle) -> Result<PathBuf, AppError> {
+  let cwd = std::env::current_dir().map_err(|_| AppError::DataDir)?;
+  let project_root = if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
+    cwd.parent().map(Path::to_path_buf).ok_or(AppError::DataDir)?
+  } else {
+    cwd
+  };
+  Ok(project_root.join("data"))
 }
 
 fn library_root(app: &AppHandle) -> Result<PathBuf, AppError> {

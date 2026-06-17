@@ -115,7 +115,7 @@ export function createDefaultHandout(title = 'Untitled handout'): HandoutDocumen
     canvas: {
       width: 1280,
       height: 720,
-      backgroundColor: '#f8fafc',
+      backgroundColor: 'rgba(0,0,0,0)',
     },
     layers: [],
     updatedAt: new Date().toISOString(),

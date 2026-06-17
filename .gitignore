@@ -11,6 +11,7 @@ node_modules
 .pnpm-store
 dist
 dist-ssr
+data
 src-tauri/target
 .superpowers
 *.local

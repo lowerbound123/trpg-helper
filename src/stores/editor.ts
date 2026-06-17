@@ -159,12 +159,14 @@ export const useEditorStore = defineStore('editor', () => {
     const result = await importAsset(file, tagList(tagText))
     library.value = result.library
     status.value = `Imported asset ${result.record.name}`
+    return result.record
   }
 
   async function importBackgroundFile(file: File, tagText: string) {
     const result = await importBackground(file, tagList(tagText))
     library.value = result.library
     status.value = `Imported background ${result.record.name}`
+    return result.record
   }
 
   async function importFontFile(file: File, tagText: string) {
@@ -172,6 +174,7 @@ export const useEditorStore = defineStore('editor', () => {
     library.value = result.library
     await loadFont(result.record)
     status.value = `Imported font ${result.record.name}`
+    return result.record
   }
 
   async function loadFont(font: LibraryRecord) {
@@ -210,8 +213,22 @@ export const useEditorStore = defineStore('editor', () => {
     status.value = `Opened project from ${path.trim()}`
   }
 
-  async function createManagedHandout(title: string) {
+  async function createManagedHandout(
+    title: string,
+    options?: {
+      width?: number
+      height?: number
+      backgroundId?: string
+    },
+  ) {
     const next = createDefaultHandout(title.trim() || 'Untitled handout')
+    if (options?.width && options?.height) {
+      next.canvas.width = Math.max(1, Math.round(options.width))
+      next.canvas.height = Math.max(1, Math.round(options.height))
+    }
+    if (options?.backgroundId) {
+      next.canvas.backgroundAssetId = options.backgroundId
+    }
     const payload = await createProject(next.title, next)
     replaceDocument(payload.document)
     currentProjectId.value = String(payload.metadata.id ?? '')

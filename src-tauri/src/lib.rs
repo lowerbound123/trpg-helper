@@ -196,6 +196,15 @@ fn decode_data_url(data_url: &str) -> Result<Vec<u8>, AppError> {
   Ok(general_purpose::STANDARD.decode(data)?)
 }
 
+fn encode_data_url(path: &Path, media_type: &str) -> Result<String, AppError> {
+  let bytes = fs::read(path)?;
+  Ok(format!(
+    "data:{};base64,{}",
+    media_type,
+    general_purpose::STANDARD.encode(bytes)
+  ))
+}
+
 fn project_dir(app: &AppHandle, project_id: &str) -> Result<PathBuf, AppError> {
   Ok(projects_root(app)?.join(project_id))
 }
@@ -251,6 +260,11 @@ fn project_summary(root: &Path, payload: &ProjectPayload) -> ProjectSummary {
 #[tauri::command]
 fn get_library(app: AppHandle) -> CommandResult<LibraryIndex> {
   read_index(&app).map_err(Into::into)
+}
+
+#[tauri::command]
+fn read_file_data_url(path: String, media_type: String) -> CommandResult<String> {
+  encode_data_url(Path::new(&path), &media_type).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -391,6 +405,7 @@ pub fn run() {
       list_projects,
       open_managed_project,
       open_project,
+      read_file_data_url,
       save_managed_project,
       save_project
     ])

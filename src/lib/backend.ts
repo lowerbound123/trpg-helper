@@ -53,6 +53,11 @@ export function fileUrl(path?: string | null): string {
   return convertFileSrc(path)
 }
 
+export async function readFileDataUrl(path: string, mediaType: string): Promise<string> {
+  if (!isTauriRuntime()) return path
+  return invoke<string>('read_file_data_url', { path, mediaType })
+}
+
 export async function getLibrary(): Promise<LibraryIndex> {
   if (!isTauriRuntime()) return emptyLibrary()
   return invoke<LibraryIndex>('get_library')

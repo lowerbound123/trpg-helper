@@ -30,7 +30,7 @@ import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { exportImage, fileUrl, type LibraryRecord } from '@/lib/backend'
+import { exportImage, fileUrl, readFileDataUrl, type LibraryRecord } from '@/lib/backend'
 import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
@@ -44,6 +44,10 @@ const layerNodeRefs = reactive<Record<string, NodeRef | undefined>>({})
 const imageElements = reactive<Record<string, HTMLImageElement>>({})
 
 const newProjectTitle = ref('Untitled handout')
+const createMode = ref<'blank' | 'existing-background' | 'upload-background'>('blank')
+const blankWidth = ref(1280)
+const blankHeight = ref(720)
+const selectedCreateBackgroundId = ref('')
 const projectPathInput = ref('')
 const exportPathInput = ref('')
 const backgroundTags = ref('')
@@ -52,6 +56,7 @@ const fontTags = ref('')
 const backgroundSearch = ref('')
 const assetSearch = ref('')
 const fontSearch = ref('')
+const resourcePreviewUrls = reactive<Record<string, string>>({})
 const isDraggingBackground = ref(false)
 const isDraggingAsset = ref(false)
 const isDraggingFont = ref(false)
@@ -104,6 +109,19 @@ function clearTags(kind: 'background' | 'asset' | 'font') {
   if (kind === 'font') fontTags.value = ''
 }
 
+function previewUrl(record: LibraryRecord) {
+  return resourcePreviewUrls[record.id] || fileUrl(record.path)
+}
+
+async function imageSize(record: LibraryRecord) {
+  await loadImage(record)
+  const image = imageElements[record.id]
+  return {
+    width: image?.naturalWidth || image?.width || blankWidth.value,
+    height: image?.naturalHeight || image?.height || blankHeight.value,
+  }
+}
+
 function draggingRef(kind: 'background' | 'asset' | 'font') {
   if (kind === 'background') return isDraggingBackground
   if (kind === 'asset') return isDraggingAsset
@@ -120,19 +138,20 @@ function imageForLayer(layer: ImageLayer) {
   return asset ? imageElements[asset.id] : undefined
 }
 
-function loadImage(record: LibraryRecord) {
+async function loadImage(record: LibraryRecord) {
   if (imageElements[record.id]) return
   const image = new window.Image()
   image.crossOrigin = 'anonymous'
-  image.src = fileUrl(record.path)
+  const src = await readFileDataUrl(record.path, record.mediaType)
+  resourcePreviewUrls[record.id] = src
+  image.src = src
   image.onload = () => {
     imageElements[record.id] = image
   }
 }
 
 function syncImages() {
-  editor.library.backgrounds.forEach(loadImage)
-  editor.library.assets.forEach(loadImage)
+  void Promise.all([...editor.library.backgrounds, ...editor.library.assets].map((record) => loadImage(record)))
 }
 
 function layerConfig(layer: HandoutLayer) {
@@ -214,13 +233,15 @@ async function updateTransformer() {
 
 async function importFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[]) {
   const fileArray = Array.from(files)
+  const imported: LibraryRecord[] = []
   for (const file of fileArray) {
-    if (kind === 'background') await editor.importBackgroundFile(file, tagsForKind(kind))
-    if (kind === 'asset') await editor.importAssetFile(file, tagsForKind(kind))
-    if (kind === 'font') await editor.importFontFile(file, tagsForKind(kind))
+    if (kind === 'background') imported.push(await editor.importBackgroundFile(file, tagsForKind(kind)))
+    if (kind === 'asset') imported.push(await editor.importAssetFile(file, tagsForKind(kind)))
+    if (kind === 'font') imported.push(await editor.importFontFile(file, tagsForKind(kind)))
   }
   clearTags(kind)
   syncImages()
+  return imported
 }
 
 async function handleFileInput(kind: 'background' | 'asset' | 'font', event: Event) {
@@ -239,7 +260,35 @@ async function handleDrop(kind: 'background' | 'asset' | 'font', event: DragEven
 }
 
 async function createProject() {
-  await editor.createManagedHandout(newProjectTitle.value)
+  if (createMode.value === 'blank') {
+    await editor.createManagedHandout(newProjectTitle.value, {
+      width: blankWidth.value,
+      height: blankHeight.value,
+    })
+    return
+  }
+
+  const background = editor.library.backgrounds.find((record) => record.id === selectedCreateBackgroundId.value)
+  if (!background) {
+    editor.status = 'Choose or upload a background before creating the handout.'
+    return
+  }
+  const size = await imageSize(background)
+  await editor.createManagedHandout(newProjectTitle.value, {
+    width: size.width,
+    height: size.height,
+    backgroundId: background.id,
+  })
+}
+
+async function handleCreateBackgroundInput(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const [background] = await importFiles('background', [file])
+  selectedCreateBackgroundId.value = background.id
+  createMode.value = 'existing-background'
+  await createProject()
+  ;(event.target as HTMLInputElement).value = ''
 }
 
 async function openProjectFromPath() {
@@ -307,17 +356,63 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </TabsList>
 
       <TabsContent value="handouts" class="manager-tab-content">
-        <section class="project-create">
-          <Input v-model="newProjectTitle" placeholder="New handout title" />
-          <Button @click="createProject">
-            <Plus data-icon="inline-start" />
-            New handout
-          </Button>
-          <Input v-model="projectPathInput" placeholder="/path/to/existing/project-folder" />
-          <Button variant="outline" @click="openProjectFromPath">
-            <FolderOpen data-icon="inline-start" />
-            Open folder
-          </Button>
+        <section class="create-panel">
+          <div class="create-header">
+            <Input v-model="newProjectTitle" placeholder="New handout title" />
+            <Input v-model="projectPathInput" placeholder="/path/to/existing/project-folder" />
+            <Button variant="outline" @click="openProjectFromPath">
+              <FolderOpen data-icon="inline-start" />
+              Open folder
+            </Button>
+          </div>
+
+          <div class="create-options">
+            <button
+              class="create-option"
+              :class="{ selected: createMode === 'existing-background' }"
+              type="button"
+              @click="createMode = 'existing-background'"
+            >
+              <Image />
+              <strong>Use uploaded background</strong>
+              <span>Create a handout at the selected background image size.</span>
+            </button>
+            <label class="create-option" :class="{ selected: createMode === 'upload-background' }">
+              <Upload />
+              <strong>Upload new background</strong>
+              <span>Import an image and immediately create from it.</span>
+              <input class="sr-only" type="file" accept="image/*" @change="handleCreateBackgroundInput" />
+            </label>
+            <button
+              class="create-option"
+              :class="{ selected: createMode === 'blank' }"
+              type="button"
+              @click="createMode = 'blank'"
+            >
+              <Plus />
+              <strong>Blank transparent canvas</strong>
+              <span>Start with a transparent canvas at a custom size.</span>
+            </button>
+          </div>
+
+          <div v-if="createMode === 'existing-background'" class="create-controls">
+            <Select v-model="selectedCreateBackgroundId">
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a background" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="background in editor.library.backgrounds" :key="background.id" :value="background.id">
+                  {{ background.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Button @click="createProject">Create from background</Button>
+          </div>
+          <div v-if="createMode === 'blank'" class="create-controls">
+            <Input v-model="blankWidth" type="number" placeholder="Width" />
+            <Input v-model="blankHeight" type="number" placeholder="Height" />
+            <Button @click="createProject">Create blank handout</Button>
+          </div>
         </section>
 
         <div class="project-grid">
@@ -360,7 +455,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         <Input v-model="backgroundSearch" placeholder="Search backgrounds or tags" />
         <div class="resource-grid">
           <button v-for="record in recordsForKind('background')" :key="record.id" class="resource-card" type="button">
-            <img :src="fileUrl(record.path)" alt="" />
+            <img :src="previewUrl(record)" alt="" />
             <strong>{{ record.name }}</strong>
             <span>{{ record.tags.join(', ') || 'No tags' }}</span>
           </button>
@@ -391,7 +486,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         <Input v-model="assetSearch" placeholder="Search assets or tags" />
         <div class="resource-grid">
           <button v-for="record in recordsForKind('asset')" :key="record.id" class="resource-card" type="button">
-            <img :src="fileUrl(record.path)" alt="" />
+            <img :src="previewUrl(record)" alt="" />
             <strong>{{ record.name }}</strong>
             <span>{{ record.tags.join(', ') || 'No tags' }}</span>
           </button>
@@ -484,10 +579,10 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               type="button"
               @click="editor.addLayerFromAsset(asset)"
             >
-              <span class="asset-thumb"><img :src="fileUrl(asset.path)" alt="" /></span>
+              <span class="asset-thumb"><img :src="previewUrl(asset)" alt="" /></span>
               <span class="asset-meta">
                 <strong>{{ asset.name }}</strong>
-                <span>{{ asset.tags.join(', ') || 'No tags' }}</span>
+                <span>Click to add · {{ asset.tags.join(', ') || 'No tags' }}</span>
               </span>
             </button>
           </ScrollArea>
@@ -657,65 +752,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </section>
     </main>
 
-    <aside class="inspector">
-      <Card>
-        <CardHeader><CardTitle>Document</CardTitle></CardHeader>
-        <CardContent class="panel-stack">
-          <label>
-            Title
-            <Input :model-value="editor.document.title" @update:model-value="(value) => editor.renameDocument(String(value))" />
-          </label>
-          <div class="two-col">
-            <label>
-              Width
-              <Input
-                type="number"
-                :model-value="editor.document.canvas.width"
-                @update:model-value="(value) => editor.patchCanvas({ width: Number(value) || 1 })"
-              />
-            </label>
-            <label>
-              Height
-              <Input
-                type="number"
-                :model-value="editor.document.canvas.height"
-                @update:model-value="(value) => editor.patchCanvas({ height: Number(value) || 1 })"
-              />
-            </label>
-          </div>
-          <section
-            class="mini-drop"
-            :class="{ dragging: isDraggingBackground }"
-            @dragenter.prevent="isDraggingBackground = true"
-            @dragover.prevent="isDraggingBackground = true"
-            @dragleave.prevent="isDraggingBackground = false"
-            @drop="handleDrop('background', $event)"
-          >
-            Drop backgrounds here
-          </section>
-          <label>
-            Background asset
-            <Select
-              :model-value="editor.document.canvas.backgroundAssetId"
-              @update:model-value="
-                (value) =>
-                  editor.setBackground(editor.library.backgrounds.find((background) => background.id === value))
-              "
-            >
-              <SelectTrigger><SelectValue placeholder="No background" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="background in editor.library.backgrounds" :key="background.id" :value="background.id">
-                  {{ background.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-        </CardContent>
-      </Card>
+    <aside class="right-rail">
+      <Tabs default-value="inspect" class="rail-tabs">
+        <TabsList class="grid grid-cols-3">
+          <TabsTrigger value="inspect">Inspect</TabsTrigger>
+          <TabsTrigger value="document">Doc Type</TabsTrigger>
+          <TabsTrigger value="export">Export</TabsTrigger>
+        </TabsList>
 
-      <Card>
-        <CardHeader><CardTitle>Inspector</CardTitle></CardHeader>
-        <CardContent v-if="editor.selectedLayer" class="panel-stack">
+        <TabsContent value="inspect" class="rail-tab-content">
+          <div v-if="editor.selectedLayer" class="panel-stack inspector-panel">
           <label>
             Name
             <Input :model-value="editor.selectedLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
@@ -842,20 +888,55 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               Delete
             </Button>
           </div>
-        </CardContent>
-        <CardContent v-else class="empty-inspector">Select a layer on the canvas or in the layer list.</CardContent>
-      </Card>
+          </div>
+          <div v-else class="empty-inspector">Select a layer on the canvas or in the layer list.</div>
+        </TabsContent>
 
-      <Card>
-        <CardHeader><CardTitle>Export</CardTitle></CardHeader>
-        <CardContent class="panel-stack">
+        <TabsContent value="document" class="rail-tab-content">
+          <div class="panel-stack inspector-panel">
+            <label>
+              Title
+              <Input :model-value="editor.document.title" @update:model-value="(value) => editor.renameDocument(String(value))" />
+            </label>
+            <div class="two-col">
+              <label>
+                Width
+                <Input
+                  type="number"
+                  :model-value="editor.document.canvas.width"
+                  @update:model-value="(value) => editor.patchCanvas({ width: Number(value) || 1 })"
+                />
+              </label>
+              <label>
+                Height
+                <Input
+                  type="number"
+                  :model-value="editor.document.canvas.height"
+                  @update:model-value="(value) => editor.patchCanvas({ height: Number(value) || 1 })"
+                />
+              </label>
+            </div>
+            <div class="document-summary">
+              <span>Background</span>
+              <strong>{{ backgroundAsset?.name || 'Transparent canvas' }}</strong>
+            </div>
+            <div class="document-summary">
+              <span>Layers</span>
+              <strong>{{ editor.document.layers.length }}</strong>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="export" class="rail-tab-content">
+          <div class="panel-stack inspector-panel">
           <Input v-model="exportPathInput" placeholder="/path/to/output.png" />
           <Button @click="exportCurrentImage">
             <Download data-icon="inline-start" />
             Export PNG/JPEG
           </Button>
-        </CardContent>
-      </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </aside>
   </div>
 </template>

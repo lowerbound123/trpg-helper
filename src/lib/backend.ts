@@ -31,6 +31,7 @@ export interface ProjectSummary {
   folder: string
   backgroundAssetId?: string | null
   previewPath?: string | null
+  previewSizeBytes?: number | null
   updatedAt: string
 }
 

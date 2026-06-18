@@ -39,7 +39,7 @@ import {
 } from '@/lib/backend'
 import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
 import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
-import { downloadFileName, renderHandoutToDataUrl } from '@/lib/render'
+import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
@@ -47,6 +47,7 @@ type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean
 type GuideLine = { orientation: 'vertical' | 'horizontal'; value: number }
 
 Konva.dragButtons = [0]
+const PREVIEW_TARGET_BYTES = 512 * 1024
 
 const editor = useEditorStore()
 const stageFrameRef = ref<HTMLElement>()
@@ -582,12 +583,13 @@ async function saveProject() {
       canvas: editor.document.canvas,
       layers: editor.document.layers.length,
     })
-    const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, 0.25, imageElements)
+    const dataUrl = await renderHandoutPreviewToDataUrl(editor.document, editor.library, imageElements)
     const previewPath = await saveProjectPreview(editor.currentProjectId, dataUrl)
     logHandoutPreview('saved preview after save', {
       projectId: editor.currentProjectId,
       previewPath,
       dataUrlLength: dataUrl.length,
+      previewBytes: dataUrlByteSize(dataUrl),
     })
     await editor.refreshProjects()
   }
@@ -663,22 +665,27 @@ async function ensureProjectPreviews() {
       projectId: project.id,
       title: project.title,
       previewPath: project.previewPath,
+      previewSizeBytes: project.previewSizeBytes,
       backgroundAssetId: project.backgroundAssetId,
     })
-    if (project.previewPath) continue
+    const shouldRegeneratePreview = !project.previewPath || Number(project.previewSizeBytes || 0) > PREVIEW_TARGET_BYTES
+    if (!shouldRegeneratePreview) continue
     try {
-      logHandoutPreview('generating missing preview', {
+      logHandoutPreview('generating preview', {
         projectId: project.id,
         title: project.title,
+        currentPreviewPath: project.previewPath,
+        currentPreviewSizeBytes: project.previewSizeBytes,
       })
       const payload = await openManagedProject(project.id)
-      const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 0.25, imageElements)
+      const dataUrl = await renderHandoutPreviewToDataUrl(payload.document, editor.library, imageElements)
       const previewPath = await saveProjectPreview(project.id, dataUrl)
       generated += 1
       logHandoutPreview('saved missing preview', {
         projectId: project.id,
         previewPath,
         dataUrlLength: dataUrl.length,
+        previewBytes: dataUrlByteSize(dataUrl),
       })
     } catch (error) {
       logHandoutPreview('failed to generate preview', {

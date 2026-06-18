@@ -8,7 +8,7 @@ import {
   updateLayer,
 } from './handout'
 import { createHistory } from './history'
-import { downloadFileName } from './render'
+import { dataUrlByteSize, downloadFileName, previewPixelRatio } from './render'
 
 describe('handout document model', () => {
   it('creates a versioned pixel-based document', () => {
@@ -106,5 +106,15 @@ describe('export helpers', () => {
     expect(downloadFileName('Case File: Alpha.png', new Date(2026, 5, 18, 7, 8, 9))).toBe(
       'Case-File-Alpha-20260618-070809.png',
     )
+  })
+
+  it('sizes previews by maximum edge', () => {
+    expect(previewPixelRatio({ width: 5000, height: 7000 }, 320)).toBeCloseTo(320 / 7000)
+    expect(previewPixelRatio({ width: 240, height: 160 }, 320)).toBe(1)
+  })
+
+  it('estimates data url bytes from base64 payloads', () => {
+    expect(dataUrlByteSize('data:image/png;base64,AAAA')).toBe(3)
+    expect(dataUrlByteSize('data:image/png;base64,AA==')).toBe(1)
   })
 })

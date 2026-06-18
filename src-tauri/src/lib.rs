@@ -91,6 +91,7 @@ struct ProjectSummary {
     folder: String,
     background_asset_id: Option<String>,
     preview_path: Option<String>,
+    preview_size_bytes: Option<u64>,
     updated_at: DateTime<Utc>,
 }
 
@@ -310,6 +311,28 @@ fn decode_data_url(data_url: &str) -> Result<Vec<u8>, AppError> {
     Ok(general_purpose::STANDARD.decode(data)?)
 }
 
+fn data_url_media_type(data_url: &str) -> &str {
+    data_url
+        .strip_prefix("data:")
+        .and_then(|rest| rest.split_once(';').map(|(media_type, _)| media_type))
+        .unwrap_or("image/png")
+}
+
+fn preview_file_name(data_url: &str) -> &'static str {
+    match data_url_media_type(data_url) {
+        "image/webp" => "preview.webp",
+        "image/jpeg" | "image/jpg" => "preview.jpg",
+        _ => "preview.png",
+    }
+}
+
+fn preview_path(root: &Path) -> Option<PathBuf> {
+    ["preview.webp", "preview.jpg", "preview.png"]
+        .iter()
+        .map(|name| root.join(name))
+        .find(|path| path.exists())
+}
+
 fn encode_data_url(path: &Path, media_type: &str) -> Result<String, AppError> {
     let bytes = fs::read(path)?;
     Ok(format!(
@@ -385,11 +408,10 @@ fn project_summary(root: &Path, payload: &ProjectPayload) -> ProjectSummary {
             .and_then(|canvas| canvas.get("backgroundAssetId"))
             .and_then(Value::as_str)
             .map(ToString::to_string),
-        preview_path: {
-            let path = root.join("preview.png");
-            path.exists()
-                .then(|| path.to_string_lossy().to_string())
-        },
+        preview_path: preview_path(root).map(|path| path.to_string_lossy().to_string()),
+        preview_size_bytes: preview_path(root)
+            .and_then(|path| fs::metadata(path).ok())
+            .map(|metadata| metadata.len()),
         updated_at,
     }
 }
@@ -763,7 +785,15 @@ fn save_project_preview(app: AppHandle, project_id: String, data_url: String) ->
     fs::create_dir_all(&root)
         .map_err(AppError::from)
         .map_err(String::from)?;
-    let path = root.join("preview.png");
+    for file_name in ["preview.webp", "preview.jpg", "preview.png"] {
+        let stale = root.join(file_name);
+        if stale.exists() {
+            fs::remove_file(stale)
+                .map_err(AppError::from)
+                .map_err(String::from)?;
+        }
+    }
+    let path = root.join(preview_file_name(&data_url));
     fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
         .map_err(AppError::from)?;
     Ok(path.to_string_lossy().to_string())

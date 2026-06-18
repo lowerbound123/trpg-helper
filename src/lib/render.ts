@@ -5,6 +5,11 @@ import { hasVisibleEffects, konvaEffectConfig } from './effects'
 import type { HandoutDocument, HandoutLayer, ImageLayer, TextLayer } from './handout'
 
 type ImageCache = Record<string, HTMLImageElement>
+type CanvasSize = { width: number; height: number }
+
+const PREVIEW_TARGET_BYTES = 512 * 1024
+const PREVIEW_MAX_BYTES = 1024 * 1024
+const PREVIEW_MAX_EDGE = 320
 
 function resolveImageRecord(library: LibraryIndex, assetId?: string) {
   return library.backgrounds.find((record) => record.id === assetId)
@@ -86,6 +91,38 @@ export async function renderHandoutToDataUrl(
   scale = 1,
   cache: ImageCache = {},
 ) {
+  const { stage, destroy } = await renderHandoutStage(document, library, cache)
+  try {
+    return compressedStageDataUrl(stage, 'image/png', Math.max(0.1, Number(scale) || 1))
+  } finally {
+    destroy()
+  }
+}
+
+export function previewPixelRatio(size: CanvasSize, maxEdge = PREVIEW_MAX_EDGE) {
+  const largest = Math.max(1, size.width, size.height)
+  return Math.min(1, maxEdge / largest)
+}
+
+export function dataUrlByteSize(dataUrl: string) {
+  const base64 = dataUrl.split(',')[1] || ''
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding)
+}
+
+function compressedStageDataUrl(stage: Konva.Stage, mimeType: string, pixelRatio: number, quality?: number) {
+  return stage.toDataURL({
+    pixelRatio,
+    mimeType,
+    quality,
+  })
+}
+
+async function renderHandoutStage(
+  document: HandoutDocument,
+  library: LibraryIndex,
+  cache: ImageCache,
+) {
   const container = globalThis.document.createElement('div')
   container.style.position = 'fixed'
   container.style.left = '-10000px'
@@ -157,13 +194,47 @@ export async function renderHandoutToDataUrl(
 
   if (hasVisibleEffects(document.canvas.effects)) content.cache()
   layer.draw()
-  const dataUrl = stage.toDataURL({
-    pixelRatio: Math.max(0.1, Number(scale) || 1),
-    mimeType: 'image/png',
-  })
-  stage.destroy()
-  container.remove()
-  return dataUrl
+
+  return {
+    stage,
+    destroy: () => {
+      stage.destroy()
+      container.remove()
+    },
+  }
+}
+
+export async function renderHandoutPreviewToDataUrl(
+  document: HandoutDocument,
+  library: LibraryIndex,
+  cache: ImageCache = {},
+) {
+  const { stage, destroy } = await renderHandoutStage(document, library, cache)
+  try {
+    let smallest = ''
+    for (const maxEdge of [PREVIEW_MAX_EDGE, 240, 160]) {
+      const pixelRatio = previewPixelRatio(document.canvas, maxEdge)
+      const png = compressedStageDataUrl(stage, 'image/png', pixelRatio)
+      if (!smallest || dataUrlByteSize(png) < dataUrlByteSize(smallest)) smallest = png
+      if (dataUrlByteSize(png) <= PREVIEW_TARGET_BYTES) return png
+
+      for (const quality of [0.82, 0.72, 0.62, 0.52, 0.42]) {
+        const webp = compressedStageDataUrl(stage, 'image/webp', pixelRatio, quality)
+        if (webp.startsWith('data:image/webp')) {
+          if (!smallest || dataUrlByteSize(webp) < dataUrlByteSize(smallest)) smallest = webp
+          if (dataUrlByteSize(webp) <= PREVIEW_MAX_BYTES) return webp
+        }
+      }
+
+      const jpeg = compressedStageDataUrl(stage, 'image/jpeg', pixelRatio, 0.55)
+      if (!smallest || dataUrlByteSize(jpeg) < dataUrlByteSize(smallest)) smallest = jpeg
+      if (dataUrlByteSize(jpeg) <= PREVIEW_MAX_BYTES) return jpeg
+    }
+
+    return smallest
+  } finally {
+    destroy()
+  }
 }
 
 export function downloadFileName(title: string, date = new Date()) {

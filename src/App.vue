@@ -32,7 +32,6 @@ import { useResourceImages } from '@/composables/useResourceImages'
 import {
   appendDebugLog,
   exportImageToDownloads,
-  fileUrl,
   openManagedProject,
   saveProjectPreview,
   type LibraryRecord,
@@ -63,6 +62,7 @@ const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const exportScale = ref(1)
 const exportLog = ref('')
+const exportProgress = ref(0)
 const canvasZoom = ref(1)
 const canvasPan = reactive({ x: 0, y: 0 })
 const panState = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
@@ -87,7 +87,13 @@ const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' |
   asset: [],
   font: [],
 })
+const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>({
+  background: 0,
+  asset: 0,
+  font: 0,
+})
 let previewMaintenanceRunning = false
+let exportProgressTimer: number | undefined
 
 const { imageElements, imageSize, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
@@ -166,9 +172,12 @@ function resizeStageViewport() {
   const element = stageFrameRef.value
   if (!element) return
   const rect = element.getBoundingClientRect()
+  const previous = { width: stageViewport.width, height: stageViewport.height }
   stageViewport.width = Math.max(320, Math.round(rect.width))
   stageViewport.height = Math.max(240, Math.round(rect.height))
-  resetCanvasView()
+  if (previous.width !== stageViewport.width || previous.height !== stageViewport.height) {
+    logViewport('resize-stage-viewport', { previous })
+  }
 }
 
 function layerName(layer: HandoutLayer) {
@@ -208,6 +217,37 @@ function logHandoutPreview(message: string, data?: Record<string, unknown>) {
   void appendDebugLog('handout-preview', message, payload)
 }
 
+function logViewport(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData({
+    ...data,
+    view: editor.view,
+    viewport: { ...stageViewport },
+    baseStageScale: baseStageScale.value,
+    canvasZoom: canvasZoom.value,
+    stageScale: stageScale.value,
+    canvasPan: { ...canvasPan },
+    canvas: {
+      width: editor.document.canvas.width,
+      height: editor.document.canvas.height,
+    },
+    selectedLayerId: editor.selectedLayerId,
+  })
+  console.debug(`[viewport] ${message}`, payload)
+  void appendDebugLog('viewport', message, payload)
+}
+
+function logUpload(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData(data)
+  console.debug(`[upload] ${message}`, payload)
+  void appendDebugLog('upload', message, payload)
+}
+
+function logExport(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData(data)
+  console.debug(`[export] ${message}`, payload)
+  void appendDebugLog('export', message, payload)
+}
+
 function clampZoom(value: number) {
   return Math.min(8, Math.max(0.1, Number(value) || 1))
 }
@@ -216,6 +256,7 @@ function resetCanvasView() {
   canvasZoom.value = 1
   canvasPan.x = Math.round((stageViewport.width - editor.document.canvas.width * stageScale.value) / 2)
   canvasPan.y = Math.round((stageViewport.height - editor.document.canvas.height * stageScale.value) / 2)
+  logViewport('reset-canvas-view')
 }
 
 function zoomCanvas(nextZoom: number, anchor = { x: stageViewport.width / 2, y: stageViewport.height / 2 }) {
@@ -228,6 +269,7 @@ function zoomCanvas(nextZoom: number, anchor = { x: stageViewport.width / 2, y: 
   const nextScale = stageScale.value
   canvasPan.x = Math.round(anchor.x - canvasPoint.x * nextScale)
   canvasPan.y = Math.round(anchor.y - canvasPoint.y * nextScale)
+  logViewport('zoom-canvas', { nextZoom: canvasZoom.value, anchor })
 }
 
 function zoomIn() {
@@ -306,6 +348,7 @@ function moveCanvasPan(event: PointerEvent) {
 }
 
 function stopCanvasPan() {
+  if (panState.active) logViewport('stop-canvas-pan')
   panState.active = false
 }
 
@@ -487,15 +530,82 @@ function refreshLayerEffectCaches() {
 }
 
 async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[], folder = '') {
-  const fileArray = Array.from(files)
+  const fileArray = validUploadFiles(kind, Array.from(files))
+  if (!fileArray.length) return []
   const imported: LibraryRecord[] = []
   for (const file of fileArray) {
     if (kind === 'background') imported.push(await editor.importBackgroundFile(file, '', folder))
     if (kind === 'asset') imported.push(await editor.importAssetFile(file, '', folder))
     if (kind === 'font') imported.push(await editor.importFontFile(file, '', folder))
   }
-  syncImages(editor.library)
+  await syncImages(editor.library)
+  finderRevision[kind] += 1
+  logUpload('uploaded files', {
+    kind,
+    folder,
+    files: fileArray.map((file) => ({ name: file.name, type: file.type, size: file.size })),
+    imported: imported.map((record) => ({ id: record.id, name: record.name, path: record.path })),
+  })
   return imported
+}
+
+function isSupportedUpload(kind: 'background' | 'asset' | 'font', file: File) {
+  if (kind === 'background' || kind === 'asset') {
+    return ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)
+  }
+  return /\.(ttf|otf|woff2?)$/i.test(file.name)
+}
+
+function validUploadFiles(kind: 'background' | 'asset' | 'font', files: File[]) {
+  const accepted = files.filter((file) => isSupportedUpload(kind, file))
+  const rejected = files.filter((file) => !isSupportedUpload(kind, file))
+  if (rejected.length) {
+    const names = rejected.map((file) => file.name).join(', ')
+    editor.status = `Unsupported ${kind} file${rejected.length > 1 ? 's' : ''}: ${names}`
+    logUpload('rejected unsupported files', {
+      kind,
+      files: rejected.map((file) => ({ name: file.name, type: file.type, size: file.size })),
+    })
+  }
+  return accepted
+}
+
+async function handleDirectFinderDrop(kind: 'background' | 'asset' | 'font', event: DragEvent) {
+  const files = Array.from(event.dataTransfer?.files || [])
+  if (!files.length) return
+  event.preventDefault()
+  event.stopPropagation()
+  const folder = kind === 'background'
+    ? selectedBackgroundFolder.value
+    : kind === 'asset'
+      ? selectedAssetFolder.value
+      : selectedFontFolder.value
+  await uploadFiles(kind, files, folder)
+}
+
+function handleDirectFinderDragover(kind: 'background' | 'asset' | 'font', event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.dataTransfer.dropEffect = 'copy'
+  event.dataTransfer.effectAllowed = 'copy'
+  event.preventDefault()
+  event.stopPropagation()
+  if (editor.status !== `Drop ${kind} files to upload`) editor.status = `Drop ${kind} files to upload`
+}
+
+function beginExportProgress() {
+  if (exportProgressTimer) window.clearInterval(exportProgressTimer)
+  exportProgress.value = 0
+  exportProgressTimer = window.setInterval(() => {
+    const current = exportProgress.value
+    if (current < 70) exportProgress.value = Math.min(70, current + Math.max(1, Math.round((70 - current) * 0.16)))
+    else if (current < 95) exportProgress.value = Math.min(95, current + 1)
+  }, 90)
+}
+
+function finishExportProgress(success: boolean) {
+  if (exportProgressTimer) window.clearInterval(exportProgressTimer)
+  exportProgressTimer = undefined
+  exportProgress.value = success ? 100 : 0
 }
 
 async function createProject() {
@@ -564,6 +674,7 @@ async function handleCreateBackgroundInput(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
   const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
+  if (!background) return
   await createProjectFromBackground(background)
   ;(event.target as HTMLInputElement).value = ''
 }
@@ -573,6 +684,7 @@ async function handleCreateBackgroundDrop(event: DragEvent) {
   const file = event.dataTransfer?.files?.[0]
   if (!file) return
   const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
+  if (!background) return
   await createProjectFromBackground(background)
 }
 
@@ -605,11 +717,19 @@ async function exportCurrentImage() {
     return
   }
   isExportingCurrent.value = true
+  beginExportProgress()
+  logExport('export current start', { title: editor.document.title, scale: exportScale.value })
   try {
     const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
     const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
     lastCurrentExport.value = { signature, path }
     exportLog.value = `Exported image to ${path}`
+    logExport('export current complete', { path, bytes: dataUrlByteSize(dataUrl) })
+    finishExportProgress(true)
+  } catch (error) {
+    exportLog.value = `Export failed: ${String(error)}`
+    logExport('export current failed', { error })
+    finishExportProgress(false)
   } finally {
     isExportingCurrent.value = false
   }
@@ -624,12 +744,20 @@ async function exportHandoutProject(project: ProjectSummary) {
     return
   }
   exportingHandoutIds.add(project.id)
+  beginExportProgress()
+  logExport('export handout start', { projectId: project.id, title: project.title })
   try {
     const payload = await openManagedProject(project.id)
     const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
     const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
     lastHandoutExports.set(project.id, { signature, path })
     exportLog.value = `Exported image to ${path}`
+    logExport('export handout complete', { projectId: project.id, path, bytes: dataUrlByteSize(dataUrl) })
+    finishExportProgress(true)
+  } catch (error) {
+    exportLog.value = `Export failed: ${String(error)}`
+    logExport('export handout failed', { projectId: project.id, error })
+    finishExportProgress(false)
   } finally {
     exportingHandoutIds.delete(project.id)
   }
@@ -647,29 +775,6 @@ function selectedHandoutStatus() {
   if (selected.length > 1) return `${selected.length} items selected`
   const project = selectedHandoutProject()
   return project ? `Selected: ${project.title}` : 'Select a handout'
-}
-
-function formatPreviewBytes(bytes?: number | null) {
-  if (!bytes) return 'size unknown'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
-}
-
-function selectedHandoutPreviewStatus() {
-  const selected = selectedFinderItems.handout
-  if (selected.length === 0) return 'Preview: no handout selected'
-  if (selected.length > 1) return 'Preview: select one handout to inspect preview path'
-  const project = selectedHandoutProject()
-  if (!project) return 'Preview: selected entry is not a known handout project'
-  const entryPath = selected[0]?.path || 'entry path missing'
-  if (!project.previewPath) return `Preview: missing · entry=${entryPath} · projectId=${project.id}`
-  return [
-    `entry=${entryPath}`,
-    `file=${project.previewPath}`,
-    `url=${fileUrl(project.previewPath)}`,
-    formatPreviewBytes(project.previewSizeBytes),
-  ].join(' · ')
 }
 
 function isSelectedHandoutExporting() {
@@ -729,7 +834,7 @@ onMounted(async () => {
     resetKonvaDragButtons()
     void appendDebugLog('app', 'boot start')
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
-    syncImages(editor.library)
+    await syncImages(editor.library)
     window.addEventListener('keydown', handleGlobalKeydown)
     resizeStageViewport()
     window.addEventListener('resize', resizeStageViewport)
@@ -746,6 +851,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeStageViewport)
+  if (exportProgressTimer) window.clearInterval(exportProgressTimer)
 })
 
 watch(() => editor.library.backgrounds, () => syncImages(editor.library), { deep: true })
@@ -753,10 +859,17 @@ watch(() => editor.library.assets, () => syncImages(editor.library), { deep: tru
 watch(() => editor.selectedLayerId, updateTransformer)
 watch(() => editor.document.layers, updateTransformer, { deep: true })
 watch(
-  () => [editor.document.canvas.width, editor.document.canvas.height, editor.view],
+  () => [editor.document.canvas.width, editor.document.canvas.height],
   () => nextTick(() => {
     resizeStageViewport()
     resetCanvasView()
+  }),
+)
+watch(
+  () => editor.view,
+  () => nextTick(() => {
+    resizeStageViewport()
+    if (editor.view === 'editor') resetCanvasView()
   }),
 )
 </script>
@@ -813,21 +926,16 @@ watch(
           @file-dclick="(event) => handleFinderFileDoubleClick('handout', event)"
         >
           <template #status-bar="{ count }">
-            <div class="finder-status-bar handout-status-bar">
-              <div class="finder-status-main">
-                <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-                <Button
-                  size="sm"
-                  :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
-                  @click="exportSelectedHandout"
-                >
-                  <Save data-icon="inline-start" />
-                  Export PNG
-                </Button>
-              </div>
-              <code class="finder-preview-path" :title="selectedHandoutPreviewStatus()">
-                {{ selectedHandoutPreviewStatus() }}
-              </code>
+            <div class="finder-status-bar">
+              <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
+              <Button
+                size="sm"
+                :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
+                @click="exportSelectedHandout"
+              >
+                <Save data-icon="inline-start" />
+                Export PNG
+              </Button>
             </div>
           </template>
         </VueFinder>
@@ -835,6 +943,7 @@ watch(
 
       <TabsContent value="backgrounds" class="manager-tab-content">
         <VueFinder
+          :key="`background-${finderRevision.background}`"
           id="background-finder"
           class="manager-finder compact-finder"
           :driver="finderDrivers.background"
@@ -846,6 +955,8 @@ watch(
           @select="(items) => handleFinderSelect('background', items)"
           @path-change="(path) => handleFinderPathChange('background', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('background', event)"
+          @dragover.capture="handleDirectFinderDragover('background', $event as DragEvent)"
+          @drop.capture="handleDirectFinderDrop('background', $event as DragEvent)"
         >
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
@@ -865,6 +976,7 @@ watch(
 
       <TabsContent value="assets" class="manager-tab-content">
         <VueFinder
+          :key="`asset-${finderRevision.asset}`"
           id="asset-finder"
           class="manager-finder compact-finder"
           :driver="finderDrivers.asset"
@@ -876,6 +988,8 @@ watch(
           @select="(items) => handleFinderSelect('asset', items)"
           @path-change="(path) => handleFinderPathChange('asset', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
+          @dragover.capture="handleDirectFinderDragover('asset', $event as DragEvent)"
+          @drop.capture="handleDirectFinderDrop('asset', $event as DragEvent)"
         >
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
@@ -895,6 +1009,7 @@ watch(
 
       <TabsContent value="fonts" class="manager-tab-content">
         <VueFinder
+          :key="`font-${finderRevision.font}`"
           id="font-finder"
           class="manager-finder compact-finder"
           :driver="finderDrivers.font"
@@ -905,6 +1020,8 @@ watch(
           @select="(items) => handleFinderSelect('font', items)"
           @path-change="(path) => handleFinderPathChange('font', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('font', event)"
+          @dragover.capture="handleDirectFinderDragover('font', $event as DragEvent)"
+          @drop.capture="handleDirectFinderDrop('font', $event as DragEvent)"
         />
         <Input v-model="fontSearch" placeholder="Search fonts or tags" />
         <div class="font-grid">
@@ -950,6 +1067,7 @@ watch(
 
         <TabsContent value="assets" class="rail-tab-content">
           <VueFinder
+            :key="`editor-asset-${finderRevision.asset}`"
             id="editor-asset-finder"
             class="rail-finder"
             :driver="finderDrivers.asset"
@@ -959,6 +1077,8 @@ watch(
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('asset', path)"
             @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
+            @dragover.capture="handleDirectFinderDragover('asset', $event as DragEvent)"
+            @drop.capture="handleDirectFinderDrop('asset', $event as DragEvent)"
           />
           <Input v-model="assetSearch" placeholder="Search assets or tags" />
           <ScrollArea class="rail-scroll">
@@ -983,6 +1103,7 @@ watch(
 
         <TabsContent value="fonts" class="rail-tab-content">
           <VueFinder
+            :key="`editor-font-${finderRevision.font}`"
             id="editor-font-finder"
             class="rail-finder"
             :driver="finderDrivers.font"
@@ -992,6 +1113,8 @@ watch(
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('font', path)"
             @file-dclick="(event) => handleFinderFileDoubleClick('font', event)"
+            @dragover.capture="handleDirectFinderDragover('font', $event as DragEvent)"
+            @drop.capture="handleDirectFinderDrop('font', $event as DragEvent)"
           />
           <Input v-model="fontSearch" placeholder="Search fonts or tags" />
           <ScrollArea class="rail-scroll">
@@ -1098,8 +1221,8 @@ watch(
           ref="stageFrameRef"
           class="stage-frame"
           :class="{ 'stage-frame-dropping': draggedAssetId, 'stage-frame-panning': panState.active }"
-          @dragover.prevent
-          @drop="handleCanvasAssetDrop"
+          @dragover.capture.prevent
+          @drop.capture="handleCanvasAssetDrop"
           @wheel.prevent="handleCanvasWheel"
           @pointerdown="startCanvasPan"
           @pointermove="moveCanvasPan"
@@ -1198,6 +1321,7 @@ watch(
       v-model:export-scale="exportScale"
       :is-exporting="isExportingCurrent"
       :export-log="exportLog"
+      :export-progress="exportProgress"
       @export-image="exportCurrentImage"
     />
   </div>

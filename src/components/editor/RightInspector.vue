@@ -16,6 +16,7 @@ const exportScale = defineModel<number>('exportScale', { required: true })
 defineProps<{
   isExporting?: boolean
   exportLog?: string
+  exportProgress?: number
 }>()
 
 defineEmits<{
@@ -416,6 +417,12 @@ function patchDocumentSaturation(value: number[] | undefined) {
             <Download data-icon="inline-start" />
             {{ isExporting ? 'Exporting...' : 'Export PNG' }}
           </Button>
+          <div class="export-progress" role="progressbar" :aria-valuenow="exportProgress || 0" aria-valuemin="0" aria-valuemax="100">
+            <div class="export-progress-track">
+              <span :style="{ width: `${exportProgress || 0}%` }" />
+            </div>
+            <strong>{{ Math.round(exportProgress || 0) }}%</strong>
+          </div>
           <div class="export-log">
             {{ exportLog || 'No export yet.' }}
           </div>

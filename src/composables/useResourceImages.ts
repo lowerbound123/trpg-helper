@@ -37,7 +37,7 @@ export function useResourceImages(fallbackWidth: Ref<number>, fallbackHeight: Re
   }
 
   function syncImages(library: LibraryIndex) {
-    void Promise.all([...library.backgrounds, ...library.assets].map((record) => loadImage(record)))
+    return Promise.allSettled([...library.backgrounds, ...library.assets].map((record) => loadImage(record)))
   }
 
   return {

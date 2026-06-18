@@ -9,6 +9,11 @@ export default defineConfig({
     vue(),
     tailwindcss()
   ],
+  server: {
+    watch: {
+      ignored: ['**/data/**', '**/log.txt', '**/src-tauri/target/**'],
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

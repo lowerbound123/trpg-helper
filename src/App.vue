@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import type Konva from 'konva'
+import Konva from 'konva'
 import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Minus,
   Eye,
   EyeOff,
   Layers,
@@ -43,7 +44,10 @@ type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 type GuideLine = { orientation: 'vertical' | 'horizontal'; value: number }
 
+Konva.dragButtons = [0]
+
 const editor = useEditorStore()
+const stageFrameRef = ref<HTMLElement>()
 const stageRef = ref<{ getNode: () => Konva.Stage }>()
 const transformerRef = ref<{ getNode: () => Konva.Transformer }>()
 const layerNodeRefs = reactive<Record<string, NodeRef | undefined>>({})
@@ -54,9 +58,15 @@ const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const exportScale = ref(1)
+const canvasZoom = ref(1)
 const canvasPan = reactive({ x: 0, y: 0 })
 const panState = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
+const stageViewport = reactive({ width: 920, height: 620 })
 const guideLines = ref<GuideLine[]>([])
+const isExportingCurrent = ref(false)
+const exportingHandoutIds = reactive(new Set<string>())
+const lastCurrentExport = ref<{ signature: string; path: string }>()
+const lastHandoutExports = reactive(new Map<string, { signature: string; path: string }>())
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
@@ -75,19 +85,24 @@ const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' |
 
 const { imageElements, imageSize, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
-const stageScale = computed(() => {
-  const maxWidth = 920
-  const maxHeight = 620
+const baseStageScale = computed(() => {
+  const maxWidth = Math.max(240, stageViewport.width - 64)
+  const maxHeight = Math.max(180, stageViewport.height - 64)
   return Math.min(maxWidth / editor.document.canvas.width, maxHeight / editor.document.canvas.height, 1)
 })
 
+const stageScale = computed(() => baseStageScale.value * canvasZoom.value)
+
 const stageConfig = computed(() => ({
-  width: editor.document.canvas.width * stageScale.value,
-  height: editor.document.canvas.height * stageScale.value,
-  scaleX: stageScale.value,
-  scaleY: stageScale.value,
+  width: stageViewport.width,
+  height: stageViewport.height,
+}))
+
+const contentGroupConfig = computed(() => ({
   x: canvasPan.x,
   y: canvasPan.y,
+  scaleX: stageScale.value,
+  scaleY: stageScale.value,
 }))
 
 const backgroundAsset = computed(() =>
@@ -126,6 +141,19 @@ const {
   },
 })
 
+function resetKonvaDragButtons() {
+  Konva.dragButtons = [0]
+}
+
+function resizeStageViewport() {
+  const element = stageFrameRef.value
+  if (!element) return
+  const rect = element.getBoundingClientRect()
+  stageViewport.width = Math.max(320, Math.round(rect.width))
+  stageViewport.height = Math.max(240, Math.round(rect.height))
+  resetCanvasView()
+}
+
 function layerName(layer: HandoutLayer) {
   if (isTextLayer(layer)) return layer.text || layer.name
   return layer.name
@@ -145,6 +173,53 @@ function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
 
 function clearAssetDrag() {
   draggedAssetId.value = ''
+}
+
+function clampZoom(value: number) {
+  return Math.min(8, Math.max(0.1, Number(value) || 1))
+}
+
+function resetCanvasView() {
+  canvasZoom.value = 1
+  canvasPan.x = Math.round((stageViewport.width - editor.document.canvas.width * stageScale.value) / 2)
+  canvasPan.y = Math.round((stageViewport.height - editor.document.canvas.height * stageScale.value) / 2)
+}
+
+function zoomCanvas(nextZoom: number, anchor = { x: stageViewport.width / 2, y: stageViewport.height / 2 }) {
+  const previousScale = stageScale.value
+  const canvasPoint = {
+    x: (anchor.x - canvasPan.x) / previousScale,
+    y: (anchor.y - canvasPan.y) / previousScale,
+  }
+  canvasZoom.value = clampZoom(nextZoom)
+  const nextScale = stageScale.value
+  canvasPan.x = Math.round(anchor.x - canvasPoint.x * nextScale)
+  canvasPan.y = Math.round(anchor.y - canvasPoint.y * nextScale)
+}
+
+function zoomIn() {
+  zoomCanvas(canvasZoom.value * 1.2)
+}
+
+function zoomOut() {
+  zoomCanvas(canvasZoom.value / 1.2)
+}
+
+function stagePointFromClient(clientX: number, clientY: number) {
+  const rect = stageRef.value?.getNode().container().getBoundingClientRect()
+  if (!rect) return { x: 0, y: 0 }
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top,
+  }
+}
+
+function canvasPointFromClient(clientX: number, clientY: number) {
+  const point = stagePointFromClient(clientX, clientY)
+  return {
+    x: (point.x - canvasPan.x) / stageScale.value,
+    y: (point.y - canvasPan.y) / stageScale.value,
+  }
 }
 
 function startLayerListDrag(layer: HandoutLayer, event: DragEvent) {
@@ -171,11 +246,8 @@ function handleCanvasAssetDrop(event: DragEvent) {
   event.preventDefault()
   const assetId = event.dataTransfer?.getData('application/x-handout-asset') || draggedAssetId.value
   const asset = editor.resolveAsset(assetId)
-  const stage = stageRef.value?.getNode()
-  if (!asset || !stage) return
-  const rect = stage.container().getBoundingClientRect()
-  const x = (event.clientX - rect.left - canvasPan.x) / stageScale.value
-  const y = (event.clientY - rect.top - canvasPan.y) / stageScale.value
+  if (!asset) return
+  const { x, y } = canvasPointFromClient(event.clientX, event.clientY)
   void imageSize(asset).then((size) => {
     editor.addLayerFromAssetAt(asset, x, y, size)
     void updateTransformer()
@@ -202,6 +274,13 @@ function moveCanvasPan(event: PointerEvent) {
 
 function stopCanvasPan() {
   panState.active = false
+}
+
+function handleCanvasWheel(event: WheelEvent) {
+  event.preventDefault()
+  const point = stagePointFromClient(event.clientX, event.clientY)
+  const factor = event.deltaY > 0 ? 1 / 1.12 : 1.12
+  zoomCanvas(canvasZoom.value * factor, point)
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -265,7 +344,7 @@ function deleteLayer(layerId?: string) {
 
 function handleStagePointer(event: KonvaEvent) {
   const stage = stageRef.value?.getNode()
-  if (stage && event.target === stage) {
+  if (stage && (event.target === stage || event.target.name() === 'canvas-background')) {
     editor.selectLayer(undefined)
     void updateTransformer()
   }
@@ -451,23 +530,59 @@ async function handleCreateBackgroundDrop(event: DragEvent) {
 async function saveProject() {
   const saved = await editor.saveCurrentProject()
   if (saved && editor.currentProjectId) {
+    console.debug('[handout-preview] rendering preview after save', {
+      projectId: editor.currentProjectId,
+      title: editor.document.title,
+      canvas: editor.document.canvas,
+      layers: editor.document.layers.length,
+    })
     const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, 0.25, imageElements)
-    await saveProjectPreview(editor.currentProjectId, dataUrl)
+    const previewPath = await saveProjectPreview(editor.currentProjectId, dataUrl)
+    console.debug('[handout-preview] saved preview after save', {
+      projectId: editor.currentProjectId,
+      previewPath,
+      dataUrlLength: dataUrl.length,
+    })
     await editor.refreshProjects()
   }
 }
 
 async function exportCurrentImage() {
-  const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
-  const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
-  editor.status = `Exported image to ${path}`
+  if (isExportingCurrent.value) return
+  const signature = JSON.stringify({ document: editor.document, scale: exportScale.value })
+  if (lastCurrentExport.value?.signature === signature) {
+    editor.status = `Unchanged image already exported to ${lastCurrentExport.value.path}`
+    return
+  }
+  isExportingCurrent.value = true
+  try {
+    const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
+    const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
+    lastCurrentExport.value = { signature, path }
+    editor.status = `Exported image to ${path}`
+  } finally {
+    isExportingCurrent.value = false
+  }
 }
 
 async function exportHandoutProject(project: ProjectSummary) {
-  const payload = await openManagedProject(project.id)
-  const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
-  const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
-  editor.status = `Exported image to ${path}`
+  if (exportingHandoutIds.has(project.id)) return
+  const signature = `${project.id}:${project.updatedAt}:1`
+  const lastExport = lastHandoutExports.get(project.id)
+  if (lastExport?.signature === signature) {
+    editor.status = `Unchanged image already exported to ${lastExport.path}`
+    return
+  }
+  exportingHandoutIds.add(project.id)
+  try {
+    const payload = await openManagedProject(project.id)
+    const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
+    const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
+    lastHandoutExports.set(project.id, { signature, path })
+    editor.status = `Exported image to ${path}`
+  } finally {
+    exportingHandoutIds.delete(project.id)
+  }
 }
 
 function selectedHandoutProject() {
@@ -484,6 +599,11 @@ function selectedHandoutStatus() {
   return project ? `Selected: ${project.title}` : 'Select a handout'
 }
 
+function isSelectedHandoutExporting() {
+  const project = selectedHandoutProject()
+  return Boolean(project && exportingHandoutIds.has(project.id))
+}
+
 async function exportSelectedHandout() {
   const project = selectedHandoutProject()
   if (!project) return
@@ -491,25 +611,50 @@ async function exportSelectedHandout() {
 }
 
 async function ensureProjectPreviews() {
+  let generated = 0
   for (const project of editor.projects) {
+    console.debug('[handout-preview] project preview status', {
+      projectId: project.id,
+      title: project.title,
+      previewPath: project.previewPath,
+      backgroundAssetId: project.backgroundAssetId,
+    })
     if (project.previewPath) continue
     try {
+      console.debug('[handout-preview] generating missing preview', {
+        projectId: project.id,
+        title: project.title,
+      })
       const payload = await openManagedProject(project.id)
       const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 0.25, imageElements)
-      await saveProjectPreview(project.id, dataUrl)
+      const previewPath = await saveProjectPreview(project.id, dataUrl)
+      generated += 1
+      console.debug('[handout-preview] saved missing preview', {
+        projectId: project.id,
+        previewPath,
+        dataUrlLength: dataUrl.length,
+      })
     } catch (error) {
-      console.warn(error)
+      console.warn('[handout-preview] failed to generate preview', {
+        projectId: project.id,
+        title: project.title,
+        error,
+      })
     }
   }
+  console.debug('[handout-preview] preview generation complete', { generated })
   await editor.refreshProjects()
 }
 
 onMounted(async () => {
   try {
+    resetKonvaDragButtons()
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
     syncImages(editor.library)
     await ensureProjectPreviews()
     window.addEventListener('keydown', handleGlobalKeydown)
+    resizeStageViewport()
+    window.addEventListener('resize', resizeStageViewport)
   } catch (error) {
     editor.status = String(error)
   } finally {
@@ -519,12 +664,20 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('resize', resizeStageViewport)
 })
 
 watch(() => editor.library.backgrounds, () => syncImages(editor.library), { deep: true })
 watch(() => editor.library.assets, () => syncImages(editor.library), { deep: true })
 watch(() => editor.selectedLayerId, updateTransformer)
 watch(() => editor.document.layers, updateTransformer, { deep: true })
+watch(
+  () => [editor.document.canvas.width, editor.document.canvas.height, editor.view],
+  () => nextTick(() => {
+    resizeStageViewport()
+    resetCanvasView()
+  }),
+)
 </script>
 
 <template>
@@ -570,6 +723,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           class="manager-finder"
           :driver="finderDrivers.handout"
           :features="finderFeaturesForKind('handout')"
+          :config="{ maxFileSize: '100mb' }"
           :context-menu-items="handoutContextMenuItems"
           selection-mode="single"
           selection-filter-type="both"
@@ -580,7 +734,11 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
               <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-              <Button size="sm" :disabled="!selectedHandoutProject()" @click="exportSelectedHandout">
+              <Button
+                size="sm"
+                :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
+                @click="exportSelectedHandout"
+              >
                 <Save data-icon="inline-start" />
                 Export PNG
               </Button>
@@ -595,6 +753,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           class="manager-finder compact-finder"
           :driver="finderDrivers.background"
           :features="finderFeaturesForKind('background')"
+          :config="{ maxFileSize: '100mb' }"
           :context-menu-items="imageHandoutContextMenuItems.background"
           selection-mode="single"
           selection-filter-type="both"
@@ -624,6 +783,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           class="manager-finder compact-finder"
           :driver="finderDrivers.asset"
           :features="finderFeaturesForKind('asset')"
+          :config="{ maxFileSize: '100mb' }"
           :context-menu-items="imageHandoutContextMenuItems.asset"
           selection-mode="single"
           selection-filter-type="both"
@@ -653,6 +813,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           class="manager-finder compact-finder"
           :driver="finderDrivers.font"
           :features="finderFeaturesForKind('font')"
+          :config="{ maxFileSize: '100mb' }"
           selection-mode="single"
           selection-filter-type="both"
           @select="(items) => handleFinderSelect('font', items)"
@@ -707,6 +868,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             class="rail-finder"
             :driver="finderDrivers.asset"
             :features="finderFeaturesForKind('asset')"
+            :config="{ maxFileSize: '100mb' }"
             selection-mode="single"
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('asset', path)"
@@ -739,6 +901,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             class="rail-finder"
             :driver="finderDrivers.font"
             :features="finderFeaturesForKind('font')"
+            :config="{ maxFileSize: '100mb' }"
             selection-mode="single"
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('font', path)"
@@ -834,14 +997,25 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         <div class="canvas-meta">
           <Badge variant="secondary">{{ editor.document.canvas.width }} x {{ editor.document.canvas.height }} px</Badge>
           <Badge variant="outline">{{ Math.round(stageScale * 100) }}%</Badge>
+          <div class="zoom-controls">
+            <Button size="icon" variant="outline" @click="zoomOut">
+              <Minus />
+            </Button>
+            <Button size="sm" variant="outline" @click="resetCanvasView">Fit</Button>
+            <Button size="icon" variant="outline" @click="zoomIn">
+              <Plus />
+            </Button>
+          </div>
           <span>{{ editor.status }}</span>
         </div>
 
         <div
+          ref="stageFrameRef"
           class="stage-frame"
           :class="{ 'stage-frame-dropping': draggedAssetId, 'stage-frame-panning': panState.active }"
           @dragover.prevent
           @drop="handleCanvasAssetDrop"
+          @wheel.prevent="handleCanvasWheel"
           @pointerdown="startCanvasPan"
           @pointermove="moveCanvasPan"
           @pointerup="stopCanvasPan"
@@ -849,81 +1023,84 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         >
           <v-stage ref="stageRef" :config="stageConfig" @click="handleStagePointer" @tap="handleStagePointer">
             <v-layer>
-              <v-rect
-                :config="{
-                  x: 0,
-                  y: 0,
-                  width: editor.document.canvas.width,
-                  height: editor.document.canvas.height,
-                  fill: editor.document.canvas.backgroundColor,
-                }"
-              />
-              <v-image
-                v-if="backgroundImage"
-                :config="{
-                  image: backgroundImage,
-                  x: 0,
-                  y: 0,
-                  width: editor.document.canvas.width,
-                  height: editor.document.canvas.height,
-                  listening: false,
-                }"
-              />
-              <template v-for="layer in editor.document.layers" :key="layer.id">
+              <v-group :config="contentGroupConfig">
+                <v-rect
+                  :config="{
+                    name: 'canvas-background',
+                    x: 0,
+                    y: 0,
+                    width: editor.document.canvas.width,
+                    height: editor.document.canvas.height,
+                    fill: editor.document.canvas.backgroundColor,
+                  }"
+                />
                 <v-image
-                  v-if="isImageLayer(layer) && imageForLayer(layer)"
-                  :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                  :config="{ ...layerConfig(layer), image: imageForLayer(layer) }"
-                  @click="selectCanvasLayer(layer.id, $event)"
-                  @tap="selectCanvasLayer(layer.id, $event)"
-                  @dragstart="selectCanvasLayer(layer.id, $event)"
-                  @dragmove="onDragMove(layer, $event)"
-                  @dragend="onDragEnd(layer)"
-                  @transformend="onTransformEnd(layer)"
-                />
-                <v-text
-                  v-else-if="isTextLayer(layer)"
-                  :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                  :config="textConfig(layer)"
-                  @click="selectCanvasLayer(layer.id, $event)"
-                  @tap="selectCanvasLayer(layer.id, $event)"
-                  @dragstart="selectCanvasLayer(layer.id, $event)"
-                  @dragmove="onDragMove(layer, $event)"
-                  @dragend="onDragEnd(layer)"
-                  @transformend="onTransformEnd(layer)"
-                />
-              </template>
-              <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">
-                <v-line
-                  v-if="guide.orientation === 'vertical'"
+                  v-if="backgroundImage"
                   :config="{
-                    points: [guide.value, 0, guide.value, editor.document.canvas.height],
-                    stroke: '#0ea5e9',
-                    strokeWidth: 1,
-                    dash: [6, 4],
+                    image: backgroundImage,
+                    x: 0,
+                    y: 0,
+                    width: editor.document.canvas.width,
+                    height: editor.document.canvas.height,
                     listening: false,
                   }"
                 />
-                <v-line
-                  v-else
+                <template v-for="layer in editor.document.layers" :key="layer.id">
+                  <v-image
+                    v-if="isImageLayer(layer) && imageForLayer(layer)"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="{ ...layerConfig(layer), image: imageForLayer(layer) }"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="selectCanvasLayer(layer.id, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transformend="onTransformEnd(layer)"
+                  />
+                  <v-text
+                    v-else-if="isTextLayer(layer)"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="textConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="selectCanvasLayer(layer.id, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transformend="onTransformEnd(layer)"
+                  />
+                </template>
+                <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">
+                  <v-line
+                    v-if="guide.orientation === 'vertical'"
+                    :config="{
+                      points: [guide.value, 0, guide.value, editor.document.canvas.height],
+                      stroke: '#0ea5e9',
+                      strokeWidth: 1 / stageScale,
+                      dash: [6 / stageScale, 4 / stageScale],
+                      listening: false,
+                    }"
+                  />
+                  <v-line
+                    v-else
+                    :config="{
+                      points: [0, guide.value, editor.document.canvas.width, guide.value],
+                      stroke: '#0ea5e9',
+                      strokeWidth: 1 / stageScale,
+                      dash: [6 / stageScale, 4 / stageScale],
+                      listening: false,
+                    }"
+                  />
+                </template>
+                <v-transformer
+                  ref="transformerRef"
                   :config="{
-                    points: [0, guide.value, editor.document.canvas.width, guide.value],
-                    stroke: '#0ea5e9',
-                    strokeWidth: 1,
-                    dash: [6, 4],
-                    listening: false,
+                    rotateEnabled: true,
+                    ignoreStroke: true,
+                    boundBoxFunc: (oldBox: unknown, newBox: { width: number; height: number }) =>
+                      newBox.width < 12 || newBox.height < 12 ? oldBox : newBox,
                   }"
                 />
-              </template>
-              <v-transformer
-                ref="transformerRef"
-                :config="{
-                  rotateEnabled: true,
-                  ignoreStroke: true,
-                  boundBoxFunc: (oldBox: unknown, newBox: { width: number; height: number }) =>
-                    newBox.width < 12 || newBox.height < 12 ? oldBox : newBox,
-                }"
-              />
+              </v-group>
             </v-layer>
           </v-stage>
         </div>
@@ -932,6 +1109,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
 
     <RightInspector
       v-model:export-scale="exportScale"
+      :is-exporting="isExportingCurrent"
       @export-image="exportCurrentImage"
     />
   </div>

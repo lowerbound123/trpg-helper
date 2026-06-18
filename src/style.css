@@ -589,13 +589,25 @@ textarea {
   color: hsl(var(--muted-foreground));
 }
 
+.zoom-controls {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.zoom-controls [data-slot='button'][data-size='icon'],
+.zoom-controls button[data-size='icon'] {
+  width: 28px;
+  height: 28px;
+}
+
 .stage-frame {
   display: grid;
   flex: 1;
   min-height: 0;
   place-items: center;
-  overflow: auto;
-  padding: 32px;
+  overflow: hidden;
+  padding: 0;
   background:
     linear-gradient(45deg, hsl(216 12% 88%) 25%, transparent 25%),
     linear-gradient(-45deg, hsl(216 12% 88%) 25%, transparent 25%),
@@ -610,6 +622,7 @@ textarea {
   background-size: 20px 20px;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
+  touch-action: none;
 }
 
 .stage-frame-dropping {

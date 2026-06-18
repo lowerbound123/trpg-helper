@@ -79,11 +79,27 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     return editor.library.fontFolders
   }
 
-  function projectPreviewUrl(project: { backgroundAssetId?: string | null; previewPath?: string | null }) {
-    if (project.previewPath) return fileUrl(project.previewPath)
+  function projectPreviewUrl(project: { id?: string; title?: string; backgroundAssetId?: string | null; previewPath?: string | null }) {
+    if (project.previewPath) {
+      const url = fileUrl(project.previewPath)
+      console.debug('[handout-preview] finder using project preview', {
+        projectId: project.id,
+        title: project.title,
+        previewPath: project.previewPath,
+        previewUrl: url,
+      })
+      return url
+    }
     const image = editor.resolveBackground(project.backgroundAssetId || undefined)
       || editor.resolveAsset(project.backgroundAssetId || undefined)
-    return image ? options.previewUrl(image) : ''
+    const fallback = image ? options.previewUrl(image) : ''
+    console.debug('[handout-preview] finder preview fallback', {
+      projectId: project.id,
+      title: project.title,
+      backgroundAssetId: project.backgroundAssetId,
+      fallback,
+    })
+    return fallback
   }
 
   function allFoldersForKind(kind: FinderKind) {
@@ -206,7 +222,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
             project.folder,
             project.id,
             project.title,
-            'application/x-handout-project',
+            'image/png',
             project.updatedAt,
             projectPreviewUrl(project),
           ),

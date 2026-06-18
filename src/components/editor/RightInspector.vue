@@ -6,12 +6,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { isTextLayer, useEditorStore } from '@/stores/editor'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
+
+defineProps<{
+  isExporting?: boolean
+}>()
 
 defineEmits<{
   exportImage: []
@@ -37,6 +40,40 @@ function deleteLayer() {
 
 function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean) {
   editor.patchSelectedLayer({ [kind]: value })
+}
+
+function sliderValue(value: number[] | undefined, fallback = 0) {
+  return value?.[0] ?? fallback
+}
+
+function patchOpacity(value: number[] | undefined) {
+  editor.patchSelectedLayer({ opacity: sliderValue(value, 100) / 100 })
+}
+
+function patchEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number[] | undefined) {
+  if (!editor.selectedLayer) return
+  editor.patchSelectedLayer({
+    effects: {
+      ...editor.selectedLayer.effects,
+      [kind]: sliderValue(value),
+    },
+  })
+}
+
+function patchBlur(value: number[] | undefined) {
+  patchEffect('blur', value)
+}
+
+function patchBrightness(value: number[] | undefined) {
+  patchEffect('brightness', value)
+}
+
+function patchContrast(value: number[] | undefined) {
+  patchEffect('contrast', value)
+}
+
+function patchSaturation(value: number[] | undefined) {
+  patchEffect('saturation', value)
 }
 </script>
 
@@ -77,12 +114,12 @@ function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean
           </div>
           <label>
             Opacity {{ Math.round(editor.selectedLayer.opacity * 100) }}%
-            <Slider
-              :model-value="[editor.selectedLayer.opacity * 100]"
-              :max="100"
-              :step="1"
-              @update:model-value="(value) => editor.patchSelectedLayer({ opacity: ((value?.[0] ?? 100) as number) / 100 })"
-            />
+              <Slider
+                :model-value="[editor.selectedLayer.opacity * 100]"
+                :max="100"
+                :step="1"
+                @update:model-value="patchOpacity"
+              />
           </label>
           <label>
             Blend mode
@@ -211,7 +248,7 @@ function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean
                 :model-value="[editor.selectedLayer.effects.blur]"
                 :max="40"
                 :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, blur: (value?.[0] ?? 0) as number } })"
+                @update:model-value="patchBlur"
               />
             </label>
             <label>
@@ -221,7 +258,7 @@ function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean
                 :min="-100"
                 :max="100"
                 :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, brightness: (value?.[0] ?? 0) as number } })"
+                @update:model-value="patchBrightness"
               />
             </label>
             <label>
@@ -231,7 +268,7 @@ function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean
                 :min="-100"
                 :max="100"
                 :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, contrast: (value?.[0] ?? 0) as number } })"
+                @update:model-value="patchContrast"
               />
             </label>
             <label>
@@ -241,7 +278,7 @@ function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean
                 :min="-100"
                 :max="100"
                 :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, saturation: (value?.[0] ?? 0) as number } })"
+                @update:model-value="patchSaturation"
               />
             </label>
           </div>
@@ -306,9 +343,9 @@ function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean
               @update:model-value="(value) => (exportScale = Math.max(0.1, Number(value) || 1))"
             />
           </label>
-          <Button @click="$emit('exportImage')">
+          <Button :disabled="isExporting" @click="$emit('exportImage')">
             <Download data-icon="inline-start" />
-            Export PNG/JPEG
+            {{ isExporting ? 'Exporting...' : 'Export PNG' }}
           </Button>
         </div>
       </TabsContent>

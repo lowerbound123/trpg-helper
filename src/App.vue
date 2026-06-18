@@ -32,6 +32,7 @@ import { useResourceImages } from '@/composables/useResourceImages'
 import {
   appendDebugLog,
   exportImageToDownloads,
+  fileUrl,
   openManagedProject,
   saveProjectPreview,
   type LibraryRecord,
@@ -661,8 +662,14 @@ function selectedHandoutPreviewStatus() {
   if (selected.length > 1) return 'Preview: select one handout to inspect preview path'
   const project = selectedHandoutProject()
   if (!project) return 'Preview: selected entry is not a known handout project'
-  if (!project.previewPath) return `Preview: missing · projectId=${project.id}`
-  return `Preview: ${project.previewPath} · ${formatPreviewBytes(project.previewSizeBytes)}`
+  const entryPath = selected[0]?.path || 'entry path missing'
+  if (!project.previewPath) return `Preview: missing · entry=${entryPath} · projectId=${project.id}`
+  return [
+    `entry=${entryPath}`,
+    `file=${project.previewPath}`,
+    `url=${fileUrl(project.previewPath)}`,
+    formatPreviewBytes(project.previewSizeBytes),
+  ].join(' · ')
 }
 
 function isSelectedHandoutExporting() {

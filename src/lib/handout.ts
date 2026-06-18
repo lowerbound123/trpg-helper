@@ -15,6 +15,7 @@ export interface CanvasSettings {
   height: number
   backgroundColor: string
   backgroundAssetId?: string
+  effects: LayerEffects
 }
 
 export interface LayerEffects {
@@ -95,12 +96,33 @@ export type LayerPatch = Partial<
   Omit<ImageLayer, 'id' | 'type' | 'zIndex'> & Omit<TextLayer, 'id' | 'type' | 'zIndex'>
 >
 
-const defaultEffects = (): LayerEffects => ({
+export const defaultEffects = (): LayerEffects => ({
   brightness: 0,
   contrast: 0,
   saturation: 0,
   blur: 0,
 })
+
+export function normalizeEffects(effects?: Partial<LayerEffects>): LayerEffects {
+  return {
+    ...defaultEffects(),
+    ...effects,
+  }
+}
+
+export function normalizeHandoutDocument(document: HandoutDocument): HandoutDocument {
+  return {
+    ...document,
+    canvas: {
+      ...document.canvas,
+      effects: normalizeEffects(document.canvas.effects),
+    },
+    layers: document.layers.map((layer) => ({
+      ...layer,
+      effects: normalizeEffects(layer.effects),
+    })) as HandoutLayer[],
+  }
+}
 
 const touch = (document: HandoutDocument): HandoutDocument => ({
   ...document,
@@ -119,6 +141,7 @@ export function createDefaultHandout(title = 'Untitled handout'): HandoutDocumen
       width: 1280,
       height: 720,
       backgroundColor: 'rgba(0,0,0,0)',
+      effects: defaultEffects(),
     },
     layers: [],
     updatedAt: new Date().toISOString(),
@@ -234,6 +257,10 @@ export function updateCanvas(
     canvas: {
       ...document.canvas,
       ...canvas,
+      effects: normalizeEffects({
+        ...document.canvas.effects,
+        ...canvas.effects,
+      }),
     },
   })
 }

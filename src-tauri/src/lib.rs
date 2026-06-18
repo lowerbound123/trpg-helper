@@ -1,5 +1,6 @@
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -110,6 +111,17 @@ fn app_root(_app: &AppHandle) -> Result<PathBuf, AppError> {
         cwd
     };
     Ok(project_root.join("data"))
+}
+
+fn project_root() -> Result<PathBuf, AppError> {
+    let cwd = std::env::current_dir().map_err(|_| AppError::DataDir)?;
+    if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
+        return cwd
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or(AppError::DataDir);
+    }
+    Ok(cwd)
 }
 
 fn library_root(app: &AppHandle) -> Result<PathBuf, AppError> {
@@ -757,6 +769,23 @@ fn save_project_preview(app: AppHandle, project_id: String, data_url: String) ->
     Ok(path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn append_debug_log(line: String) -> CommandResult<String> {
+    let path = project_root()
+        .map_err(String::from)?
+        .join("log.txt");
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    writeln!(file, "{line}")
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -772,6 +801,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            append_debug_log,
             export_image,
             export_image_to_downloads,
             save_project_preview,

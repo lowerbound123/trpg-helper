@@ -16,7 +16,17 @@ describe('handout document model', () => {
 
     expect(handout.schemaVersion).toBe(1)
     expect(handout.title).toBe('Case File')
-    expect(handout.canvas).toEqual({ width: 1280, height: 720, backgroundColor: 'rgba(0,0,0,0)' })
+    expect(handout.canvas).toEqual({
+      width: 1280,
+      height: 720,
+      backgroundColor: 'rgba(0,0,0,0)',
+      effects: {
+        brightness: 0,
+        contrast: 0,
+        saturation: 0,
+        blur: 0,
+      },
+    })
     expect(handout.layers).toEqual([])
   })
 

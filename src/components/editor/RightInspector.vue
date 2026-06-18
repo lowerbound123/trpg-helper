@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { isTextLayer, useEditorStore } from '@/stores/editor'
@@ -14,6 +15,7 @@ const exportScale = defineModel<number>('exportScale', { required: true })
 
 defineProps<{
   isExporting?: boolean
+  exportLog?: string
 }>()
 
 defineEmits<{
@@ -74,6 +76,31 @@ function patchContrast(value: number[] | undefined) {
 
 function patchSaturation(value: number[] | undefined) {
   patchEffect('saturation', value)
+}
+
+function patchDocumentEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number[] | undefined) {
+  editor.patchCanvas({
+    effects: {
+      ...editor.document.canvas.effects,
+      [kind]: sliderValue(value),
+    },
+  })
+}
+
+function patchDocumentBlur(value: number[] | undefined) {
+  patchDocumentEffect('blur', value)
+}
+
+function patchDocumentBrightness(value: number[] | undefined) {
+  patchDocumentEffect('brightness', value)
+}
+
+function patchDocumentContrast(value: number[] | undefined) {
+  patchDocumentEffect('contrast', value)
+}
+
+function patchDocumentSaturation(value: number[] | undefined) {
+  patchDocumentEffect('saturation', value)
 }
 </script>
 
@@ -328,6 +355,48 @@ function patchSaturation(value: number[] | undefined) {
             <span>Layers</span>
             <strong>{{ editor.document.layers.length }}</strong>
           </div>
+          <Separator />
+          <div class="effect-grid">
+            <label>
+              Document blur {{ editor.document.canvas.effects.blur }}
+              <Slider
+                :model-value="[editor.document.canvas.effects.blur]"
+                :max="40"
+                :step="1"
+                @update:model-value="patchDocumentBlur"
+              />
+            </label>
+            <label>
+              Document brightness {{ editor.document.canvas.effects.brightness }}
+              <Slider
+                :model-value="[editor.document.canvas.effects.brightness]"
+                :min="-100"
+                :max="100"
+                :step="1"
+                @update:model-value="patchDocumentBrightness"
+              />
+            </label>
+            <label>
+              Document contrast {{ editor.document.canvas.effects.contrast }}
+              <Slider
+                :model-value="[editor.document.canvas.effects.contrast]"
+                :min="-100"
+                :max="100"
+                :step="1"
+                @update:model-value="patchDocumentContrast"
+              />
+            </label>
+            <label>
+              Document saturation {{ editor.document.canvas.effects.saturation }}
+              <Slider
+                :model-value="[editor.document.canvas.effects.saturation]"
+                :min="-100"
+                :max="100"
+                :step="1"
+                @update:model-value="patchDocumentSaturation"
+              />
+            </label>
+          </div>
         </div>
       </TabsContent>
 
@@ -343,10 +412,13 @@ function patchSaturation(value: number[] | undefined) {
               @update:model-value="(value) => (exportScale = Math.max(0.1, Number(value) || 1))"
             />
           </label>
-          <Button :disabled="isExporting" @click="$emit('exportImage')">
+          <Button variant="outline" :disabled="isExporting" @click="$emit('exportImage')">
             <Download data-icon="inline-start" />
             {{ isExporting ? 'Exporting...' : 'Export PNG' }}
           </Button>
+          <div class="export-log">
+            {{ exportLog || 'No export yet.' }}
+          </div>
         </div>
       </TabsContent>
     </Tabs>

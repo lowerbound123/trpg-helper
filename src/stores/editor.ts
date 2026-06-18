@@ -6,6 +6,7 @@ import {
   addTextLayer,
   createDefaultHandout,
   moveLayer,
+  normalizeHandoutDocument,
   removeLayer,
   updateCanvas,
   updateLayer,
@@ -161,7 +162,7 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function replaceDocument(next: HandoutDocument, dir?: string) {
-    history.value.replace(next)
+    history.value.replace(normalizeHandoutDocument(next))
     selectedLayerId.value = undefined
     if (dir !== undefined) projectDir.value = dir
   }

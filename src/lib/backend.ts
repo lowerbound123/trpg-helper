@@ -252,3 +252,17 @@ export async function saveProjectPreview(projectId: string, dataUrl: string): Pr
   if (!isTauriRuntime()) return dataUrl
   return invoke<string>('save_project_preview', { projectId, dataUrl })
 }
+
+export async function appendDebugLog(scope: string, message: string, data?: unknown): Promise<string> {
+  const line = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    scope,
+    message,
+    data,
+  })
+  if (!isTauriRuntime()) {
+    console.debug(line)
+    return line
+  }
+  return invoke<string>('append_debug_log', { line })
+}

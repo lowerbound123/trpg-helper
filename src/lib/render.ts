@@ -1,6 +1,7 @@
 import Konva from 'konva'
 
 import { readFileDataUrl, type LibraryIndex, type LibraryRecord } from './backend'
+import { hasVisibleEffects, konvaEffectConfig } from './effects'
 import type { HandoutDocument, HandoutLayer, ImageLayer, TextLayer } from './handout'
 
 type ImageCache = Record<string, HTMLImageElement>
@@ -70,7 +71,13 @@ function commonConfig(layer: HandoutLayer) {
     opacity: layer.opacity,
     visible: layer.visible,
     globalCompositeOperation: layer.blendMode,
+    ...konvaEffectConfig(layer.effects),
   }
+}
+
+function prepareEffectNode<T extends Konva.Shape | Konva.Group>(node: T, effects?: HandoutLayer['effects']) {
+  if (hasVisibleEffects(effects)) node.cache()
+  return node
 }
 
 export async function renderHandoutToDataUrl(
@@ -91,9 +98,17 @@ export async function renderHandoutToDataUrl(
     height: document.canvas.height,
   })
   const layer = new Konva.Layer()
+  const content = new Konva.Group({
+    x: 0,
+    y: 0,
+    width: document.canvas.width,
+    height: document.canvas.height,
+    ...konvaEffectConfig(document.canvas.effects),
+  })
   stage.add(layer)
+  layer.add(content)
 
-  layer.add(new Konva.Rect({
+  content.add(new Konva.Rect({
     x: 0,
     y: 0,
     width: document.canvas.width,
@@ -103,7 +118,7 @@ export async function renderHandoutToDataUrl(
 
   const background = resolveImageRecord(library, document.canvas.backgroundAssetId)
   if (background) {
-    layer.add(new Konva.Image({
+    content.add(new Konva.Image({
       image: await loadImage(background, cache),
       x: 0,
       y: 0,
@@ -117,15 +132,15 @@ export async function renderHandoutToDataUrl(
     if (isImageLayer(item)) {
       const record = resolveImageRecord(library, item.assetId)
       if (!record) continue
-      layer.add(new Konva.Image({
+      content.add(prepareEffectNode(new Konva.Image({
         ...commonConfig(item),
         image: await loadImage(record, cache),
-      }))
+      }), item.effects))
     }
     if (isTextLayer(item)) {
       const font = library.fonts.find((record) => record.id === item.fontId)
       if (font) await ensureFont(font)
-      layer.add(new Konva.Text({
+      content.add(prepareEffectNode(new Konva.Text({
         ...commonConfig(item),
         text: item.text,
         fontFamily: item.fontFamily,
@@ -136,10 +151,11 @@ export async function renderHandoutToDataUrl(
         lineHeight: item.lineHeight,
         textDecoration: textDecoration(item),
         verticalAlign: 'top',
-      }))
+      }), item.effects))
     }
   }
 
+  if (hasVisibleEffects(document.canvas.effects)) content.cache()
   layer.draw()
   const dataUrl = stage.toDataURL({
     pixelRatio: Math.max(0.1, Number(scale) || 1),

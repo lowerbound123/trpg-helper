@@ -30,12 +30,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useFinderManagement, filterRecords, finderFeaturesForKind } from '@/composables/useFinderManagement'
 import { useResourceImages } from '@/composables/useResourceImages'
 import {
+  appendDebugLog,
   exportImageToDownloads,
   openManagedProject,
   saveProjectPreview,
   type LibraryRecord,
   type ProjectSummary,
 } from '@/lib/backend'
+import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
 import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
 import { downloadFileName, renderHandoutToDataUrl } from '@/lib/render'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
@@ -58,6 +60,7 @@ const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const exportScale = ref(1)
+const exportLog = ref('')
 const canvasZoom = ref(1)
 const canvasPan = reactive({ x: 0, y: 0 })
 const panState = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
@@ -104,6 +107,17 @@ const contentGroupConfig = computed(() => ({
   scaleX: stageScale.value,
   scaleY: stageScale.value,
 }))
+
+const documentFilterStyle = computed(() => {
+  const effects = editor.document.canvas.effects
+  if (!hasVisibleEffects(effects)) return ''
+  return [
+    effects.blur ? `blur(${effects.blur}px)` : '',
+    effects.brightness ? `brightness(${100 + effects.brightness}%)` : '',
+    effects.contrast ? `contrast(${100 + effects.contrast}%)` : '',
+    effects.saturation ? `saturate(${100 + effects.saturation}%)` : '',
+  ].filter(Boolean).join(' ')
+})
 
 const backgroundAsset = computed(() =>
   editor.resolveBackground(editor.document.canvas.backgroundAssetId)
@@ -173,6 +187,22 @@ function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
 
 function clearAssetDrag() {
   draggedAssetId.value = ''
+}
+
+function serializableLogData(data?: Record<string, unknown>) {
+  if (!data) return undefined
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [
+      key,
+      value instanceof Error ? { name: value.name, message: value.message, stack: value.stack } : value,
+    ]),
+  )
+}
+
+function logHandoutPreview(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData(data)
+  console.debug(`[handout-preview] ${message}`, payload)
+  void appendDebugLog('handout-preview', message, payload)
 }
 
 function clampZoom(value: number) {
@@ -309,6 +339,7 @@ function layerConfig(layer: HandoutLayer) {
     visible: layer.visible,
     draggable: !layer.locked,
     globalCompositeOperation: layer.blendMode,
+    ...konvaEffectConfig(layer.effects),
   }
 }
 
@@ -355,11 +386,12 @@ function onTransformEnd(layer: HandoutLayer) {
   if (!node) return
   const scaleX = node.scaleX()
   const scaleY = node.scaleY()
+  const position = node.position()
   node.scaleX(1)
   node.scaleY(1)
   editor.patchLayer(layer.id, {
-    x: Math.round(node.x()),
-    y: Math.round(node.y()),
+    x: Math.round(position.x),
+    y: Math.round(position.y),
     width: Math.max(12, Math.round(node.width() * scaleX)),
     height: Math.max(12, Math.round(node.height() * scaleY)),
     rotation: Math.round(node.rotation()),
@@ -430,11 +462,25 @@ function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
 
 async function updateTransformer() {
   await nextTick()
+  refreshLayerEffectCaches()
   const transformer = transformerRef.value?.getNode()
   if (!transformer) return
   const selected = editor.selectedLayerId ? layerNodeRefs[editor.selectedLayerId]?.getNode() : undefined
   transformer.nodes(selected ? [selected] : [])
   transformer.getLayer()?.batchDraw()
+}
+
+function refreshLayerEffectCaches() {
+  for (const layer of editor.document.layers) {
+    const node = layerNodeRefs[layer.id]?.getNode()
+    if (!node) continue
+    if (hasVisibleEffects(layer.effects)) {
+      node.cache()
+    } else {
+      node.clearCache()
+    }
+  }
+  stageRef.value?.getNode().batchDraw()
 }
 
 async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[], folder = '') {
@@ -530,7 +576,7 @@ async function handleCreateBackgroundDrop(event: DragEvent) {
 async function saveProject() {
   const saved = await editor.saveCurrentProject()
   if (saved && editor.currentProjectId) {
-    console.debug('[handout-preview] rendering preview after save', {
+    logHandoutPreview('rendering preview after save', {
       projectId: editor.currentProjectId,
       title: editor.document.title,
       canvas: editor.document.canvas,
@@ -538,7 +584,7 @@ async function saveProject() {
     })
     const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, 0.25, imageElements)
     const previewPath = await saveProjectPreview(editor.currentProjectId, dataUrl)
-    console.debug('[handout-preview] saved preview after save', {
+    logHandoutPreview('saved preview after save', {
       projectId: editor.currentProjectId,
       previewPath,
       dataUrlLength: dataUrl.length,
@@ -551,7 +597,7 @@ async function exportCurrentImage() {
   if (isExportingCurrent.value) return
   const signature = JSON.stringify({ document: editor.document, scale: exportScale.value })
   if (lastCurrentExport.value?.signature === signature) {
-    editor.status = `Unchanged image already exported to ${lastCurrentExport.value.path}`
+    exportLog.value = `Unchanged image already exported to ${lastCurrentExport.value.path}`
     return
   }
   isExportingCurrent.value = true
@@ -559,7 +605,7 @@ async function exportCurrentImage() {
     const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
     const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
     lastCurrentExport.value = { signature, path }
-    editor.status = `Exported image to ${path}`
+    exportLog.value = `Exported image to ${path}`
   } finally {
     isExportingCurrent.value = false
   }
@@ -570,7 +616,7 @@ async function exportHandoutProject(project: ProjectSummary) {
   const signature = `${project.id}:${project.updatedAt}:1`
   const lastExport = lastHandoutExports.get(project.id)
   if (lastExport?.signature === signature) {
-    editor.status = `Unchanged image already exported to ${lastExport.path}`
+    exportLog.value = `Unchanged image already exported to ${lastExport.path}`
     return
   }
   exportingHandoutIds.add(project.id)
@@ -579,7 +625,7 @@ async function exportHandoutProject(project: ProjectSummary) {
     const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
     const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
     lastHandoutExports.set(project.id, { signature, path })
-    editor.status = `Exported image to ${path}`
+    exportLog.value = `Exported image to ${path}`
   } finally {
     exportingHandoutIds.delete(project.id)
   }
@@ -613,7 +659,7 @@ async function exportSelectedHandout() {
 async function ensureProjectPreviews() {
   let generated = 0
   for (const project of editor.projects) {
-    console.debug('[handout-preview] project preview status', {
+    logHandoutPreview('project preview status', {
       projectId: project.id,
       title: project.title,
       previewPath: project.previewPath,
@@ -621,7 +667,7 @@ async function ensureProjectPreviews() {
     })
     if (project.previewPath) continue
     try {
-      console.debug('[handout-preview] generating missing preview', {
+      logHandoutPreview('generating missing preview', {
         projectId: project.id,
         title: project.title,
       })
@@ -629,20 +675,20 @@ async function ensureProjectPreviews() {
       const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 0.25, imageElements)
       const previewPath = await saveProjectPreview(project.id, dataUrl)
       generated += 1
-      console.debug('[handout-preview] saved missing preview', {
+      logHandoutPreview('saved missing preview', {
         projectId: project.id,
         previewPath,
         dataUrlLength: dataUrl.length,
       })
     } catch (error) {
-      console.warn('[handout-preview] failed to generate preview', {
+      logHandoutPreview('failed to generate preview', {
         projectId: project.id,
         title: project.title,
         error,
       })
     }
   }
-  console.debug('[handout-preview] preview generation complete', { generated })
+  logHandoutPreview('preview generation complete', { generated })
   await editor.refreshProjects()
 }
 
@@ -886,7 +932,7 @@ watch(
               @dragstart="startAssetDrag(asset, $event)"
               @dragend="clearAssetDrag"
             >
-              <span class="asset-thumb"><img :src="previewUrl(asset)" alt="" /></span>
+              <span class="asset-thumb"><img :src="previewUrl(asset)" alt="" draggable="false" /></span>
               <span class="asset-meta">
                 <strong>{{ asset.name }}</strong>
                 <span>Click or drag to add · {{ asset.tags.join(', ') || 'No tags' }}</span>
@@ -1006,7 +1052,6 @@ watch(
               <Plus />
             </Button>
           </div>
-          <span>{{ editor.status }}</span>
         </div>
 
         <div
@@ -1021,8 +1066,9 @@ watch(
           @pointerup="stopCanvasPan"
           @pointerleave="stopCanvasPan"
         >
-          <v-stage ref="stageRef" :config="stageConfig" @click="handleStagePointer" @tap="handleStagePointer">
-            <v-layer>
+          <div class="stage-surface" :style="{ filter: documentFilterStyle }">
+            <v-stage ref="stageRef" :config="stageConfig" @click="handleStagePointer" @tap="handleStagePointer">
+              <v-layer>
               <v-group :config="contentGroupConfig">
                 <v-rect
                   :config="{
@@ -1101,8 +1147,9 @@ watch(
                   }"
                 />
               </v-group>
-            </v-layer>
-          </v-stage>
+              </v-layer>
+            </v-stage>
+          </div>
         </div>
       </section>
     </main>
@@ -1110,6 +1157,7 @@ watch(
     <RightInspector
       v-model:export-scale="exportScale"
       :is-exporting="isExportingCurrent"
+      :export-log="exportLog"
       @export-image="exportCurrentImage"
     />
   </div>

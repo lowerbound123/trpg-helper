@@ -634,6 +634,10 @@ textarea {
   cursor: grabbing;
 }
 
+.stage-surface {
+  will-change: filter;
+}
+
 .konvajs-content {
   background: transparent;
   box-shadow:
@@ -657,6 +661,18 @@ textarea {
 
 .document-summary span {
   color: hsl(var(--muted-foreground));
+}
+
+.export-log {
+  min-height: 42px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 0.45);
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 [data-slot='input'],

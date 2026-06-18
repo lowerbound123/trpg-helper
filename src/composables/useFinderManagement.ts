@@ -1,7 +1,7 @@
 import { computed, type Ref } from 'vue'
 import { contextMenuItems as defaultContextMenuItems, type DirEntry, type Driver, type FsData, type Item } from 'vuefinder'
 
-import { fileUrl, type LibraryRecord, type ProjectSummary } from '@/lib/backend'
+import { appendDebugLog, fileUrl, type LibraryRecord, type ProjectSummary } from '@/lib/backend'
 import { useEditorStore } from '@/stores/editor'
 
 export type FinderKind = 'handout' | 'background' | 'asset' | 'font'
@@ -73,6 +73,11 @@ export function isImageFinderEntry(entry?: DirEntry | null) {
 }
 
 export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, options: UseFinderOptions) {
+  function logPreview(message: string, data: Record<string, unknown>) {
+    console.debug(`[handout-preview] ${message}`, data)
+    void appendDebugLog('handout-preview', message, data)
+  }
+
   function foldersForKind(kind: 'background' | 'asset' | 'font') {
     if (kind === 'background') return editor.library.backgroundFolders
     if (kind === 'asset') return editor.library.assetFolders
@@ -82,7 +87,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
   function projectPreviewUrl(project: { id?: string; title?: string; backgroundAssetId?: string | null; previewPath?: string | null }) {
     if (project.previewPath) {
       const url = fileUrl(project.previewPath)
-      console.debug('[handout-preview] finder using project preview', {
+      logPreview('finder using project preview', {
         projectId: project.id,
         title: project.title,
         previewPath: project.previewPath,
@@ -93,7 +98,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     const image = editor.resolveBackground(project.backgroundAssetId || undefined)
       || editor.resolveAsset(project.backgroundAssetId || undefined)
     const fallback = image ? options.previewUrl(image) : ''
-    console.debug('[handout-preview] finder preview fallback', {
+    logPreview('finder preview fallback', {
       projectId: project.id,
       title: project.title,
       backgroundAssetId: project.backgroundAssetId,

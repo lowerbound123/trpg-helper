@@ -88,6 +88,7 @@ struct ProjectSummary {
     project_dir: String,
     #[serde(default)]
     folder: String,
+    background_asset_id: Option<String>,
     updated_at: DateTime<Utc>,
 }
 
@@ -169,6 +170,20 @@ fn ensure_folder(folders: &mut Vec<String>, folder: &str) {
     }
     folders.push(folder.to_string());
     folders.sort();
+}
+
+fn rename_folder_value(value: &str, old_folder: &str, new_folder: &str) -> String {
+    if old_folder.is_empty() {
+        return value.to_string();
+    }
+    if value == old_folder {
+        return new_folder.to_string();
+    }
+    let prefix = format!("{old_folder}/");
+    if value.starts_with(&prefix) {
+        return format!("{new_folder}/{}", &value[prefix.len()..]);
+    }
+    value.to_string()
 }
 
 fn library_folders_mut<'a>(index: &'a mut LibraryIndex, kind: &str) -> Option<&'a mut Vec<String>> {
@@ -351,6 +366,12 @@ fn project_summary(root: &Path, payload: &ProjectPayload) -> ProjectSummary {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        background_asset_id: payload
+            .document
+            .get("canvas")
+            .and_then(|canvas| canvas.get("backgroundAssetId"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
         updated_at,
     }
 }
@@ -381,12 +402,125 @@ fn create_library_folder(
 }
 
 #[tauri::command]
+fn rename_library_record(
+    app: AppHandle,
+    kind: String,
+    id: String,
+    name: String,
+) -> CommandResult<LibraryIndex> {
+    let mut index = read_index(&app).map_err(String::from)?;
+    let records = match kind.as_str() {
+        "background" | "backgrounds" => &mut index.backgrounds,
+        "asset" | "assets" => &mut index.assets,
+        "font" | "fonts" => &mut index.fonts,
+        _ => return Err("unknown library record kind".to_string()),
+    };
+    let record = records
+        .iter_mut()
+        .find(|record| record.id == id)
+        .ok_or_else(|| "record not found".to_string())?;
+    record.name = name.trim().to_string();
+    record.updated_at = Utc::now();
+    write_index(&app, &index).map_err(String::from)?;
+    Ok(index)
+}
+
+#[tauri::command]
+fn rename_library_folder(
+    app: AppHandle,
+    kind: String,
+    old_folder: String,
+    new_folder: String,
+) -> CommandResult<LibraryIndex> {
+    let old_folder = normalize_folder(old_folder);
+    let new_folder = normalize_folder(new_folder);
+    if old_folder.is_empty() || new_folder.is_empty() {
+        return Err("folder names cannot be empty".to_string());
+    }
+    let mut index = read_index(&app).map_err(String::from)?;
+    let folders = library_folders_mut(&mut index, &kind)
+        .ok_or_else(|| "unknown library folder kind".to_string())?;
+    *folders = folders
+        .iter()
+        .map(|folder| rename_folder_value(folder, &old_folder, &new_folder))
+        .collect();
+    folders.sort();
+    folders.dedup();
+
+    let records = match kind.as_str() {
+        "background" | "backgrounds" => &mut index.backgrounds,
+        "asset" | "assets" => &mut index.assets,
+        "font" | "fonts" => &mut index.fonts,
+        _ => return Err("unknown library folder kind".to_string()),
+    };
+    for record in records {
+        record.folder = rename_folder_value(&record.folder, &old_folder, &new_folder);
+        record.updated_at = Utc::now();
+    }
+
+    write_index(&app, &index).map_err(String::from)?;
+    Ok(index)
+}
+
+#[tauri::command]
 fn create_project_folder(app: AppHandle, folder: String) -> CommandResult<Vec<String>> {
     let folder = normalize_folder(folder);
     ensure_project_folder(&app, &folder).map_err(String::from)?;
     Ok(read_project_folder_index(&app)
         .map_err(String::from)?
         .folders)
+}
+
+#[tauri::command]
+fn rename_project_folder(
+    app: AppHandle,
+    old_folder: String,
+    new_folder: String,
+) -> CommandResult<Vec<String>> {
+    let old_folder = normalize_folder(old_folder);
+    let new_folder = normalize_folder(new_folder);
+    if old_folder.is_empty() || new_folder.is_empty() {
+        return Err("folder names cannot be empty".to_string());
+    }
+
+    let mut folder_index = read_project_folder_index(&app).map_err(String::from)?;
+    folder_index.folders = folder_index
+        .folders
+        .iter()
+        .map(|folder| rename_folder_value(folder, &old_folder, &new_folder))
+        .collect();
+    folder_index.folders.sort();
+    folder_index.folders.dedup();
+    write_project_folder_index(&app, &folder_index).map_err(String::from)?;
+
+    let root = projects_root(&app).map_err(String::from)?;
+    for entry in fs::read_dir(root)
+        .map_err(AppError::from)
+        .map_err(String::from)?
+    {
+        let path = entry.map_err(AppError::from).map_err(String::from)?.path();
+        if !path.is_dir() || !path.join("metadata.json").exists() {
+            continue;
+        }
+        let payload = read_project_files(&path).map_err(String::from)?;
+        let folder = payload
+            .metadata
+            .get("folder")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let next_folder = rename_folder_value(folder, &old_folder, &new_folder);
+        let mut metadata = payload.metadata;
+        if let Some(object) = metadata.as_object_mut() {
+            object.insert("folder".to_string(), Value::String(next_folder));
+            object.insert(
+                "savedAt".to_string(),
+                Value::String(Utc::now().to_rfc3339()),
+            );
+        }
+        write_project_files(&path, &payload.document, &metadata).map_err(String::from)?;
+    }
+
+    Ok(folder_index.folders)
 }
 
 #[tauri::command]
@@ -525,6 +659,31 @@ fn open_managed_project(app: AppHandle, project_id: String) -> CommandResult<Pro
 }
 
 #[tauri::command]
+fn rename_managed_project(
+    app: AppHandle,
+    project_id: String,
+    title: String,
+) -> CommandResult<ProjectPayload> {
+    let root = project_dir(&app, &project_id).map_err(String::from)?;
+    let mut payload = read_project_files(&root).map_err(String::from)?;
+    if let Some(object) = payload.document.as_object_mut() {
+        object.insert("title".to_string(), Value::String(title.trim().to_string()));
+        object.insert(
+            "updatedAt".to_string(),
+            Value::String(Utc::now().to_rfc3339()),
+        );
+    }
+    if let Some(object) = payload.metadata.as_object_mut() {
+        object.insert(
+            "savedAt".to_string(),
+            Value::String(Utc::now().to_rfc3339()),
+        );
+    }
+    write_project_files(&root, &payload.document, &payload.metadata).map_err(String::from)?;
+    Ok(payload)
+}
+
+#[tauri::command]
 fn save_managed_project(
     app: AppHandle,
     project_id: String,
@@ -590,6 +749,10 @@ pub fn run() {
             open_managed_project,
             open_project,
             read_file_data_url,
+            rename_library_folder,
+            rename_library_record,
+            rename_managed_project,
+            rename_project_folder,
             save_managed_project,
             save_project
         ])

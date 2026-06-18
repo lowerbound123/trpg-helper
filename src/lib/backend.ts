@@ -29,6 +29,7 @@ export interface ProjectSummary {
   title: string
   projectDir: string
   folder: string
+  backgroundAssetId?: string | null
   updatedAt: string
 }
 
@@ -123,6 +124,29 @@ export async function createProjectFolder(folder: string): Promise<string[]> {
   return invoke<string[]>('create_project_folder', { folder })
 }
 
+export async function renameLibraryRecord(
+  kind: 'background' | 'asset' | 'font',
+  id: string,
+  name: string,
+): Promise<LibraryIndex> {
+  if (!isTauriRuntime()) return emptyLibrary()
+  return invoke<LibraryIndex>('rename_library_record', { kind, id, name })
+}
+
+export async function renameLibraryFolder(
+  kind: 'background' | 'asset' | 'font',
+  oldFolder: string,
+  newFolder: string,
+): Promise<LibraryIndex> {
+  if (!isTauriRuntime()) return emptyLibrary()
+  return invoke<LibraryIndex>('rename_library_folder', { kind, oldFolder, newFolder })
+}
+
+export async function renameProjectFolder(oldFolder: string, newFolder: string): Promise<string[]> {
+  if (!isTauriRuntime()) return []
+  return invoke<string[]>('rename_project_folder', { oldFolder, newFolder })
+}
+
 export async function listProjectFolders(): Promise<string[]> {
   if (!isTauriRuntime()) return []
   return invoke<string[]>('list_project_folders')
@@ -176,6 +200,13 @@ export async function openManagedProject(projectId: string): Promise<ProjectPayl
     throw new Error('Opening projects requires the Tauri desktop runtime.')
   }
   return invoke<ProjectPayload>('open_managed_project', { projectId })
+}
+
+export async function renameManagedProject(projectId: string, title: string): Promise<ProjectPayload> {
+  if (!isTauriRuntime()) {
+    throw new Error('Renaming projects requires the Tauri desktop runtime.')
+  }
+  return invoke<ProjectPayload>('rename_managed_project', { projectId, title })
 }
 
 export async function saveManagedProject(

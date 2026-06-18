@@ -30,6 +30,10 @@ import {
   listProjects,
   openManagedProject,
   openProject,
+  renameLibraryFolder,
+  renameLibraryRecord,
+  renameManagedProject,
+  renameProjectFolder,
   saveManagedProject,
   saveProject,
   type LibraryIndex,
@@ -71,25 +75,29 @@ export const useEditorStore = defineStore('editor', () => {
     selectedLayerId.value = layerId
   }
 
-  function addLayerFromAsset(asset: LibraryRecord) {
+  function addLayerFromAsset(asset: LibraryRecord, size?: { width?: number; height?: number }) {
     commit((doc) =>
       addImageLayer(doc, {
         assetId: asset.id,
         name: asset.name,
         x: 120 + doc.layers.length * 20,
         y: 100 + doc.layers.length * 20,
+        width: size?.width,
+        height: size?.height,
       }),
     )
     selectedLayerId.value = document.value.layers.at(-1)?.id
   }
 
-  function addLayerFromAssetAt(asset: LibraryRecord, x: number, y: number) {
+  function addLayerFromAssetAt(asset: LibraryRecord, x: number, y: number, size?: { width?: number; height?: number }) {
     commit((doc) =>
       addImageLayer(doc, {
         assetId: asset.id,
         name: asset.name,
         x: Math.max(0, Math.round(x)),
         y: Math.max(0, Math.round(y)),
+        width: size?.width,
+        height: size?.height,
       }),
     )
     selectedLayerId.value = document.value.layers.at(-1)?.id
@@ -203,6 +211,29 @@ export const useEditorStore = defineStore('editor', () => {
   async function addProjectFolder(folder: string) {
     projectFolders.value = await createProjectFolder(folder)
     status.value = `Created handout folder ${folder.trim()}`
+  }
+
+  async function renameResource(kind: 'background' | 'asset' | 'font', id: string, name: string) {
+    library.value = await renameLibraryRecord(kind, id, name)
+    status.value = `Renamed ${kind} to ${name.trim()}`
+  }
+
+  async function renameResourceFolder(kind: 'background' | 'asset' | 'font', oldFolder: string, newFolder: string) {
+    library.value = await renameLibraryFolder(kind, oldFolder, newFolder)
+    status.value = `Renamed folder ${oldFolder} to ${newFolder.trim()}`
+  }
+
+  async function renameProjectFolderPath(oldFolder: string, newFolder: string) {
+    projectFolders.value = await renameProjectFolder(oldFolder, newFolder)
+    await refreshProjects()
+    status.value = `Renamed folder ${oldFolder} to ${newFolder.trim()}`
+  }
+
+  async function renameProject(projectId: string, title: string) {
+    const payload = await renameManagedProject(projectId, title)
+    if (currentProjectId.value === projectId) replaceDocument(payload.document)
+    await refreshProjects()
+    status.value = `Renamed project to ${title.trim()}`
   }
 
   async function loadFont(font: LibraryRecord) {
@@ -321,6 +352,10 @@ export const useEditorStore = defineStore('editor', () => {
     projectDir,
     redo,
     renameDocument,
+    renameProject,
+    renameProjectFolderPath,
+    renameResource,
+    renameResourceFolder,
     refreshLibrary,
     refreshProjects,
     replaceDocument,

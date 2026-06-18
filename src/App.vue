@@ -19,10 +19,19 @@ import {
   Undo2,
   Upload,
 } from '@lucide/vue'
+import { VueFinder, type DirEntry, type Driver, type FsData } from 'vuefinder'
+import 'vuefinder/dist/vuefinder.css'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -36,6 +45,7 @@ import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; cancelBubble?: boolean }
+type FinderKind = 'handout' | 'background' | 'asset' | 'font'
 
 const editor = useEditorStore()
 const stageRef = ref<{ getNode: () => Konva.Stage }>()
@@ -44,12 +54,13 @@ const layerNodeRefs = reactive<Record<string, NodeRef | undefined>>({})
 const imageElements = reactive<Record<string, HTMLImageElement>>({})
 
 const newProjectTitle = ref('Untitled handout')
-const createMode = ref<'blank' | 'existing-background' | 'upload-background'>('blank')
+const createMode = ref<'blank' | 'upload-background'>('blank')
+const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
-const selectedCreateBackgroundId = ref('')
 const projectPathInput = ref('')
 const exportPathInput = ref('')
+const exportScale = ref(1)
 const backgroundTags = ref('')
 const assetTags = ref('')
 const fontTags = ref('')
@@ -60,7 +71,6 @@ const selectedProjectFolder = ref('')
 const selectedBackgroundFolder = ref('')
 const selectedAssetFolder = ref('')
 const selectedFontFolder = ref('')
-const newProjectFolder = ref('')
 const newBackgroundFolder = ref('')
 const newAssetFolder = ref('')
 const newFontFolder = ref('')
@@ -69,6 +79,33 @@ const isDraggingBackground = ref(false)
 const isDraggingAsset = ref(false)
 const isDraggingFont = ref(false)
 const draggedAssetId = ref('')
+
+const finderStorages: Record<FinderKind, string> = {
+  handout: 'handouts',
+  background: 'backgrounds',
+  asset: 'assets',
+  font: 'fonts',
+}
+const finderFeatures = {
+  archive: false,
+  copy: false,
+  delete: false,
+  download: false,
+  edit: false,
+  fullscreen: false,
+  history: false,
+  language: false,
+  move: false,
+  newfile: false,
+  newfolder: true,
+  pinned: false,
+  preview: true,
+  rename: true,
+  search: true,
+  theme: false,
+  unarchive: false,
+  upload: false,
+}
 
 const stageScale = computed(() => {
   const maxWidth = 920
@@ -100,6 +137,12 @@ const filteredAssets = computed(() =>
 const filteredFonts = computed(() =>
   filterRecords(editor.library.fonts, fontSearch.value, selectedFontFolder.value),
 )
+const finderDrivers = computed<Record<FinderKind, Driver>>(() => ({
+  handout: createFinderDriver('handout'),
+  background: createFinderDriver('background'),
+  asset: createFinderDriver('asset'),
+  font: createFinderDriver('font'),
+}))
 
 function folderMatches(recordFolder: string | undefined, selectedFolder: string) {
   return (recordFolder || '') === selectedFolder
@@ -118,6 +161,268 @@ function foldersForKind(kind: 'background' | 'asset' | 'font') {
   if (kind === 'background') return editor.library.backgroundFolders
   if (kind === 'asset') return editor.library.assetFolders
   return editor.library.fontFolders
+}
+
+function projectPreviewUrl(project: { backgroundAssetId?: string | null }) {
+  const background = editor.resolveBackground(project.backgroundAssetId || undefined)
+  return background ? previewUrl(background) : ''
+}
+
+function allFoldersForKind(kind: FinderKind) {
+  if (kind === 'handout') return editor.projectFolders
+  return foldersForKind(kind)
+}
+
+function selectedFolderForFinder(kind: FinderKind) {
+  if (kind === 'handout') return selectedProjectFolder.value
+  return folderValue(kind)
+}
+
+function setSelectedFolderForFinder(kind: FinderKind, folder: string) {
+  if (kind === 'handout') selectedProjectFolder.value = folder
+  else setFolderValue(kind, folder)
+}
+
+function finderRoot(kind: FinderKind) {
+  return `${finderStorages[kind]}://`
+}
+
+function normalizeFinderFolder(value?: string) {
+  if (!value) return ''
+  return value.replace(/^[^:]+:\/\//, '').replace(/^\/+|\/+$/g, '')
+}
+
+function finderPath(kind: FinderKind, folder = '', id?: string) {
+  const root = finderRoot(kind)
+  const normalized = normalizeFinderFolder(folder)
+  const parts = normalized ? [normalized] : []
+  if (id) parts.push(`__${kind}-${id}`)
+  return `${root}${parts.join('/')}`
+}
+
+function finderParentPath(kind: FinderKind, folder = '') {
+  const normalized = normalizeFinderFolder(folder)
+  return normalized ? `${finderRoot(kind)}${normalized}` : finderRoot(kind)
+}
+
+function entryBase(path: string) {
+  return normalizeFinderFolder(path).split('/').filter(Boolean).at(-1) || ''
+}
+
+function entryFolder(path: string) {
+  const folder = normalizeFinderFolder(path)
+  if (!folder) return ''
+  return folder.split('/').slice(0, -1).join('/')
+}
+
+function extensionForName(name: string) {
+  const extension = name.split('.').at(-1) || ''
+  return extension === name ? '' : extension
+}
+
+function makeDirEntry(kind: FinderKind, parent: string, folderPath: string, basename: string): DirEntry {
+  return {
+    dir: finderParentPath(kind, parent),
+    basename,
+    extension: '',
+    path: finderParentPath(kind, folderPath),
+    storage: finderStorages[kind],
+    type: 'dir',
+    file_size: null,
+    last_modified: null,
+    mime_type: null,
+    visibility: 'public',
+  }
+}
+
+function makeFileEntry(
+  kind: FinderKind,
+  folder: string,
+  id: string,
+  name: string,
+  mediaType: string,
+  updatedAt: string,
+  preview?: string,
+): DirEntry {
+  return {
+    dir: finderParentPath(kind, folder),
+    basename: name,
+    extension: extensionForName(name),
+    path: finderPath(kind, folder, id),
+    storage: finderStorages[kind],
+    type: 'file',
+    file_size: null,
+    last_modified: Date.parse(updatedAt) || null,
+    mime_type: mediaType,
+    visibility: 'public',
+    previewUrl: preview,
+  }
+}
+
+function finderFoldersAt(kind: FinderKind, currentFolder: string) {
+  const folders = allFoldersForKind(kind)
+  const seen = new Set<string>()
+  return folders
+    .map(normalizeFinderFolder)
+    .filter(Boolean)
+    .flatMap((folder) => {
+      const parent = entryFolder(folder)
+      if (parent !== currentFolder) return []
+      const basename = entryBase(folder)
+      if (seen.has(basename)) return []
+      seen.add(basename)
+      return [makeDirEntry(kind, currentFolder, folder, basename)]
+    })
+}
+
+function finderFilesAt(kind: FinderKind, currentFolder: string) {
+  if (kind === 'handout') {
+    return editor.latestProjects
+      .filter((project) => folderMatches(project.folder, currentFolder))
+      .map((project) =>
+        makeFileEntry(
+          kind,
+          project.folder,
+          project.id,
+          project.title,
+          'application/x-handout-project',
+          project.updatedAt,
+          projectPreviewUrl(project),
+        ),
+      )
+  }
+
+  return recordsForKindWithoutSearch(kind)
+    .filter((record) => folderMatches(record.folder, currentFolder))
+    .map((record) =>
+      makeFileEntry(kind, record.folder, record.id, record.name, record.mediaType, record.updatedAt, previewUrl(record)),
+    )
+}
+
+function recordsForKindWithoutSearch(kind: Exclude<FinderKind, 'handout'>) {
+  if (kind === 'background') return editor.library.backgrounds
+  if (kind === 'asset') return editor.library.assets
+  return editor.library.fonts
+}
+
+function finderData(kind: FinderKind, path?: string): FsData {
+  const folder = normalizeFinderFolder(path)
+  return {
+    storages: [finderStorages[kind]],
+    dirname: finderParentPath(kind, folder),
+    read_only: false,
+    files: [...finderFoldersAt(kind, folder), ...finderFilesAt(kind, folder)],
+  }
+}
+
+function finderResult(kind: FinderKind, path?: string) {
+  const data = finderData(kind, path)
+  return {
+    ...data,
+    read_only: Boolean(data.read_only),
+  }
+}
+
+function idFromFinderPath(kind: FinderKind, path: string) {
+  return entryBase(path).replace(`__${kind}-`, '')
+}
+
+async function createFolderFromFinder(kind: FinderKind, parentPath: string, name: string) {
+  const parent = normalizeFinderFolder(parentPath)
+  const folder = [parent, name.trim()].filter(Boolean).join('/')
+  if (kind === 'handout') await editor.addProjectFolder(folder)
+  else await editor.createResourceFolder(kind, folder)
+}
+
+async function renameFromFinder(kind: FinderKind, params: { path: string; item: string; name: string }) {
+  const itemPath = params.item.includes('://')
+    ? params.item
+    : `${finderParentPath(kind, normalizeFinderFolder(params.path)).replace(/\/$/, '')}/${params.item}`
+  const basename = entryBase(itemPath)
+  if (basename.startsWith(`__${kind}-`)) {
+    const id = idFromFinderPath(kind, itemPath)
+    if (kind === 'handout') await editor.renameProject(id, params.name)
+    else await editor.renameResource(kind, id, params.name)
+    return
+  }
+
+  const oldFolder = normalizeFinderFolder(itemPath)
+  const newFolder = [entryFolder(oldFolder), params.name.trim()].filter(Boolean).join('/')
+  if (kind === 'handout') await editor.renameProjectFolderPath(oldFolder, newFolder)
+  else await editor.renameResourceFolder(kind, oldFolder, newFolder)
+  if (selectedFolderForFinder(kind) === oldFolder) setSelectedFolderForFinder(kind, newFolder)
+}
+
+function createFinderDriver(kind: FinderKind): Driver {
+  const unsupported = async () => {
+    throw new Error('This file operation is not supported in the handout library yet.')
+  }
+
+  return {
+    async list(params) {
+      return finderData(kind, params?.path)
+    },
+    async createFolder(params) {
+      await createFolderFromFinder(kind, params.path, params.name)
+      return finderResult(kind, params.path)
+    },
+    async rename(params) {
+      await renameFromFinder(kind, params)
+      return finderResult(kind, params.path)
+    },
+    async delete() {
+      return unsupported()
+    },
+    async copy() {
+      return unsupported()
+    },
+    async move() {
+      return unsupported()
+    },
+    async archive() {
+      return unsupported()
+    },
+    async unarchive() {
+      return unsupported()
+    },
+    async createFile() {
+      return unsupported()
+    },
+    async getContent() {
+      return { content: '' }
+    },
+    getPreviewUrl(params) {
+      const id = idFromFinderPath(kind, params.path)
+      if (kind === 'handout') return projectPreviewUrl({ backgroundAssetId: editor.projects.find((p) => p.id === id)?.backgroundAssetId })
+      const record = recordsForKindWithoutSearch(kind).find((item) => item.id === id)
+      return record ? previewUrl(record) : ''
+    },
+    getDownloadUrl() {
+      return ''
+    },
+    async search(params) {
+      const query = params.filter.trim().toLowerCase()
+      return finderData(kind, params.path).files.filter((file) => file.basename.toLowerCase().includes(query))
+    },
+    async save() {
+      return ''
+    },
+  }
+}
+
+function handleFinderPathChange(kind: FinderKind, path: string) {
+  setSelectedFolderForFinder(kind, normalizeFinderFolder(path))
+}
+
+function handleFinderFileDoubleClick(kind: FinderKind, event: { item: DirEntry; preventDefault: () => void }) {
+  if (event.item.type !== 'file') return
+  event.preventDefault()
+  const id = idFromFinderPath(kind, event.item.path)
+  if (kind === 'handout') void editor.openManagedHandout(id)
+  if (kind === 'asset') {
+    const asset = editor.resolveAsset(id)
+    if (asset) void addAssetToCanvas(asset)
+  }
 }
 
 function folderValue(kind: 'background' | 'asset' | 'font') {
@@ -150,14 +455,6 @@ async function createResourceFolder(kind: 'background' | 'asset' | 'font') {
   await editor.createResourceFolder(kind, folder)
   setFolderValue(kind, folder)
   clearFolderInput(kind)
-}
-
-async function createHandoutFolder() {
-  const folder = newProjectFolder.value.trim()
-  if (!folder) return
-  await editor.addProjectFolder(folder)
-  selectedProjectFolder.value = folder
-  newProjectFolder.value = ''
 }
 
 function recordsForKind(kind: 'background' | 'asset' | 'font') {
@@ -239,6 +536,12 @@ function clearAssetDrag() {
   draggedAssetId.value = ''
 }
 
+async function addAssetToCanvas(asset: LibraryRecord) {
+  const size = await imageSize(asset)
+  editor.addLayerFromAsset(asset, size)
+  void updateTransformer()
+}
+
 function handleCanvasAssetDrop(event: DragEvent) {
   event.preventDefault()
   const assetId = event.dataTransfer?.getData('application/x-handout-asset') || draggedAssetId.value
@@ -248,9 +551,11 @@ function handleCanvasAssetDrop(event: DragEvent) {
   const rect = stage.container().getBoundingClientRect()
   const x = (event.clientX - rect.left) / stageScale.value
   const y = (event.clientY - rect.top) / stageScale.value
-  editor.addLayerFromAssetAt(asset, x, y)
+  void imageSize(asset).then((size) => {
+    editor.addLayerFromAssetAt(asset, x, y, size)
+    void updateTransformer()
+  })
   draggedAssetId.value = ''
-  void updateTransformer()
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -389,14 +694,12 @@ async function createProject() {
       height: blankHeight.value,
       folder: selectedProjectFolder.value,
     })
+    isCreateDialogOpen.value = false
     return
   }
+}
 
-  const background = editor.library.backgrounds.find((record) => record.id === selectedCreateBackgroundId.value)
-  if (!background) {
-    editor.status = 'Choose or upload a background before creating the handout.'
-    return
-  }
+async function createProjectFromBackground(background: LibraryRecord) {
   const size = await imageSize(background)
   await editor.createManagedHandout(newProjectTitle.value, {
     width: size.width,
@@ -404,16 +707,23 @@ async function createProject() {
     backgroundId: background.id,
     folder: selectedProjectFolder.value,
   })
+  isCreateDialogOpen.value = false
 }
 
 async function handleCreateBackgroundInput(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
   const [background] = await importFiles('background', [file])
-  selectedCreateBackgroundId.value = background.id
-  createMode.value = 'existing-background'
-  await createProject()
+  await createProjectFromBackground(background)
   ;(event.target as HTMLInputElement).value = ''
+}
+
+async function handleCreateBackgroundDrop(event: DragEvent) {
+  event.preventDefault()
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  const [background] = await importFiles('background', [file])
+  await createProjectFromBackground(background)
 }
 
 async function openProjectFromPath() {
@@ -430,7 +740,7 @@ async function exportCurrentImage() {
   const stage = stageRef.value?.getNode()
   if (!path || !stage) return
   const dataUrl = stage.toDataURL({
-    pixelRatio: 1 / stageScale.value,
+    pixelRatio: Math.max(0.1, Number(exportScale.value) || 1) / stageScale.value,
     mimeType: path.toLowerCase().endsWith('.jpg') || path.toLowerCase().endsWith('.jpeg')
       ? 'image/jpeg'
       : 'image/png',
@@ -486,79 +796,37 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </TabsList>
 
       <TabsContent value="handouts" class="manager-tab-content">
-        <section class="create-panel">
+        <section class="manager-actions">
           <div class="create-header">
-            <Input v-model="newProjectTitle" placeholder="New handout title" />
             <Input v-model="projectPathInput" placeholder="/path/to/existing/project-folder" />
             <Button variant="outline" @click="openProjectFromPath">
               <FolderOpen data-icon="inline-start" />
               Open folder
             </Button>
-          </div>
-
-          <div class="folder-toolbar">
-            <label>
-              Handout folder
-              <select v-model="selectedProjectFolder" class="folder-select">
-                <option value="">Root</option>
-                <option v-for="folder in editor.projectFolders" :key="folder" :value="folder">{{ folder }}</option>
-              </select>
-            </label>
-            <Input v-model="newProjectFolder" placeholder="New folder, e.g. Chapter 1" />
-            <Button variant="outline" @click="createHandoutFolder">New folder</Button>
-          </div>
-
-          <div class="create-options">
-            <button
-              class="create-option"
-              :class="{ selected: createMode === 'existing-background' }"
-              type="button"
-              @click="createMode = 'existing-background'"
-            >
-              <Image />
-              <strong>Use uploaded background</strong>
-              <span>Create a handout at the selected background image size.</span>
-            </button>
-            <label class="create-option" :class="{ selected: createMode === 'upload-background' }">
-              <Upload />
-              <strong>Upload new background</strong>
-              <span>Import an image and immediately create from it.</span>
-              <input class="sr-only" type="file" accept="image/*" @change="handleCreateBackgroundInput" />
-            </label>
-            <button
-              class="create-option"
-              :class="{ selected: createMode === 'blank' }"
-              type="button"
-              @click="createMode = 'blank'"
-            >
-              <Plus />
-              <strong>Blank transparent canvas</strong>
-              <span>Start with a transparent canvas at a custom size.</span>
-            </button>
-          </div>
-
-          <div v-if="createMode === 'existing-background'" class="create-controls">
-            <Select v-model="selectedCreateBackgroundId">
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a background" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="background in editor.library.backgrounds" :key="background.id" :value="background.id">
-                  {{ background.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <Button @click="createProject">Create from background</Button>
-          </div>
-          <div v-if="createMode === 'blank'" class="create-controls">
-            <Input v-model="blankWidth" type="number" placeholder="Width" />
-            <Input v-model="blankHeight" type="number" placeholder="Height" />
-            <Button @click="createProject">Create blank handout</Button>
+            <Button @click="isCreateDialogOpen = true">
+              <Plus data-icon="inline-start" />
+              New handout
+            </Button>
           </div>
         </section>
 
+        <VueFinder
+          id="handout-finder"
+          class="manager-finder"
+          :driver="finderDrivers.handout"
+          :features="finderFeatures"
+          selection-mode="single"
+          selection-filter-type="both"
+          @path-change="(path) => handleFinderPathChange('handout', path)"
+          @file-dclick="(event) => handleFinderFileDoubleClick('handout', event)"
+        />
+
         <div class="project-grid">
           <Card v-for="project in filteredProjects" :key="project.id" class="project-card">
+            <div class="project-thumb">
+              <img v-if="projectPreviewUrl(project)" :src="projectPreviewUrl(project)" alt="" />
+              <span v-else>Transparent</span>
+            </div>
             <CardHeader>
               <CardTitle>{{ project.title }}</CardTitle>
             </CardHeader>
@@ -606,12 +874,23 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           <Input v-model="newBackgroundFolder" placeholder="New folder" />
           <Button variant="outline" @click="createResourceFolder('background')">New folder</Button>
         </div>
+        <VueFinder
+          id="background-finder"
+          class="manager-finder compact-finder"
+          :driver="finderDrivers.background"
+          :features="finderFeatures"
+          selection-mode="single"
+          selection-filter-type="both"
+          @path-change="(path) => handleFinderPathChange('background', path)"
+          @file-dclick="(event) => handleFinderFileDoubleClick('background', event)"
+        />
         <Input v-model="backgroundSearch" placeholder="Search backgrounds or tags" />
         <div class="resource-grid">
           <button v-for="record in recordsForKind('background')" :key="record.id" class="resource-card" type="button">
             <img :src="previewUrl(record)" alt="" />
             <strong>{{ record.name }}</strong>
             <span>{{ record.tags.join(', ') || 'No tags' }}</span>
+            <Button size="sm" @click.stop="createProjectFromBackground(record)">Create handout</Button>
           </button>
         </div>
       </TabsContent>
@@ -648,6 +927,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           <Input v-model="newAssetFolder" placeholder="New folder" />
           <Button variant="outline" @click="createResourceFolder('asset')">New folder</Button>
         </div>
+        <VueFinder
+          id="asset-finder"
+          class="manager-finder compact-finder"
+          :driver="finderDrivers.asset"
+          :features="finderFeatures"
+          selection-mode="single"
+          selection-filter-type="both"
+          @path-change="(path) => handleFinderPathChange('asset', path)"
+          @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
+        />
         <Input v-model="assetSearch" placeholder="Search assets or tags" />
         <div class="resource-grid">
           <button
@@ -704,6 +993,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           <Input v-model="newFontFolder" placeholder="New folder" />
           <Button variant="outline" @click="createResourceFolder('font')">New folder</Button>
         </div>
+        <VueFinder
+          id="font-finder"
+          class="manager-finder compact-finder"
+          :driver="finderDrivers.font"
+          :features="finderFeatures"
+          selection-mode="single"
+          selection-filter-type="both"
+          @path-change="(path) => handleFinderPathChange('font', path)"
+          @file-dclick="(event) => handleFinderFileDoubleClick('font', event)"
+        />
         <Input v-model="fontSearch" placeholder="Search fonts or tags" />
         <div class="font-grid">
           <div v-for="font in recordsForKind('font')" :key="font.id" class="font-card">
@@ -713,6 +1012,60 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         </div>
       </TabsContent>
     </Tabs>
+
+    <Dialog v-model:open="isCreateDialogOpen">
+      <DialogContent class="create-dialog">
+        <DialogHeader>
+          <DialogTitle>Create handout</DialogTitle>
+          <DialogDescription>Start from an uploaded background file or a blank transparent canvas.</DialogDescription>
+        </DialogHeader>
+        <Input v-model="newProjectTitle" placeholder="New handout title" />
+        <div class="create-options">
+          <button
+            class="create-option"
+            :class="{ selected: createMode === 'upload-background' }"
+            type="button"
+            @click="createMode = 'upload-background'"
+          >
+            <Upload />
+            <strong>Upload file</strong>
+            <span>Use the uploaded image size as the canvas size.</span>
+          </button>
+          <button
+            class="create-option"
+            :class="{ selected: createMode === 'blank' }"
+            type="button"
+            @click="createMode = 'blank'"
+          >
+            <Plus />
+            <strong>Blank canvas</strong>
+            <span>Set the canvas size manually.</span>
+          </button>
+        </div>
+
+        <section
+          v-if="createMode === 'upload-background'"
+          class="drop-panel compact-drop"
+          @dragover.prevent
+          @drop="handleCreateBackgroundDrop"
+        >
+          <Image />
+          <strong>Drop a background image here</strong>
+          <span>The image will be imported and used as the handout background.</span>
+          <Button as="label" variant="outline">
+            <Upload data-icon="inline-start" />
+            Upload background
+            <input class="sr-only" type="file" accept="image/*" @change="handleCreateBackgroundInput" />
+          </Button>
+        </section>
+
+        <div v-if="createMode === 'blank'" class="create-controls">
+          <Input v-model="blankWidth" type="number" placeholder="Width" />
+          <Input v-model="blankHeight" type="number" placeholder="Height" />
+          <Button @click="createProject">Create blank handout</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 
   <div v-else class="app-shell">
@@ -765,6 +1118,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             <Input v-model="newAssetFolder" placeholder="New folder" />
             <Button size="sm" variant="outline" @click="createResourceFolder('asset')">New</Button>
           </div>
+          <VueFinder
+            id="editor-asset-finder"
+            class="rail-finder"
+            :driver="finderDrivers.asset"
+            :features="finderFeatures"
+            selection-mode="single"
+            selection-filter-type="both"
+            @path-change="(path) => handleFinderPathChange('asset', path)"
+            @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
+          />
           <Input v-model="assetSearch" placeholder="Search assets or tags" />
           <ScrollArea class="rail-scroll">
             <button
@@ -773,7 +1136,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               class="asset-row"
               type="button"
               draggable="true"
-              @click="editor.addLayerFromAsset(asset)"
+              @click="addAssetToCanvas(asset)"
               @dragstart="startAssetDrag(asset, $event)"
               @dragend="clearAssetDrag"
             >
@@ -822,6 +1185,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             <Input v-model="newFontFolder" placeholder="New folder" />
             <Button size="sm" variant="outline" @click="createResourceFolder('font')">New</Button>
           </div>
+          <VueFinder
+            id="editor-font-finder"
+            class="rail-finder"
+            :driver="finderDrivers.font"
+            :features="finderFeatures"
+            selection-mode="single"
+            selection-filter-type="both"
+            @path-change="(path) => handleFinderPathChange('font', path)"
+            @file-dclick="(event) => handleFinderFileDoubleClick('font', event)"
+          />
           <Input v-model="fontSearch" placeholder="Search fonts or tags" />
           <ScrollArea class="rail-scroll">
             <div v-for="font in filteredFonts" :key="font.id" class="font-row">
@@ -1158,6 +1531,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         <TabsContent value="export" class="rail-tab-content">
           <div class="panel-stack inspector-panel">
           <Input v-model="exportPathInput" placeholder="/path/to/output.png" />
+          <label>
+            Export scale {{ exportScale }}x
+            <Slider
+              :model-value="[exportScale]"
+              :min="0.25"
+              :max="4"
+              :step="0.25"
+              @update:model-value="(value) => (exportScale = (value?.[0] ?? 1) as number)"
+            />
+          </label>
           <Button @click="exportCurrentImage">
             <Download data-icon="inline-start" />
             Export PNG/JPEG

@@ -816,10 +816,17 @@ fn append_debug_log(line: String) -> CommandResult<String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+fn reset_debug_log() {
+    if let Ok(path) = project_root().map(|root| root.join("log.txt")) {
+        let _ = fs::write(path, "");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            reset_debug_log();
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

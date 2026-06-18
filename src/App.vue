@@ -86,6 +86,7 @@ const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' |
   asset: [],
   font: [],
 })
+let previewMaintenanceRunning = false
 
 const { imageElements, imageSize, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
@@ -659,58 +660,61 @@ async function exportSelectedHandout() {
 }
 
 async function ensureProjectPreviews() {
+  if (previewMaintenanceRunning) return
+  previewMaintenanceRunning = true
   let generated = 0
-  for (const project of editor.projects) {
-    logHandoutPreview('project preview status', {
-      projectId: project.id,
-      title: project.title,
-      previewPath: project.previewPath,
-      previewSizeBytes: project.previewSizeBytes,
-      backgroundAssetId: project.backgroundAssetId,
-    })
-    const shouldRegeneratePreview = !project.previewPath || Number(project.previewSizeBytes || 0) > PREVIEW_TARGET_BYTES
-    if (!shouldRegeneratePreview) continue
-    try {
-      logHandoutPreview('generating preview', {
-        projectId: project.id,
-        title: project.title,
-        currentPreviewPath: project.previewPath,
-        currentPreviewSizeBytes: project.previewSizeBytes,
-      })
-      const payload = await openManagedProject(project.id)
-      const dataUrl = await renderHandoutPreviewToDataUrl(payload.document, editor.library, imageElements)
-      const previewPath = await saveProjectPreview(project.id, dataUrl)
-      generated += 1
-      logHandoutPreview('saved missing preview', {
-        projectId: project.id,
-        previewPath,
-        dataUrlLength: dataUrl.length,
-        previewBytes: dataUrlByteSize(dataUrl),
-      })
-    } catch (error) {
-      logHandoutPreview('failed to generate preview', {
-        projectId: project.id,
-        title: project.title,
-        error,
-      })
+  try {
+    for (const project of editor.projects) {
+      const shouldRegeneratePreview = !project.previewPath || Number(project.previewSizeBytes || 0) > PREVIEW_TARGET_BYTES
+      if (!shouldRegeneratePreview) continue
+      try {
+        logHandoutPreview('generating preview', {
+          projectId: project.id,
+          title: project.title,
+          currentPreviewPath: project.previewPath,
+          currentPreviewSizeBytes: project.previewSizeBytes,
+        })
+        const payload = await openManagedProject(project.id)
+        const dataUrl = await renderHandoutPreviewToDataUrl(payload.document, editor.library, imageElements)
+        const previewPath = await saveProjectPreview(project.id, dataUrl)
+        generated += 1
+        logHandoutPreview('saved preview', {
+          projectId: project.id,
+          previewPath,
+          previewBytes: dataUrlByteSize(dataUrl),
+        })
+      } catch (error) {
+        logHandoutPreview('failed to generate preview', {
+          projectId: project.id,
+          title: project.title,
+          error,
+        })
+      }
     }
+    if (generated > 0) {
+      logHandoutPreview('preview generation complete', { generated })
+      await editor.refreshProjects()
+    }
+  } finally {
+    previewMaintenanceRunning = false
   }
-  logHandoutPreview('preview generation complete', { generated })
-  await editor.refreshProjects()
 }
 
 onMounted(async () => {
   try {
     resetKonvaDragButtons()
+    void appendDebugLog('app', 'boot start')
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
     syncImages(editor.library)
-    await ensureProjectPreviews()
     window.addEventListener('keydown', handleGlobalKeydown)
     resizeStageViewport()
     window.addEventListener('resize', resizeStageViewport)
+    isBooting.value = false
+    await nextTick()
+    void ensureProjectPreviews()
   } catch (error) {
     editor.status = String(error)
-  } finally {
+    void appendDebugLog('app', 'boot failed', serializableLogData({ error }))
     isBooting.value = false
   }
 })

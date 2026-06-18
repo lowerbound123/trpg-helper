@@ -332,11 +332,38 @@ body,
   color: hsl(var(--muted-foreground));
 }
 
-.finder-status-bar span {
+.finder-status-main {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.handout-status-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.finder-status-bar span,
+.finder-preview-path {
   overflow: hidden;
   min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.finder-preview-path {
+  display: block;
+  padding: 4px 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
 }
 
 button,

@@ -648,6 +648,23 @@ function selectedHandoutStatus() {
   return project ? `Selected: ${project.title}` : 'Select a handout'
 }
 
+function formatPreviewBytes(bytes?: number | null) {
+  if (!bytes) return 'size unknown'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+function selectedHandoutPreviewStatus() {
+  const selected = selectedFinderItems.handout
+  if (selected.length === 0) return 'Preview: no handout selected'
+  if (selected.length > 1) return 'Preview: select one handout to inspect preview path'
+  const project = selectedHandoutProject()
+  if (!project) return 'Preview: selected entry is not a known handout project'
+  if (!project.previewPath) return `Preview: missing · projectId=${project.id}`
+  return `Preview: ${project.previewPath} · ${formatPreviewBytes(project.previewSizeBytes)}`
+}
+
 function isSelectedHandoutExporting() {
   const project = selectedHandoutProject()
   return Boolean(project && exportingHandoutIds.has(project.id))
@@ -789,16 +806,21 @@ watch(
           @file-dclick="(event) => handleFinderFileDoubleClick('handout', event)"
         >
           <template #status-bar="{ count }">
-            <div class="finder-status-bar">
-              <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-              <Button
-                size="sm"
-                :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
-                @click="exportSelectedHandout"
-              >
-                <Save data-icon="inline-start" />
-                Export PNG
-              </Button>
+            <div class="finder-status-bar handout-status-bar">
+              <div class="finder-status-main">
+                <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
+                <Button
+                  size="sm"
+                  :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
+                  @click="exportSelectedHandout"
+                >
+                  <Save data-icon="inline-start" />
+                  Export PNG
+                </Button>
+              </div>
+              <code class="finder-preview-path" :title="selectedHandoutPreviewStatus()">
+                {{ selectedHandoutPreviewStatus() }}
+              </code>
             </div>
           </template>
         </VueFinder>

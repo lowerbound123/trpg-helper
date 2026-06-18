@@ -5,7 +5,6 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
-  Download,
   Eye,
   EyeOff,
   FolderOpen,
@@ -19,39 +18,31 @@ import {
   Undo2,
   Upload,
 } from '@lucide/vue'
-import { VueFinder, type DirEntry, type Driver, type FsData } from 'vuefinder'
+import { VueFinder } from 'vuefinder'
 import 'vuefinder/dist/vuefinder.css'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import RightInspector from '@/components/editor/RightInspector.vue'
+import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
-import { exportImage, fileUrl, readFileDataUrl, type LibraryRecord } from '@/lib/backend'
+import { useFinderManagement, filterRecords, finderFeatures, folderMatches } from '@/composables/useFinderManagement'
+import { useResourceImages } from '@/composables/useResourceImages'
+import { exportImage, type LibraryRecord } from '@/lib/backend'
 import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; cancelBubble?: boolean }
-type FinderKind = 'handout' | 'background' | 'asset' | 'font'
 
 const editor = useEditorStore()
 const stageRef = ref<{ getNode: () => Konva.Stage }>()
 const transformerRef = ref<{ getNode: () => Konva.Transformer }>()
 const layerNodeRefs = reactive<Record<string, NodeRef | undefined>>({})
-const imageElements = reactive<Record<string, HTMLImageElement>>({})
 
 const newProjectTitle = ref('Untitled handout')
 const createMode = ref<'blank' | 'upload-background'>('blank')
@@ -74,38 +65,12 @@ const selectedFontFolder = ref('')
 const newBackgroundFolder = ref('')
 const newAssetFolder = ref('')
 const newFontFolder = ref('')
-const resourcePreviewUrls = reactive<Record<string, string>>({})
 const isDraggingBackground = ref(false)
 const isDraggingAsset = ref(false)
 const isDraggingFont = ref(false)
 const draggedAssetId = ref('')
 
-const finderStorages: Record<FinderKind, string> = {
-  handout: 'handouts',
-  background: 'backgrounds',
-  asset: 'assets',
-  font: 'fonts',
-}
-const finderFeatures = {
-  archive: false,
-  copy: false,
-  delete: false,
-  download: false,
-  edit: false,
-  fullscreen: false,
-  history: false,
-  language: false,
-  move: false,
-  newfile: false,
-  newfolder: true,
-  pinned: false,
-  preview: true,
-  rename: true,
-  search: true,
-  theme: false,
-  unarchive: false,
-  upload: false,
-}
+const { imageElements, imageSize, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
 const stageScale = computed(() => {
   const maxWidth = 920
@@ -137,293 +102,22 @@ const filteredAssets = computed(() =>
 const filteredFonts = computed(() =>
   filterRecords(editor.library.fonts, fontSearch.value, selectedFontFolder.value),
 )
-const finderDrivers = computed<Record<FinderKind, Driver>>(() => ({
-  handout: createFinderDriver('handout'),
-  background: createFinderDriver('background'),
-  asset: createFinderDriver('asset'),
-  font: createFinderDriver('font'),
-}))
-
-function folderMatches(recordFolder: string | undefined, selectedFolder: string) {
-  return (recordFolder || '') === selectedFolder
-}
-
-function filterRecords(records: LibraryRecord[], queryText: string, selectedFolder: string) {
-  const query = queryText.trim().toLowerCase()
-  const scoped = records.filter((record) => folderMatches(record.folder, selectedFolder))
-  if (!query) return scoped
-  return scoped.filter((record) =>
-    [record.name, ...record.tags].some((part) => part.toLowerCase().includes(query)),
-  )
-}
-
-function foldersForKind(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') return editor.library.backgroundFolders
-  if (kind === 'asset') return editor.library.assetFolders
-  return editor.library.fontFolders
-}
-
-function projectPreviewUrl(project: { backgroundAssetId?: string | null }) {
-  const background = editor.resolveBackground(project.backgroundAssetId || undefined)
-  return background ? previewUrl(background) : ''
-}
-
-function allFoldersForKind(kind: FinderKind) {
-  if (kind === 'handout') return editor.projectFolders
-  return foldersForKind(kind)
-}
-
-function selectedFolderForFinder(kind: FinderKind) {
-  if (kind === 'handout') return selectedProjectFolder.value
-  return folderValue(kind)
-}
-
-function setSelectedFolderForFinder(kind: FinderKind, folder: string) {
-  if (kind === 'handout') selectedProjectFolder.value = folder
-  else setFolderValue(kind, folder)
-}
-
-function finderRoot(kind: FinderKind) {
-  return `${finderStorages[kind]}://`
-}
-
-function normalizeFinderFolder(value?: string) {
-  if (!value) return ''
-  return value.replace(/^[^:]+:\/\//, '').replace(/^\/+|\/+$/g, '')
-}
-
-function finderPath(kind: FinderKind, folder = '', id?: string) {
-  const root = finderRoot(kind)
-  const normalized = normalizeFinderFolder(folder)
-  const parts = normalized ? [normalized] : []
-  if (id) parts.push(`__${kind}-${id}`)
-  return `${root}${parts.join('/')}`
-}
-
-function finderParentPath(kind: FinderKind, folder = '') {
-  const normalized = normalizeFinderFolder(folder)
-  return normalized ? `${finderRoot(kind)}${normalized}` : finderRoot(kind)
-}
-
-function entryBase(path: string) {
-  return normalizeFinderFolder(path).split('/').filter(Boolean).at(-1) || ''
-}
-
-function entryFolder(path: string) {
-  const folder = normalizeFinderFolder(path)
-  if (!folder) return ''
-  return folder.split('/').slice(0, -1).join('/')
-}
-
-function extensionForName(name: string) {
-  const extension = name.split('.').at(-1) || ''
-  return extension === name ? '' : extension
-}
-
-function makeDirEntry(kind: FinderKind, parent: string, folderPath: string, basename: string): DirEntry {
-  return {
-    dir: finderParentPath(kind, parent),
-    basename,
-    extension: '',
-    path: finderParentPath(kind, folderPath),
-    storage: finderStorages[kind],
-    type: 'dir',
-    file_size: null,
-    last_modified: null,
-    mime_type: null,
-    visibility: 'public',
-  }
-}
-
-function makeFileEntry(
-  kind: FinderKind,
-  folder: string,
-  id: string,
-  name: string,
-  mediaType: string,
-  updatedAt: string,
-  preview?: string,
-): DirEntry {
-  return {
-    dir: finderParentPath(kind, folder),
-    basename: name,
-    extension: extensionForName(name),
-    path: finderPath(kind, folder, id),
-    storage: finderStorages[kind],
-    type: 'file',
-    file_size: null,
-    last_modified: Date.parse(updatedAt) || null,
-    mime_type: mediaType,
-    visibility: 'public',
-    previewUrl: preview,
-  }
-}
-
-function finderFoldersAt(kind: FinderKind, currentFolder: string) {
-  const folders = allFoldersForKind(kind)
-  const seen = new Set<string>()
-  return folders
-    .map(normalizeFinderFolder)
-    .filter(Boolean)
-    .flatMap((folder) => {
-      const parent = entryFolder(folder)
-      if (parent !== currentFolder) return []
-      const basename = entryBase(folder)
-      if (seen.has(basename)) return []
-      seen.add(basename)
-      return [makeDirEntry(kind, currentFolder, folder, basename)]
-    })
-}
-
-function finderFilesAt(kind: FinderKind, currentFolder: string) {
-  if (kind === 'handout') {
-    return editor.latestProjects
-      .filter((project) => folderMatches(project.folder, currentFolder))
-      .map((project) =>
-        makeFileEntry(
-          kind,
-          project.folder,
-          project.id,
-          project.title,
-          'application/x-handout-project',
-          project.updatedAt,
-          projectPreviewUrl(project),
-        ),
-      )
-  }
-
-  return recordsForKindWithoutSearch(kind)
-    .filter((record) => folderMatches(record.folder, currentFolder))
-    .map((record) =>
-      makeFileEntry(kind, record.folder, record.id, record.name, record.mediaType, record.updatedAt, previewUrl(record)),
-    )
-}
-
-function recordsForKindWithoutSearch(kind: Exclude<FinderKind, 'handout'>) {
-  if (kind === 'background') return editor.library.backgrounds
-  if (kind === 'asset') return editor.library.assets
-  return editor.library.fonts
-}
-
-function finderData(kind: FinderKind, path?: string): FsData {
-  const folder = normalizeFinderFolder(path)
-  return {
-    storages: [finderStorages[kind]],
-    dirname: finderParentPath(kind, folder),
-    read_only: false,
-    files: [...finderFoldersAt(kind, folder), ...finderFilesAt(kind, folder)],
-  }
-}
-
-function finderResult(kind: FinderKind, path?: string) {
-  const data = finderData(kind, path)
-  return {
-    ...data,
-    read_only: Boolean(data.read_only),
-  }
-}
-
-function idFromFinderPath(kind: FinderKind, path: string) {
-  return entryBase(path).replace(`__${kind}-`, '')
-}
-
-async function createFolderFromFinder(kind: FinderKind, parentPath: string, name: string) {
-  const parent = normalizeFinderFolder(parentPath)
-  const folder = [parent, name.trim()].filter(Boolean).join('/')
-  if (kind === 'handout') await editor.addProjectFolder(folder)
-  else await editor.createResourceFolder(kind, folder)
-}
-
-async function renameFromFinder(kind: FinderKind, params: { path: string; item: string; name: string }) {
-  const itemPath = params.item.includes('://')
-    ? params.item
-    : `${finderParentPath(kind, normalizeFinderFolder(params.path)).replace(/\/$/, '')}/${params.item}`
-  const basename = entryBase(itemPath)
-  if (basename.startsWith(`__${kind}-`)) {
-    const id = idFromFinderPath(kind, itemPath)
-    if (kind === 'handout') await editor.renameProject(id, params.name)
-    else await editor.renameResource(kind, id, params.name)
-    return
-  }
-
-  const oldFolder = normalizeFinderFolder(itemPath)
-  const newFolder = [entryFolder(oldFolder), params.name.trim()].filter(Boolean).join('/')
-  if (kind === 'handout') await editor.renameProjectFolderPath(oldFolder, newFolder)
-  else await editor.renameResourceFolder(kind, oldFolder, newFolder)
-  if (selectedFolderForFinder(kind) === oldFolder) setSelectedFolderForFinder(kind, newFolder)
-}
-
-function createFinderDriver(kind: FinderKind): Driver {
-  const unsupported = async () => {
-    throw new Error('This file operation is not supported in the handout library yet.')
-  }
-
-  return {
-    async list(params) {
-      return finderData(kind, params?.path)
-    },
-    async createFolder(params) {
-      await createFolderFromFinder(kind, params.path, params.name)
-      return finderResult(kind, params.path)
-    },
-    async rename(params) {
-      await renameFromFinder(kind, params)
-      return finderResult(kind, params.path)
-    },
-    async delete() {
-      return unsupported()
-    },
-    async copy() {
-      return unsupported()
-    },
-    async move() {
-      return unsupported()
-    },
-    async archive() {
-      return unsupported()
-    },
-    async unarchive() {
-      return unsupported()
-    },
-    async createFile() {
-      return unsupported()
-    },
-    async getContent() {
-      return { content: '' }
-    },
-    getPreviewUrl(params) {
-      const id = idFromFinderPath(kind, params.path)
-      if (kind === 'handout') return projectPreviewUrl({ backgroundAssetId: editor.projects.find((p) => p.id === id)?.backgroundAssetId })
-      const record = recordsForKindWithoutSearch(kind).find((item) => item.id === id)
-      return record ? previewUrl(record) : ''
-    },
-    getDownloadUrl() {
-      return ''
-    },
-    async search(params) {
-      const query = params.filter.trim().toLowerCase()
-      return finderData(kind, params.path).files.filter((file) => file.basename.toLowerCase().includes(query))
-    },
-    async save() {
-      return ''
-    },
-  }
-}
-
-function handleFinderPathChange(kind: FinderKind, path: string) {
-  setSelectedFolderForFinder(kind, normalizeFinderFolder(path))
-}
-
-function handleFinderFileDoubleClick(kind: FinderKind, event: { item: DirEntry; preventDefault: () => void }) {
-  if (event.item.type !== 'file') return
-  event.preventDefault()
-  const id = idFromFinderPath(kind, event.item.path)
-  if (kind === 'handout') void editor.openManagedHandout(id)
-  if (kind === 'asset') {
-    const asset = editor.resolveAsset(id)
-    if (asset) void addAssetToCanvas(asset)
-  }
-}
+const {
+  finderDrivers,
+  foldersForKind,
+  handleFinderFileDoubleClick,
+  handleFinderPathChange,
+  projectPreviewUrl,
+} = useFinderManagement(editor, {
+  addAssetToCanvas,
+  previewUrl,
+  selectedFolders: {
+    handout: selectedProjectFolder,
+    background: selectedBackgroundFolder,
+    asset: selectedAssetFolder,
+    font: selectedFontFolder,
+  },
+})
 
 function folderValue(kind: 'background' | 'asset' | 'font') {
   if (kind === 'background') return selectedBackgroundFolder.value
@@ -475,19 +169,6 @@ function clearTags(kind: 'background' | 'asset' | 'font') {
   if (kind === 'font') fontTags.value = ''
 }
 
-function previewUrl(record: LibraryRecord) {
-  return resourcePreviewUrls[record.id] || fileUrl(record.path)
-}
-
-async function imageSize(record: LibraryRecord) {
-  await loadImage(record)
-  const image = imageElements[record.id]
-  return {
-    width: image?.naturalWidth || image?.width || blankWidth.value,
-    height: image?.naturalHeight || image?.height || blankHeight.value,
-  }
-}
-
 function draggingRef(kind: 'background' | 'asset' | 'font') {
   if (kind === 'background') return isDraggingBackground
   if (kind === 'asset') return isDraggingAsset
@@ -502,23 +183,6 @@ function layerName(layer: HandoutLayer) {
 function imageForLayer(layer: ImageLayer) {
   const asset = editor.resolveAsset(layer.assetId)
   return asset ? imageElements[asset.id] : undefined
-}
-
-async function loadImage(record: LibraryRecord) {
-  if (imageElements[record.id]) return imageElements[record.id]
-  const image = new window.Image()
-  image.crossOrigin = 'anonymous'
-  const src = await readFileDataUrl(record.path, record.mediaType)
-  resourcePreviewUrls[record.id] = src
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => {
-      imageElements[record.id] = image
-      resolve()
-    }
-    image.onerror = () => reject(new Error(`Failed to load ${record.name}`))
-    image.src = src
-  })
-  return image
 }
 
 function importFolderForKind(kind: 'background' | 'asset' | 'font') {
@@ -570,10 +234,6 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   if (!editor.selectedLayerId) return
   event.preventDefault()
   deleteLayer()
-}
-
-function syncImages() {
-  void Promise.all([...editor.library.backgrounds, ...editor.library.assets].map((record) => loadImage(record)))
 }
 
 function layerConfig(layer: HandoutLayer) {
@@ -668,7 +328,7 @@ async function importFiles(kind: 'background' | 'asset' | 'font', files: FileLis
     if (kind === 'font') imported.push(await editor.importFontFile(file, tagsForKind(kind), importFolderForKind(kind)))
   }
   clearTags(kind)
-  syncImages()
+  syncImages(editor.library)
   return imported
 }
 
@@ -749,18 +409,10 @@ async function exportCurrentImage() {
   editor.status = `Exported image to ${path}`
 }
 
-function setFont(fontId: string) {
-  const font = editor.resolveFont(fontId)
-  editor.patchSelectedLayer({
-    fontId,
-    fontFamily: font?.name.replace(/\.[^.]+$/, '') || 'Inter',
-  })
-}
-
 onMounted(async () => {
   try {
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
-    syncImages()
+    syncImages(editor.library)
     window.addEventListener('keydown', handleGlobalKeydown)
   } catch (error) {
     editor.status = String(error)
@@ -771,8 +423,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
-watch(() => editor.library.backgrounds, syncImages, { deep: true })
-watch(() => editor.library.assets, syncImages, { deep: true })
+watch(() => editor.library.backgrounds, () => syncImages(editor.library), { deep: true })
+watch(() => editor.library.assets, () => syncImages(editor.library), { deep: true })
 watch(() => editor.selectedLayerId, updateTransformer)
 watch(() => editor.document.layers, updateTransformer, { deep: true })
 </script>
@@ -1013,59 +665,16 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </TabsContent>
     </Tabs>
 
-    <Dialog v-model:open="isCreateDialogOpen">
-      <DialogContent class="create-dialog">
-        <DialogHeader>
-          <DialogTitle>Create handout</DialogTitle>
-          <DialogDescription>Start from an uploaded background file or a blank transparent canvas.</DialogDescription>
-        </DialogHeader>
-        <Input v-model="newProjectTitle" placeholder="New handout title" />
-        <div class="create-options">
-          <button
-            class="create-option"
-            :class="{ selected: createMode === 'upload-background' }"
-            type="button"
-            @click="createMode = 'upload-background'"
-          >
-            <Upload />
-            <strong>Upload file</strong>
-            <span>Use the uploaded image size as the canvas size.</span>
-          </button>
-          <button
-            class="create-option"
-            :class="{ selected: createMode === 'blank' }"
-            type="button"
-            @click="createMode = 'blank'"
-          >
-            <Plus />
-            <strong>Blank canvas</strong>
-            <span>Set the canvas size manually.</span>
-          </button>
-        </div>
-
-        <section
-          v-if="createMode === 'upload-background'"
-          class="drop-panel compact-drop"
-          @dragover.prevent
-          @drop="handleCreateBackgroundDrop"
-        >
-          <Image />
-          <strong>Drop a background image here</strong>
-          <span>The image will be imported and used as the handout background.</span>
-          <Button as="label" variant="outline">
-            <Upload data-icon="inline-start" />
-            Upload background
-            <input class="sr-only" type="file" accept="image/*" @change="handleCreateBackgroundInput" />
-          </Button>
-        </section>
-
-        <div v-if="createMode === 'blank'" class="create-controls">
-          <Input v-model="blankWidth" type="number" placeholder="Width" />
-          <Input v-model="blankHeight" type="number" placeholder="Height" />
-          <Button @click="createProject">Create blank handout</Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <CreateHandoutDialog
+      v-model:open="isCreateDialogOpen"
+      v-model:title="newProjectTitle"
+      v-model:mode="createMode"
+      v-model:width="blankWidth"
+      v-model:height="blankHeight"
+      @blank="createProject"
+      @background-drop="handleCreateBackgroundDrop"
+      @background-input="handleCreateBackgroundInput"
+    />
   </div>
 
   <div v-else class="app-shell">
@@ -1353,201 +962,10 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </section>
     </main>
 
-    <aside class="right-rail">
-      <Tabs default-value="inspect" class="rail-tabs">
-        <TabsList class="grid grid-cols-3">
-          <TabsTrigger value="inspect">Inspect</TabsTrigger>
-          <TabsTrigger value="document">Doc Type</TabsTrigger>
-          <TabsTrigger value="export">Export</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="inspect" class="rail-tab-content">
-          <div v-if="editor.selectedLayer" class="panel-stack inspector-panel">
-          <label>
-            Name
-            <Input :model-value="editor.selectedLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
-          </label>
-          <div class="two-col">
-            <label>
-              X
-              <Input type="number" :model-value="editor.selectedLayer.x" @update:model-value="(value) => editor.patchSelectedLayer({ x: Number(value) || 0 })" />
-            </label>
-            <label>
-              Y
-              <Input type="number" :model-value="editor.selectedLayer.y" @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })" />
-            </label>
-          </div>
-          <div class="two-col">
-            <label>
-              Width
-              <Input type="number" :model-value="editor.selectedLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
-            </label>
-            <label>
-              Height
-              <Input type="number" :model-value="editor.selectedLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
-            </label>
-          </div>
-          <label>
-            Opacity {{ Math.round(editor.selectedLayer.opacity * 100) }}%
-            <Slider
-              :model-value="[editor.selectedLayer.opacity * 100]"
-              :max="100"
-              :step="1"
-              @update:model-value="(value) => editor.patchSelectedLayer({ opacity: ((value?.[0] ?? 100) as number) / 100 })"
-            />
-          </label>
-          <label>
-            Blend mode
-            <Select :model-value="editor.selectedLayer.blendMode" @update:model-value="(value) => editor.patchSelectedLayer({ blendMode: value as any })">
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="source-over">Normal</SelectItem>
-                <SelectItem value="multiply">Multiply</SelectItem>
-                <SelectItem value="screen">Screen</SelectItem>
-                <SelectItem value="overlay">Overlay</SelectItem>
-                <SelectItem value="darken">Darken</SelectItem>
-                <SelectItem value="lighten">Lighten</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <template v-if="isTextLayer(editor.selectedLayer)">
-            <label>
-              Text
-              <Textarea :model-value="editor.selectedLayer.text" @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })" />
-            </label>
-            <div class="two-col">
-              <label>
-                Font size
-                <Input type="number" :model-value="editor.selectedLayer.fontSize" @update:model-value="(value) => editor.patchSelectedLayer({ fontSize: Number(value) || 1 })" />
-              </label>
-              <label>
-                Color
-                <Input type="color" :model-value="editor.selectedLayer.fill" @update:model-value="(value) => editor.patchSelectedLayer({ fill: String(value) })" />
-              </label>
-            </div>
-            <label>
-              Font
-              <Select :model-value="editor.selectedLayer.fontId" @update:model-value="(value) => setFont(String(value))">
-                <SelectTrigger><SelectValue :placeholder="editor.selectedLayer.fontFamily" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="font in editor.library.fonts" :key="font.id" :value="font.id">
-                    {{ font.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-          </template>
-          <Separator />
-          <div class="effect-grid">
-            <label>
-              Blur {{ editor.selectedLayer.effects.blur }}
-              <Slider
-                :model-value="[editor.selectedLayer.effects.blur]"
-                :max="40"
-                :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, blur: (value?.[0] ?? 0) as number } })"
-              />
-            </label>
-            <label>
-              Brightness {{ editor.selectedLayer.effects.brightness }}
-              <Slider
-                :model-value="[editor.selectedLayer.effects.brightness]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, brightness: (value?.[0] ?? 0) as number } })"
-              />
-            </label>
-            <label>
-              Contrast {{ editor.selectedLayer.effects.contrast }}
-              <Slider
-                :model-value="[editor.selectedLayer.effects.contrast]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, contrast: (value?.[0] ?? 0) as number } })"
-              />
-            </label>
-            <label>
-              Saturation {{ editor.selectedLayer.effects.saturation }}
-              <Slider
-                :model-value="[editor.selectedLayer.effects.saturation]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="(value) => editor.patchSelectedLayer({ effects: { ...editor.selectedLayer!.effects, saturation: (value?.[0] ?? 0) as number } })"
-              />
-            </label>
-          </div>
-          <div class="danger-row">
-            <Button variant="outline" @click="editor.patchSelectedLayer({ visible: !editor.selectedLayer.visible })">
-              <Eye data-icon="inline-start" />
-              Toggle
-            </Button>
-            <Button variant="destructive" @click="deleteLayer()">
-              <Trash2 data-icon="inline-start" />
-              Delete
-            </Button>
-          </div>
-          </div>
-          <div v-else class="empty-inspector">Select a layer on the canvas or in the layer list.</div>
-        </TabsContent>
-
-        <TabsContent value="document" class="rail-tab-content">
-          <div class="panel-stack inspector-panel">
-            <label>
-              Title
-              <Input :model-value="editor.document.title" @update:model-value="(value) => editor.renameDocument(String(value))" />
-            </label>
-            <div class="two-col">
-              <label>
-                Width
-                <Input
-                  type="number"
-                  :model-value="editor.document.canvas.width"
-                  @update:model-value="(value) => editor.patchCanvas({ width: Number(value) || 1 })"
-                />
-              </label>
-              <label>
-                Height
-                <Input
-                  type="number"
-                  :model-value="editor.document.canvas.height"
-                  @update:model-value="(value) => editor.patchCanvas({ height: Number(value) || 1 })"
-                />
-              </label>
-            </div>
-            <div class="document-summary">
-              <span>Background</span>
-              <strong>{{ backgroundAsset?.name || 'Transparent canvas' }}</strong>
-            </div>
-            <div class="document-summary">
-              <span>Layers</span>
-              <strong>{{ editor.document.layers.length }}</strong>
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="export" class="rail-tab-content">
-          <div class="panel-stack inspector-panel">
-          <Input v-model="exportPathInput" placeholder="/path/to/output.png" />
-          <label>
-            Export scale {{ exportScale }}x
-            <Slider
-              :model-value="[exportScale]"
-              :min="0.25"
-              :max="4"
-              :step="0.25"
-              @update:model-value="(value) => (exportScale = (value?.[0] ?? 1) as number)"
-            />
-          </label>
-          <Button @click="exportCurrentImage">
-            <Download data-icon="inline-start" />
-            Export PNG/JPEG
-          </Button>
-          </div>
-        </TabsContent>
-      </Tabs>
-    </aside>
+    <RightInspector
+      v-model:export-path="exportPathInput"
+      v-model:export-scale="exportScale"
+      @export-image="exportCurrentImage"
+    />
   </div>
 </template>

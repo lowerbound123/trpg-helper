@@ -18,19 +18,18 @@ import {
   Undo2,
   Upload,
 } from '@lucide/vue'
-import { VueFinder } from 'vuefinder'
+import { VueFinder, type DirEntry } from 'vuefinder'
 import 'vuefinder/dist/vuefinder.css'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import RightInspector from '@/components/editor/RightInspector.vue'
 import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useFinderManagement, filterRecords, finderFeatures, folderMatches } from '@/composables/useFinderManagement'
+import { useFinderManagement, filterRecords, finderFeatures } from '@/composables/useFinderManagement'
 import { useResourceImages } from '@/composables/useResourceImages'
 import { exportImage, type LibraryRecord } from '@/lib/backend'
 import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
@@ -55,7 +54,6 @@ const exportScale = ref(1)
 const backgroundTags = ref('')
 const assetTags = ref('')
 const fontTags = ref('')
-const backgroundSearch = ref('')
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
@@ -69,6 +67,12 @@ const isDraggingBackground = ref(false)
 const isDraggingAsset = ref(false)
 const isDraggingFont = ref(false)
 const draggedAssetId = ref('')
+const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>({
+  handout: [],
+  background: [],
+  asset: [],
+  font: [],
+})
 
 const { imageElements, imageSize, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
@@ -85,17 +89,14 @@ const stageConfig = computed(() => ({
   scaleY: stageScale.value,
 }))
 
-const backgroundAsset = computed(() => editor.resolveBackground(editor.document.canvas.backgroundAssetId))
+const backgroundAsset = computed(() =>
+  editor.resolveBackground(editor.document.canvas.backgroundAssetId)
+    || editor.resolveAsset(editor.document.canvas.backgroundAssetId),
+)
 const backgroundImage = computed(() =>
   backgroundAsset.value ? imageElements[backgroundAsset.value.id] : undefined,
 )
 
-const filteredProjects = computed(() =>
-  editor.latestProjects.filter((project) => folderMatches(project.folder, selectedProjectFolder.value)),
-)
-const filteredBackgrounds = computed(() =>
-  filterRecords(editor.library.backgrounds, backgroundSearch.value, selectedBackgroundFolder.value),
-)
 const filteredAssets = computed(() =>
   filterRecords(editor.library.assets, assetSearch.value, selectedAssetFolder.value),
 )
@@ -107,9 +108,11 @@ const {
   foldersForKind,
   handleFinderFileDoubleClick,
   handleFinderPathChange,
-  projectPreviewUrl,
+  imageHandoutContextMenuItems,
+  imageRecordFromFinderEntry,
 } = useFinderManagement(editor, {
   addAssetToCanvas,
+  createHandoutFromImageRecord,
   previewUrl,
   selectedFolders: {
     handout: selectedProjectFolder,
@@ -149,12 +152,6 @@ async function createResourceFolder(kind: 'background' | 'asset' | 'font') {
   await editor.createResourceFolder(kind, folder)
   setFolderValue(kind, folder)
   clearFolderInput(kind)
-}
-
-function recordsForKind(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') return filteredBackgrounds.value
-  if (kind === 'asset') return filteredAssets.value
-  return filteredFonts.value
 }
 
 function tagsForKind(kind: 'background' | 'asset' | 'font') {
@@ -370,6 +367,45 @@ async function createProjectFromBackground(background: LibraryRecord) {
   isCreateDialogOpen.value = false
 }
 
+function handoutTitleFromRecord(record: LibraryRecord) {
+  const name = record.name || record.fileName || 'Untitled handout'
+  return name.replace(/\.[^.]+$/, '') || name
+}
+
+async function createHandoutFromImageRecord(_kind: 'background' | 'asset', record: LibraryRecord) {
+  const size = await imageSize(record)
+  await editor.createManagedHandout(handoutTitleFromRecord(record), {
+    width: size.width,
+    height: size.height,
+    backgroundId: record.id,
+    folder: selectedProjectFolder.value,
+  })
+}
+
+function selectedImageRecord(kind: 'background' | 'asset') {
+  const selected = selectedFinderItems[kind]
+  if (selected.length !== 1) return undefined
+  return imageRecordFromFinderEntry(kind, selected[0])
+}
+
+function selectedImageStatus(kind: 'background' | 'asset') {
+  const selected = selectedFinderItems[kind]
+  if (selected.length === 0) return 'No image selected'
+  if (selected.length > 1) return `${selected.length} items selected`
+  const record = selectedImageRecord(kind)
+  return record ? `Selected: ${record.name}` : 'Select an image file'
+}
+
+async function createHandoutFromFinderImage(kind: 'background' | 'asset') {
+  const record = selectedImageRecord(kind)
+  if (!record) return
+  await createHandoutFromImageRecord(kind, record)
+}
+
+function handleFinderSelect(kind: 'handout' | 'background' | 'asset' | 'font', items: DirEntry[]) {
+  selectedFinderItems[kind] = items
+}
+
 async function handleCreateBackgroundInput(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
@@ -469,29 +505,10 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           :features="finderFeatures"
           selection-mode="single"
           selection-filter-type="both"
+          @select="(items) => handleFinderSelect('handout', items)"
           @path-change="(path) => handleFinderPathChange('handout', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('handout', event)"
         />
-
-        <div class="project-grid">
-          <Card v-for="project in filteredProjects" :key="project.id" class="project-card">
-            <div class="project-thumb">
-              <img v-if="projectPreviewUrl(project)" :src="projectPreviewUrl(project)" alt="" />
-              <span v-else>Transparent</span>
-            </div>
-            <CardHeader>
-              <CardTitle>{{ project.title }}</CardTitle>
-            </CardHeader>
-            <CardContent class="project-card-content">
-              <Badge variant="outline">{{ project.folder || 'Root' }}</Badge>
-              <span>{{ new Date(project.updatedAt).toLocaleString() }}</span>
-              <Button @click="editor.openManagedHandout(project.id)">Open editor</Button>
-            </CardContent>
-          </Card>
-          <Card v-if="!filteredProjects.length" class="empty-card">
-            <CardContent>No handout projects yet.</CardContent>
-          </Card>
-        </div>
       </TabsContent>
 
       <TabsContent value="backgrounds" class="manager-tab-content">
@@ -531,20 +548,27 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           class="manager-finder compact-finder"
           :driver="finderDrivers.background"
           :features="finderFeatures"
+          :context-menu-items="imageHandoutContextMenuItems.background"
           selection-mode="single"
           selection-filter-type="both"
+          @select="(items) => handleFinderSelect('background', items)"
           @path-change="(path) => handleFinderPathChange('background', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('background', event)"
-        />
-        <Input v-model="backgroundSearch" placeholder="Search backgrounds or tags" />
-        <div class="resource-grid">
-          <button v-for="record in recordsForKind('background')" :key="record.id" class="resource-card" type="button">
-            <img :src="previewUrl(record)" alt="" />
-            <strong>{{ record.name }}</strong>
-            <span>{{ record.tags.join(', ') || 'No tags' }}</span>
-            <Button size="sm" @click.stop="createProjectFromBackground(record)">Create handout</Button>
-          </button>
-        </div>
+        >
+          <template #status-bar="{ count }">
+            <div class="finder-status-bar">
+              <span>{{ count }} items · {{ selectedImageStatus('background') }}</span>
+              <Button
+                size="sm"
+                :disabled="!selectedImageRecord('background')"
+                @click="createHandoutFromFinderImage('background')"
+              >
+                <Plus data-icon="inline-start" />
+                Create handout
+              </Button>
+            </div>
+          </template>
+        </VueFinder>
       </TabsContent>
 
       <TabsContent value="assets" class="manager-tab-content">
@@ -584,27 +608,27 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           class="manager-finder compact-finder"
           :driver="finderDrivers.asset"
           :features="finderFeatures"
+          :context-menu-items="imageHandoutContextMenuItems.asset"
           selection-mode="single"
           selection-filter-type="both"
+          @select="(items) => handleFinderSelect('asset', items)"
           @path-change="(path) => handleFinderPathChange('asset', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
-        />
-        <Input v-model="assetSearch" placeholder="Search assets or tags" />
-        <div class="resource-grid">
-          <button
-            v-for="record in recordsForKind('asset')"
-            :key="record.id"
-            class="resource-card"
-            type="button"
-            draggable="true"
-            @dragstart="startAssetDrag(record, $event)"
-            @dragend="clearAssetDrag"
-          >
-            <img :src="previewUrl(record)" alt="" />
-            <strong>{{ record.name }}</strong>
-            <span>{{ record.tags.join(', ') || 'No tags' }}</span>
-          </button>
-        </div>
+        >
+          <template #status-bar="{ count }">
+            <div class="finder-status-bar">
+              <span>{{ count }} items · {{ selectedImageStatus('asset') }}</span>
+              <Button
+                size="sm"
+                :disabled="!selectedImageRecord('asset')"
+                @click="createHandoutFromFinderImage('asset')"
+              >
+                <Plus data-icon="inline-start" />
+                Create handout
+              </Button>
+            </div>
+          </template>
+        </VueFinder>
       </TabsContent>
 
       <TabsContent value="fonts" class="manager-tab-content">
@@ -652,12 +676,13 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           :features="finderFeatures"
           selection-mode="single"
           selection-filter-type="both"
+          @select="(items) => handleFinderSelect('font', items)"
           @path-change="(path) => handleFinderPathChange('font', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('font', event)"
         />
         <Input v-model="fontSearch" placeholder="Search fonts or tags" />
         <div class="font-grid">
-          <div v-for="font in recordsForKind('font')" :key="font.id" class="font-card">
+          <div v-for="font in filteredFonts" :key="font.id" class="font-card">
             <strong>{{ font.name }}</strong>
             <span>{{ font.tags.join(', ') || 'No tags' }}</span>
           </div>

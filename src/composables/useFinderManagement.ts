@@ -1,5 +1,5 @@
 import { computed, type Ref } from 'vue'
-import type { DirEntry, Driver, FsData } from 'vuefinder'
+import { contextMenuItems as defaultContextMenuItems, type DirEntry, type Driver, type FsData, type Item } from 'vuefinder'
 
 import type { LibraryRecord, ProjectSummary } from '@/lib/backend'
 import { useEditorStore } from '@/stores/editor'
@@ -29,6 +29,7 @@ export const finderFeatures = {
 
 type UseFinderOptions = {
   addAssetToCanvas: (asset: LibraryRecord) => void | Promise<void>
+  createHandoutFromImageRecord: (kind: 'background' | 'asset', record: LibraryRecord) => void | Promise<void>
   previewUrl: (record: LibraryRecord) => string
   selectedFolders: {
     handout: Ref<string>
@@ -58,6 +59,10 @@ export function filterRecords(records: LibraryRecord[], queryText: string, selec
   )
 }
 
+export function isImageFinderEntry(entry?: DirEntry | null) {
+  return entry?.type === 'file' && Boolean(entry.mime_type?.startsWith('image/'))
+}
+
 export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, options: UseFinderOptions) {
   function foldersForKind(kind: 'background' | 'asset' | 'font') {
     if (kind === 'background') return editor.library.backgroundFolders
@@ -66,8 +71,9 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
   }
 
   function projectPreviewUrl(project: { backgroundAssetId?: string | null }) {
-    const background = editor.resolveBackground(project.backgroundAssetId || undefined)
-    return background ? options.previewUrl(background) : ''
+    const image = editor.resolveBackground(project.backgroundAssetId || undefined)
+      || editor.resolveAsset(project.backgroundAssetId || undefined)
+    return image ? options.previewUrl(image) : ''
   }
 
   function allFoldersForKind(kind: FinderKind) {
@@ -226,6 +232,22 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     return entryBase(path).replace(`__${kind}-`, '')
   }
 
+  function idFromFinderEntry(kind: FinderKind, entry: DirEntry) {
+    return idFromFinderPath(kind, entry.path)
+  }
+
+  function recordFromFinderEntry(kind: 'background' | 'asset' | 'font', entry?: DirEntry | null) {
+    if (!entry || entry.type !== 'file') return undefined
+    const id = idFromFinderEntry(kind, entry)
+    return recordsForKindWithoutSearch(kind).find((record) => record.id === id)
+  }
+
+  function imageRecordFromFinderEntry(kind: 'background' | 'asset', entry?: DirEntry | null) {
+    const record = recordFromFinderEntry(kind, entry)
+    if (!record || !record.mediaType.startsWith('image/')) return undefined
+    return record
+  }
+
   async function createFolderFromFinder(kind: FinderKind, parentPath: string, name: string) {
     const parent = normalizeFinderFolder(parentPath)
     const folder = [parent, name.trim()].filter(Boolean).join('/')
@@ -318,6 +340,30 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     font: createFinderDriver('font'),
   }))
 
+  function createImageHandoutContextMenu(kind: 'background' | 'asset'): Item[] {
+    let contextTarget: DirEntry | null = null
+    const createItem: Item = {
+      id: `create_${kind}_handout`,
+      title: () => 'Create handout',
+      order: 45,
+      show(_app, context) {
+        contextTarget = context.target
+        return Boolean(contextTarget && isImageFinderEntry(contextTarget) && imageRecordFromFinderEntry(kind, contextTarget))
+      },
+      action(_app, selectedItems) {
+        const entry = selectedItems.find((item) => isImageFinderEntry(item)) || contextTarget
+        const record = imageRecordFromFinderEntry(kind, entry)
+        if (record) void options.createHandoutFromImageRecord(kind, record)
+      },
+    }
+    return [...defaultContextMenuItems, createItem]
+  }
+
+  const imageHandoutContextMenuItems = computed<Record<'background' | 'asset', Item[]>>(() => ({
+    background: createImageHandoutContextMenu('background'),
+    asset: createImageHandoutContextMenu('asset'),
+  }))
+
   function handleFinderPathChange(kind: FinderKind, path: string) {
     setSelectedFolderForFinder(kind, normalizeFinderFolder(path))
   }
@@ -338,6 +384,9 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     foldersForKind,
     handleFinderFileDoubleClick,
     handleFinderPathChange,
+    imageHandoutContextMenuItems,
+    imageRecordFromFinderEntry,
     projectPreviewUrl,
+    recordFromFinderEntry,
   }
 }

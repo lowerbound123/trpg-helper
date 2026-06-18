@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type Konva from 'konva'
 import {
   ArrowDown,
@@ -56,10 +56,19 @@ const fontTags = ref('')
 const backgroundSearch = ref('')
 const assetSearch = ref('')
 const fontSearch = ref('')
+const selectedProjectFolder = ref('')
+const selectedBackgroundFolder = ref('')
+const selectedAssetFolder = ref('')
+const selectedFontFolder = ref('')
+const newProjectFolder = ref('')
+const newBackgroundFolder = ref('')
+const newAssetFolder = ref('')
+const newFontFolder = ref('')
 const resourcePreviewUrls = reactive<Record<string, string>>({})
 const isDraggingBackground = ref(false)
 const isDraggingAsset = ref(false)
 const isDraggingFont = ref(false)
+const draggedAssetId = ref('')
 
 const stageScale = computed(() => {
   const maxWidth = 920
@@ -79,16 +88,76 @@ const backgroundImage = computed(() =>
   backgroundAsset.value ? imageElements[backgroundAsset.value.id] : undefined,
 )
 
-const filteredBackgrounds = computed(() => filterRecords(editor.library.backgrounds, backgroundSearch.value))
-const filteredAssets = computed(() => filterRecords(editor.library.assets, assetSearch.value))
-const filteredFonts = computed(() => filterRecords(editor.library.fonts, fontSearch.value))
+const filteredProjects = computed(() =>
+  editor.latestProjects.filter((project) => folderMatches(project.folder, selectedProjectFolder.value)),
+)
+const filteredBackgrounds = computed(() =>
+  filterRecords(editor.library.backgrounds, backgroundSearch.value, selectedBackgroundFolder.value),
+)
+const filteredAssets = computed(() =>
+  filterRecords(editor.library.assets, assetSearch.value, selectedAssetFolder.value),
+)
+const filteredFonts = computed(() =>
+  filterRecords(editor.library.fonts, fontSearch.value, selectedFontFolder.value),
+)
 
-function filterRecords(records: LibraryRecord[], queryText: string) {
+function folderMatches(recordFolder: string | undefined, selectedFolder: string) {
+  return (recordFolder || '') === selectedFolder
+}
+
+function filterRecords(records: LibraryRecord[], queryText: string, selectedFolder: string) {
   const query = queryText.trim().toLowerCase()
-  if (!query) return records
-  return records.filter((record) =>
+  const scoped = records.filter((record) => folderMatches(record.folder, selectedFolder))
+  if (!query) return scoped
+  return scoped.filter((record) =>
     [record.name, ...record.tags].some((part) => part.toLowerCase().includes(query)),
   )
+}
+
+function foldersForKind(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') return editor.library.backgroundFolders
+  if (kind === 'asset') return editor.library.assetFolders
+  return editor.library.fontFolders
+}
+
+function folderValue(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') return selectedBackgroundFolder.value
+  if (kind === 'asset') return selectedAssetFolder.value
+  return selectedFontFolder.value
+}
+
+function setFolderValue(kind: 'background' | 'asset' | 'font', value: string) {
+  if (kind === 'background') selectedBackgroundFolder.value = value
+  if (kind === 'asset') selectedAssetFolder.value = value
+  if (kind === 'font') selectedFontFolder.value = value
+}
+
+function folderInput(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') return newBackgroundFolder.value
+  if (kind === 'asset') return newAssetFolder.value
+  return newFontFolder.value
+}
+
+function clearFolderInput(kind: 'background' | 'asset' | 'font') {
+  if (kind === 'background') newBackgroundFolder.value = ''
+  if (kind === 'asset') newAssetFolder.value = ''
+  if (kind === 'font') newFontFolder.value = ''
+}
+
+async function createResourceFolder(kind: 'background' | 'asset' | 'font') {
+  const folder = folderInput(kind).trim()
+  if (!folder) return
+  await editor.createResourceFolder(kind, folder)
+  setFolderValue(kind, folder)
+  clearFolderInput(kind)
+}
+
+async function createHandoutFolder() {
+  const folder = newProjectFolder.value.trim()
+  if (!folder) return
+  await editor.addProjectFolder(folder)
+  selectedProjectFolder.value = folder
+  newProjectFolder.value = ''
 }
 
 function recordsForKind(kind: 'background' | 'asset' | 'font') {
@@ -139,15 +208,63 @@ function imageForLayer(layer: ImageLayer) {
 }
 
 async function loadImage(record: LibraryRecord) {
-  if (imageElements[record.id]) return
+  if (imageElements[record.id]) return imageElements[record.id]
   const image = new window.Image()
   image.crossOrigin = 'anonymous'
   const src = await readFileDataUrl(record.path, record.mediaType)
   resourcePreviewUrls[record.id] = src
-  image.src = src
-  image.onload = () => {
-    imageElements[record.id] = image
-  }
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => {
+      imageElements[record.id] = image
+      resolve()
+    }
+    image.onerror = () => reject(new Error(`Failed to load ${record.name}`))
+    image.src = src
+  })
+  return image
+}
+
+function importFolderForKind(kind: 'background' | 'asset' | 'font') {
+  return folderValue(kind)
+}
+
+function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
+  draggedAssetId.value = asset.id
+  event.dataTransfer?.setData('application/x-handout-asset', asset.id)
+  event.dataTransfer?.setData('text/plain', asset.name)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+}
+
+function clearAssetDrag() {
+  draggedAssetId.value = ''
+}
+
+function handleCanvasAssetDrop(event: DragEvent) {
+  event.preventDefault()
+  const assetId = event.dataTransfer?.getData('application/x-handout-asset') || draggedAssetId.value
+  const asset = editor.resolveAsset(assetId)
+  const stage = stageRef.value?.getNode()
+  if (!asset || !stage) return
+  const rect = stage.container().getBoundingClientRect()
+  const x = (event.clientX - rect.left) / stageScale.value
+  const y = (event.clientY - rect.top) / stageScale.value
+  editor.addLayerFromAssetAt(asset, x, y)
+  draggedAssetId.value = ''
+  void updateTransformer()
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  const element = target as HTMLElement | null
+  if (!element) return false
+  return Boolean(element.closest('input, textarea, select, [contenteditable="true"]'))
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (editor.view !== 'editor' || isEditableTarget(event.target)) return
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return
+  if (!editor.selectedLayerId) return
+  event.preventDefault()
+  deleteLayer()
 }
 
 function syncImages() {
@@ -186,6 +303,12 @@ function textConfig(layer: TextLayer) {
 function selectCanvasLayer(layerId: string, event?: KonvaEvent) {
   if (event) event.cancelBubble = true
   editor.selectLayer(layerId)
+  void updateTransformer()
+}
+
+function deleteLayer(layerId?: string) {
+  if (layerId) editor.selectLayer(layerId)
+  editor.deleteSelectedLayer()
   void updateTransformer()
 }
 
@@ -235,9 +358,9 @@ async function importFiles(kind: 'background' | 'asset' | 'font', files: FileLis
   const fileArray = Array.from(files)
   const imported: LibraryRecord[] = []
   for (const file of fileArray) {
-    if (kind === 'background') imported.push(await editor.importBackgroundFile(file, tagsForKind(kind)))
-    if (kind === 'asset') imported.push(await editor.importAssetFile(file, tagsForKind(kind)))
-    if (kind === 'font') imported.push(await editor.importFontFile(file, tagsForKind(kind)))
+    if (kind === 'background') imported.push(await editor.importBackgroundFile(file, tagsForKind(kind), importFolderForKind(kind)))
+    if (kind === 'asset') imported.push(await editor.importAssetFile(file, tagsForKind(kind), importFolderForKind(kind)))
+    if (kind === 'font') imported.push(await editor.importFontFile(file, tagsForKind(kind), importFolderForKind(kind)))
   }
   clearTags(kind)
   syncImages()
@@ -264,6 +387,7 @@ async function createProject() {
     await editor.createManagedHandout(newProjectTitle.value, {
       width: blankWidth.value,
       height: blankHeight.value,
+      folder: selectedProjectFolder.value,
     })
     return
   }
@@ -278,6 +402,7 @@ async function createProject() {
     width: size.width,
     height: size.height,
     backgroundId: background.id,
+    folder: selectedProjectFolder.value,
   })
 }
 
@@ -326,9 +451,14 @@ onMounted(async () => {
   try {
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
     syncImages()
+    window.addEventListener('keydown', handleGlobalKeydown)
   } catch (error) {
     editor.status = String(error)
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 watch(() => editor.library.backgrounds, syncImages, { deep: true })
@@ -364,6 +494,18 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               <FolderOpen data-icon="inline-start" />
               Open folder
             </Button>
+          </div>
+
+          <div class="folder-toolbar">
+            <label>
+              Handout folder
+              <select v-model="selectedProjectFolder" class="folder-select">
+                <option value="">Root</option>
+                <option v-for="folder in editor.projectFolders" :key="folder" :value="folder">{{ folder }}</option>
+              </select>
+            </label>
+            <Input v-model="newProjectFolder" placeholder="New folder, e.g. Chapter 1" />
+            <Button variant="outline" @click="createHandoutFolder">New folder</Button>
           </div>
 
           <div class="create-options">
@@ -416,16 +558,17 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         </section>
 
         <div class="project-grid">
-          <Card v-for="project in editor.latestProjects" :key="project.id" class="project-card">
+          <Card v-for="project in filteredProjects" :key="project.id" class="project-card">
             <CardHeader>
               <CardTitle>{{ project.title }}</CardTitle>
             </CardHeader>
             <CardContent class="project-card-content">
+              <Badge variant="outline">{{ project.folder || 'Root' }}</Badge>
               <span>{{ new Date(project.updatedAt).toLocaleString() }}</span>
               <Button @click="editor.openManagedHandout(project.id)">Open editor</Button>
             </CardContent>
           </Card>
-          <Card v-if="!editor.latestProjects.length" class="empty-card">
+          <Card v-if="!filteredProjects.length" class="empty-card">
             <CardContent>No handout projects yet.</CardContent>
           </Card>
         </div>
@@ -452,6 +595,17 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             </Button>
           </div>
         </section>
+        <div class="folder-toolbar">
+          <label>
+            Background folder
+            <select v-model="selectedBackgroundFolder" class="folder-select">
+              <option value="">Root</option>
+              <option v-for="folder in foldersForKind('background')" :key="folder" :value="folder">{{ folder }}</option>
+            </select>
+          </label>
+          <Input v-model="newBackgroundFolder" placeholder="New folder" />
+          <Button variant="outline" @click="createResourceFolder('background')">New folder</Button>
+        </div>
         <Input v-model="backgroundSearch" placeholder="Search backgrounds or tags" />
         <div class="resource-grid">
           <button v-for="record in recordsForKind('background')" :key="record.id" class="resource-card" type="button">
@@ -483,9 +637,28 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             </Button>
           </div>
         </section>
+        <div class="folder-toolbar">
+          <label>
+            Asset folder
+            <select v-model="selectedAssetFolder" class="folder-select">
+              <option value="">Root</option>
+              <option v-for="folder in foldersForKind('asset')" :key="folder" :value="folder">{{ folder }}</option>
+            </select>
+          </label>
+          <Input v-model="newAssetFolder" placeholder="New folder" />
+          <Button variant="outline" @click="createResourceFolder('asset')">New folder</Button>
+        </div>
         <Input v-model="assetSearch" placeholder="Search assets or tags" />
         <div class="resource-grid">
-          <button v-for="record in recordsForKind('asset')" :key="record.id" class="resource-card" type="button">
+          <button
+            v-for="record in recordsForKind('asset')"
+            :key="record.id"
+            class="resource-card"
+            type="button"
+            draggable="true"
+            @dragstart="startAssetDrag(record, $event)"
+            @dragend="clearAssetDrag"
+          >
             <img :src="previewUrl(record)" alt="" />
             <strong>{{ record.name }}</strong>
             <span>{{ record.tags.join(', ') || 'No tags' }}</span>
@@ -520,6 +693,17 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
             </Button>
           </div>
         </section>
+        <div class="folder-toolbar">
+          <label>
+            Font folder
+            <select v-model="selectedFontFolder" class="folder-select">
+              <option value="">Root</option>
+              <option v-for="folder in foldersForKind('font')" :key="folder" :value="folder">{{ folder }}</option>
+            </select>
+          </label>
+          <Input v-model="newFontFolder" placeholder="New folder" />
+          <Button variant="outline" @click="createResourceFolder('font')">New folder</Button>
+        </div>
         <Input v-model="fontSearch" placeholder="Search fonts or tags" />
         <div class="font-grid">
           <div v-for="font in recordsForKind('font')" :key="font.id" class="font-card">
@@ -570,6 +754,17 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               <input class="sr-only" type="file" accept="image/*" multiple @change="handleFileInput('asset', $event)" />
             </Button>
           </div>
+          <div class="folder-toolbar compact">
+            <label>
+              Folder
+              <select v-model="selectedAssetFolder" class="folder-select">
+                <option value="">Root</option>
+                <option v-for="folder in foldersForKind('asset')" :key="folder" :value="folder">{{ folder }}</option>
+              </select>
+            </label>
+            <Input v-model="newAssetFolder" placeholder="New folder" />
+            <Button size="sm" variant="outline" @click="createResourceFolder('asset')">New</Button>
+          </div>
           <Input v-model="assetSearch" placeholder="Search assets or tags" />
           <ScrollArea class="rail-scroll">
             <button
@@ -577,12 +772,15 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               :key="asset.id"
               class="asset-row"
               type="button"
+              draggable="true"
               @click="editor.addLayerFromAsset(asset)"
+              @dragstart="startAssetDrag(asset, $event)"
+              @dragend="clearAssetDrag"
             >
               <span class="asset-thumb"><img :src="previewUrl(asset)" alt="" /></span>
               <span class="asset-meta">
                 <strong>{{ asset.name }}</strong>
-                <span>Click to add · {{ asset.tags.join(', ') || 'No tags' }}</span>
+                <span>Click or drag to add · {{ asset.tags.join(', ') || 'No tags' }}</span>
               </span>
             </button>
           </ScrollArea>
@@ -613,6 +811,17 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               />
             </Button>
           </div>
+          <div class="folder-toolbar compact">
+            <label>
+              Folder
+              <select v-model="selectedFontFolder" class="folder-select">
+                <option value="">Root</option>
+                <option v-for="folder in foldersForKind('font')" :key="folder" :value="folder">{{ folder }}</option>
+              </select>
+            </label>
+            <Input v-model="newFontFolder" placeholder="New folder" />
+            <Button size="sm" variant="outline" @click="createResourceFolder('font')">New</Button>
+          </div>
           <Input v-model="fontSearch" placeholder="Search fonts or tags" />
           <ScrollArea class="rail-scroll">
             <div v-for="font in filteredFonts" :key="font.id" class="font-row">
@@ -636,15 +845,21 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               <ArrowDown data-icon="inline-start" />
               Down
             </Button>
+            <Button size="sm" variant="destructive" :disabled="!editor.selectedLayer" @click="deleteLayer()">
+              <Trash2 data-icon="inline-start" />
+              Delete
+            </Button>
           </div>
           <ScrollArea class="rail-scroll">
-            <button
+            <div
               v-for="layer in editor.layers"
               :key="layer.id"
               class="layer-row"
               :class="{ selected: editor.selectedLayerId === layer.id }"
-              type="button"
+              role="button"
+              tabindex="0"
               @click="selectCanvasLayer(layer.id)"
+              @keydown.enter="selectCanvasLayer(layer.id)"
             >
               <Layers class="layer-icon" />
               <span>
@@ -653,7 +868,15 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               </span>
               <Eye v-if="layer.visible" class="layer-state" />
               <EyeOff v-else class="layer-state" />
-            </button>
+              <Button
+                class="row-delete"
+                size="icon"
+                variant="ghost"
+                @click.stop="deleteLayer(layer.id)"
+              >
+                <Trash2 />
+              </Button>
+            </div>
           </ScrollArea>
         </TabsContent>
       </Tabs>
@@ -692,7 +915,12 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           <span>{{ editor.status }}</span>
         </div>
 
-        <div class="stage-frame">
+        <div
+          class="stage-frame"
+          :class="{ 'stage-frame-dropping': draggedAssetId }"
+          @dragover.prevent
+          @drop="handleCanvasAssetDrop"
+        >
           <v-stage ref="stageRef" :config="stageConfig" @click="handleStagePointer" @tap="handleStagePointer">
             <v-layer>
               <v-rect
@@ -883,7 +1111,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               <Eye data-icon="inline-start" />
               Toggle
             </Button>
-            <Button variant="destructive" @click="editor.deleteSelectedLayer()">
+            <Button variant="destructive" @click="deleteLayer()">
               <Trash2 data-icon="inline-start" />
               Delete
             </Button>

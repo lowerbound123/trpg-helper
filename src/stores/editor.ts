@@ -19,11 +19,14 @@ import { createHistory } from '@/lib/history'
 import {
   emptyLibrary,
   fileUrl,
+  createLibraryFolder,
   createProject,
+  createProjectFolder,
   getLibrary,
   importAsset,
   importBackground,
   importFont,
+  listProjectFolders,
   listProjects,
   openManagedProject,
   openProject,
@@ -47,6 +50,7 @@ export const useEditorStore = defineStore('editor', () => {
   const currentProjectId = ref<string>()
   const view = ref<'manager' | 'editor'>('manager')
   const projects = ref<ProjectSummary[]>([])
+  const projectFolders = ref<string[]>([])
   const library = ref<LibraryIndex>(emptyLibrary())
   const status = ref('Ready')
 
@@ -74,6 +78,18 @@ export const useEditorStore = defineStore('editor', () => {
         name: asset.name,
         x: 120 + doc.layers.length * 20,
         y: 100 + doc.layers.length * 20,
+      }),
+    )
+    selectedLayerId.value = document.value.layers.at(-1)?.id
+  }
+
+  function addLayerFromAssetAt(asset: LibraryRecord, x: number, y: number) {
+    commit((doc) =>
+      addImageLayer(doc, {
+        assetId: asset.id,
+        name: asset.name,
+        x: Math.max(0, Math.round(x)),
+        y: Math.max(0, Math.round(y)),
       }),
     )
     selectedLayerId.value = document.value.layers.at(-1)?.id
@@ -152,29 +168,41 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   async function refreshProjects() {
-    projects.value = await listProjects()
+    const [nextProjects, nextFolders] = await Promise.all([listProjects(), listProjectFolders()])
+    projects.value = nextProjects
+    projectFolders.value = nextFolders
   }
 
-  async function importAssetFile(file: File, tagText: string) {
-    const result = await importAsset(file, tagList(tagText))
+  async function importAssetFile(file: File, tagText: string, folder = '') {
+    const result = await importAsset(file, tagList(tagText), folder)
     library.value = result.library
     status.value = `Imported asset ${result.record.name}`
     return result.record
   }
 
-  async function importBackgroundFile(file: File, tagText: string) {
-    const result = await importBackground(file, tagList(tagText))
+  async function importBackgroundFile(file: File, tagText: string, folder = '') {
+    const result = await importBackground(file, tagList(tagText), folder)
     library.value = result.library
     status.value = `Imported background ${result.record.name}`
     return result.record
   }
 
-  async function importFontFile(file: File, tagText: string) {
-    const result = await importFont(file, tagList(tagText))
+  async function importFontFile(file: File, tagText: string, folder = '') {
+    const result = await importFont(file, tagList(tagText), folder)
     library.value = result.library
     await loadFont(result.record)
     status.value = `Imported font ${result.record.name}`
     return result.record
+  }
+
+  async function createResourceFolder(kind: 'background' | 'asset' | 'font', folder: string) {
+    library.value = await createLibraryFolder(kind, folder)
+    status.value = `Created ${kind} folder ${folder.trim()}`
+  }
+
+  async function addProjectFolder(folder: string) {
+    projectFolders.value = await createProjectFolder(folder)
+    status.value = `Created handout folder ${folder.trim()}`
   }
 
   async function loadFont(font: LibraryRecord) {
@@ -219,6 +247,7 @@ export const useEditorStore = defineStore('editor', () => {
       width?: number
       height?: number
       backgroundId?: string
+      folder?: string
     },
   ) {
     const next = createDefaultHandout(title.trim() || 'Untitled handout')
@@ -229,7 +258,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (options?.backgroundId) {
       next.canvas.backgroundAssetId = options.backgroundId
     }
-    const payload = await createProject(next.title, next)
+    const payload = await createProject(next.title, next, options?.folder ?? '')
     replaceDocument(payload.document)
     currentProjectId.value = String(payload.metadata.id ?? '')
     view.value = 'editor'
@@ -264,13 +293,16 @@ export const useEditorStore = defineStore('editor', () => {
 
   return {
     addLayerFromAsset,
+    addLayerFromAssetAt,
     addText,
+    addProjectFolder,
     canRedo,
     canUndo,
     deleteSelectedLayer,
     document,
     closeEditor,
     createManagedHandout,
+    createResourceFolder,
     currentProjectId,
     importBackgroundFile,
     importAssetFile,
@@ -285,6 +317,7 @@ export const useEditorStore = defineStore('editor', () => {
     patchCanvas,
     patchSelectedLayer,
     projects,
+    projectFolders,
     projectDir,
     redo,
     renameDocument,

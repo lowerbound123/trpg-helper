@@ -9,6 +9,7 @@ export interface LibraryRecord {
   path: string
   thumbnailPath?: string | null
   tags: string[]
+  folder: string
   mediaType: string
   createdAt: string
   updatedAt: string
@@ -18,12 +19,16 @@ export interface LibraryIndex {
   backgrounds: LibraryRecord[]
   assets: LibraryRecord[]
   fonts: LibraryRecord[]
+  backgroundFolders: string[]
+  assetFolders: string[]
+  fontFolders: string[]
 }
 
 export interface ProjectSummary {
   id: string
   title: string
   projectDir: string
+  folder: string
   updatedAt: string
 }
 
@@ -41,6 +46,9 @@ export const emptyLibrary = (): LibraryIndex => ({
   backgrounds: [],
   assets: [],
   fonts: [],
+  backgroundFolders: [],
+  assetFolders: [],
+  fontFolders: [],
 })
 
 function isTauriRuntime() {
@@ -63,7 +71,7 @@ export async function getLibrary(): Promise<LibraryIndex> {
   return invoke<LibraryIndex>('get_library')
 }
 
-export async function importAsset(file: File, tags: string[]): Promise<ImportResult> {
+export async function importAsset(file: File, tags: string[], folder = ''): Promise<ImportResult> {
   if (!isTauriRuntime()) {
     throw new Error('Asset import requires the Tauri desktop runtime.')
   }
@@ -71,11 +79,12 @@ export async function importAsset(file: File, tags: string[]): Promise<ImportRes
     fileName: file.name,
     data: Array.from(new Uint8Array(await file.arrayBuffer())),
     tags,
+    folder,
     mediaType: file.type || 'application/octet-stream',
   })
 }
 
-export async function importBackground(file: File, tags: string[]): Promise<ImportResult> {
+export async function importBackground(file: File, tags: string[], folder = ''): Promise<ImportResult> {
   if (!isTauriRuntime()) {
     throw new Error('Background import requires the Tauri desktop runtime.')
   }
@@ -83,11 +92,12 @@ export async function importBackground(file: File, tags: string[]): Promise<Impo
     fileName: file.name,
     data: Array.from(new Uint8Array(await file.arrayBuffer())),
     tags,
+    folder,
     mediaType: file.type || 'application/octet-stream',
   })
 }
 
-export async function importFont(file: File, tags: string[]): Promise<ImportResult> {
+export async function importFont(file: File, tags: string[], folder = ''): Promise<ImportResult> {
   if (!isTauriRuntime()) {
     throw new Error('Font import requires the Tauri desktop runtime.')
   }
@@ -95,8 +105,27 @@ export async function importFont(file: File, tags: string[]): Promise<ImportResu
     fileName: file.name,
     data: Array.from(new Uint8Array(await file.arrayBuffer())),
     tags,
+    folder,
     mediaType: file.type || 'font/ttf',
   })
+}
+
+export async function createLibraryFolder(
+  kind: 'background' | 'asset' | 'font',
+  folder: string,
+): Promise<LibraryIndex> {
+  if (!isTauriRuntime()) return emptyLibrary()
+  return invoke<LibraryIndex>('create_library_folder', { kind, folder })
+}
+
+export async function createProjectFolder(folder: string): Promise<string[]> {
+  if (!isTauriRuntime()) return []
+  return invoke<string[]>('create_project_folder', { folder })
+}
+
+export async function listProjectFolders(): Promise<string[]> {
+  if (!isTauriRuntime()) return []
+  return invoke<string[]>('list_project_folders')
 }
 
 export async function saveProject(
@@ -128,17 +157,18 @@ export async function listProjects(): Promise<ProjectSummary[]> {
   return invoke<ProjectSummary[]>('list_projects')
 }
 
-export async function createProject(title: string, document: HandoutDocument): Promise<ProjectPayload> {
+export async function createProject(title: string, document: HandoutDocument, folder = ''): Promise<ProjectPayload> {
   if (!isTauriRuntime()) {
     return {
       document: { ...document, title },
       metadata: {
         id: `preview-${Date.now()}`,
+        folder,
         savedAt: new Date().toISOString(),
       },
     }
   }
-  return invoke<ProjectPayload>('create_project', { title, document })
+  return invoke<ProjectPayload>('create_project', { title, document, folder })
 }
 
 export async function openManagedProject(projectId: string): Promise<ProjectPayload> {

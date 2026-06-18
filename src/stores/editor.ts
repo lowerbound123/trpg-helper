@@ -140,6 +140,10 @@ export const useEditorStore = defineStore('editor', () => {
     commit((doc) => moveLayer(doc, layer.id, layer.zIndex + delta))
   }
 
+  function moveLayerToIndex(layerId: string, targetIndex: number) {
+    commit((doc) => moveLayer(doc, layerId, targetIndex))
+  }
+
   function setBackground(background?: LibraryRecord) {
     commit((doc) => updateCanvas(doc, { backgroundAssetId: background?.id }))
   }
@@ -342,6 +346,7 @@ export const useEditorStore = defineStore('editor', () => {
     layers,
     library,
     moveSelectedLayer,
+    moveLayerToIndex,
     openManagedHandout,
     openProjectFromPath,
     patchLayer,

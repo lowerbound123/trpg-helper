@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Download, Eye, Trash2 } from '@lucide/vue'
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Download, Eye, Italic, Strikethrough, Trash2, Underline } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { isTextLayer, useEditorStore } from '@/stores/editor'
 
-const exportPath = defineModel<string>('exportPath', { required: true })
 const exportScale = defineModel<number>('exportScale', { required: true })
 
 defineEmits<{
@@ -19,7 +18,10 @@ defineEmits<{
 }>()
 
 const editor = useEditorStore()
-const backgroundAsset = computed(() => editor.resolveBackground(editor.document.canvas.backgroundAssetId))
+const backgroundAsset = computed(() =>
+  editor.resolveBackground(editor.document.canvas.backgroundAssetId)
+    || editor.resolveAsset(editor.document.canvas.backgroundAssetId),
+)
 
 function setFont(fontId: string) {
   const font = editor.resolveFont(fontId)
@@ -31,6 +33,10 @@ function setFont(fontId: string) {
 
 function deleteLayer() {
   editor.deleteSelectedLayer()
+}
+
+function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean) {
+  editor.patchSelectedLayer({ [kind]: value })
 }
 </script>
 
@@ -106,6 +112,84 @@ function deleteLayer() {
                 Color
                 <Input type="color" :model-value="editor.selectedLayer.fill" @update:model-value="(value) => editor.patchSelectedLayer({ fill: String(value) })" />
               </label>
+            </div>
+            <label>
+              Line height
+              <Input
+                type="number"
+                step="0.05"
+                min="0.5"
+                :model-value="editor.selectedLayer.lineHeight"
+                @update:model-value="(value) => editor.patchSelectedLayer({ lineHeight: Math.max(0.5, Number(value) || 1) })"
+              />
+            </label>
+            <div class="icon-button-grid">
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.align === 'left'"
+                @click="editor.patchSelectedLayer({ align: 'left' })"
+              >
+                <AlignLeft />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.align === 'center'"
+                @click="editor.patchSelectedLayer({ align: 'center' })"
+              >
+                <AlignCenter />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.align === 'right'"
+                @click="editor.patchSelectedLayer({ align: 'right' })"
+              >
+                <AlignRight />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.align === 'justify'"
+                @click="editor.patchSelectedLayer({ align: 'justify' })"
+              >
+                <AlignJustify />
+              </Button>
+            </div>
+            <div class="icon-button-grid">
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.fontWeight >= 700"
+                @click="editor.patchSelectedLayer({ fontWeight: editor.selectedLayer.fontWeight >= 700 ? 400 : 700 })"
+              >
+                <Bold />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.italic"
+                @click="editor.patchSelectedLayer({ italic: !editor.selectedLayer.italic })"
+              >
+                <Italic />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.underline"
+                @click="patchTextDecoration('underline', !editor.selectedLayer.underline)"
+              >
+                <Underline />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                :data-active="editor.selectedLayer.strikethrough"
+                @click="patchTextDecoration('strikethrough', !editor.selectedLayer.strikethrough)"
+              >
+                <Strikethrough />
+              </Button>
             </div>
             <label>
               Font
@@ -212,15 +296,14 @@ function deleteLayer() {
 
       <TabsContent value="export" class="rail-tab-content">
         <div class="panel-stack inspector-panel">
-          <Input v-model="exportPath" placeholder="/path/to/output.png" />
           <label>
-            Export scale {{ exportScale }}x
-            <Slider
-              :model-value="[exportScale]"
-              :min="0.25"
-              :max="4"
-              :step="0.25"
-              @update:model-value="(value) => (exportScale = (value?.[0] ?? 1) as number)"
+            Export scale
+            <Input
+              type="number"
+              min="0.1"
+              step="0.25"
+              :model-value="exportScale"
+              @update:model-value="(value) => (exportScale = Math.max(0.1, Number(value) || 1))"
             />
           </label>
           <Button @click="$emit('exportImage')">

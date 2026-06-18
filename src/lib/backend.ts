@@ -30,6 +30,7 @@ export interface ProjectSummary {
   projectDir: string
   folder: string
   backgroundAssetId?: string | null
+  previewPath?: string | null
   updatedAt: string
 }
 
@@ -234,4 +235,20 @@ export async function exportImage(filePath: string, dataUrl: string): Promise<st
     return filePath
   }
   return invoke<string>('export_image', { filePath, dataUrl })
+}
+
+export async function exportImageToDownloads(fileName: string, dataUrl: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    const link = document.createElement('a')
+    link.href = dataUrl
+    link.download = fileName || 'handout.png'
+    link.click()
+    return fileName
+  }
+  return invoke<string>('export_image_to_downloads', { fileName, dataUrl })
+}
+
+export async function saveProjectPreview(projectId: string, dataUrl: string): Promise<string> {
+  if (!isTauriRuntime()) return dataUrl
+  return invoke<string>('save_project_preview', { projectId, dataUrl })
 }

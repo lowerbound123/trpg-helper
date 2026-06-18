@@ -53,8 +53,11 @@ export interface TextLayer extends BaseLayer {
   fontFamily: string
   fontSize: number
   fontWeight: number
+  italic: boolean
+  underline: boolean
+  strikethrough: boolean
   fill: string
-  align: 'left' | 'center' | 'right'
+  align: 'left' | 'center' | 'right' | 'justify'
   lineHeight: number
 }
 
@@ -157,6 +160,9 @@ export function addTextLayer(document: HandoutDocument, input: NewTextLayerInput
     fontFamily: input.fontFamily ?? 'Inter',
     fontSize: 42,
     fontWeight: 600,
+    italic: false,
+    underline: false,
+    strikethrough: false,
     fill: '#111827',
     align: 'left',
     lineHeight: 1.18,

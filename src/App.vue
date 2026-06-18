@@ -7,8 +7,6 @@ import {
   ArrowUp,
   Eye,
   EyeOff,
-  FolderOpen,
-  Image,
   Layers,
   Plus,
   Redo2,
@@ -16,7 +14,6 @@ import {
   Trash2,
   Type,
   Undo2,
-  Upload,
 } from '@lucide/vue'
 import { VueFinder, type DirEntry } from 'vuefinder'
 import 'vuefinder/dist/vuefinder.css'
@@ -29,14 +26,22 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useFinderManagement, filterRecords, finderFeatures } from '@/composables/useFinderManagement'
+import { useFinderManagement, filterRecords, finderFeaturesForKind } from '@/composables/useFinderManagement'
 import { useResourceImages } from '@/composables/useResourceImages'
-import { exportImage, type LibraryRecord } from '@/lib/backend'
+import {
+  exportImageToDownloads,
+  openManagedProject,
+  saveProjectPreview,
+  type LibraryRecord,
+  type ProjectSummary,
+} from '@/lib/backend'
 import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
+import { downloadFileName, renderHandoutToDataUrl } from '@/lib/render'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
-type KonvaEvent = { target: Konva.Node; cancelBubble?: boolean }
+type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
+type GuideLine = { orientation: 'vertical' | 'horizontal'; value: number }
 
 const editor = useEditorStore()
 const stageRef = ref<{ getNode: () => Konva.Stage }>()
@@ -48,25 +53,19 @@ const createMode = ref<'blank' | 'upload-background'>('blank')
 const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
-const projectPathInput = ref('')
-const exportPathInput = ref('')
 const exportScale = ref(1)
-const backgroundTags = ref('')
-const assetTags = ref('')
-const fontTags = ref('')
+const canvasPan = reactive({ x: 0, y: 0 })
+const panState = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
+const guideLines = ref<GuideLine[]>([])
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
 const selectedBackgroundFolder = ref('')
 const selectedAssetFolder = ref('')
 const selectedFontFolder = ref('')
-const newBackgroundFolder = ref('')
-const newAssetFolder = ref('')
-const newFontFolder = ref('')
-const isDraggingBackground = ref(false)
-const isDraggingAsset = ref(false)
-const isDraggingFont = ref(false)
+const isBooting = ref(true)
 const draggedAssetId = ref('')
+const draggedLayerId = ref('')
 const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>({
   handout: [],
   background: [],
@@ -87,6 +86,8 @@ const stageConfig = computed(() => ({
   height: editor.document.canvas.height * stageScale.value,
   scaleX: stageScale.value,
   scaleY: stageScale.value,
+  x: canvasPan.x,
+  y: canvasPan.y,
 }))
 
 const backgroundAsset = computed(() =>
@@ -105,15 +106,18 @@ const filteredFonts = computed(() =>
 )
 const {
   finderDrivers,
-  foldersForKind,
   handleFinderFileDoubleClick,
   handleFinderPathChange,
+  handoutContextMenuItems,
   imageHandoutContextMenuItems,
   imageRecordFromFinderEntry,
+  projectFromFinderEntry,
 } = useFinderManagement(editor, {
   addAssetToCanvas,
   createHandoutFromImageRecord,
+  exportHandoutProject,
   previewUrl,
+  uploadFiles,
   selectedFolders: {
     handout: selectedProjectFolder,
     background: selectedBackgroundFolder,
@@ -121,56 +125,6 @@ const {
     font: selectedFontFolder,
   },
 })
-
-function folderValue(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') return selectedBackgroundFolder.value
-  if (kind === 'asset') return selectedAssetFolder.value
-  return selectedFontFolder.value
-}
-
-function setFolderValue(kind: 'background' | 'asset' | 'font', value: string) {
-  if (kind === 'background') selectedBackgroundFolder.value = value
-  if (kind === 'asset') selectedAssetFolder.value = value
-  if (kind === 'font') selectedFontFolder.value = value
-}
-
-function folderInput(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') return newBackgroundFolder.value
-  if (kind === 'asset') return newAssetFolder.value
-  return newFontFolder.value
-}
-
-function clearFolderInput(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') newBackgroundFolder.value = ''
-  if (kind === 'asset') newAssetFolder.value = ''
-  if (kind === 'font') newFontFolder.value = ''
-}
-
-async function createResourceFolder(kind: 'background' | 'asset' | 'font') {
-  const folder = folderInput(kind).trim()
-  if (!folder) return
-  await editor.createResourceFolder(kind, folder)
-  setFolderValue(kind, folder)
-  clearFolderInput(kind)
-}
-
-function tagsForKind(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') return backgroundTags.value
-  if (kind === 'asset') return assetTags.value
-  return fontTags.value
-}
-
-function clearTags(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') backgroundTags.value = ''
-  if (kind === 'asset') assetTags.value = ''
-  if (kind === 'font') fontTags.value = ''
-}
-
-function draggingRef(kind: 'background' | 'asset' | 'font') {
-  if (kind === 'background') return isDraggingBackground
-  if (kind === 'asset') return isDraggingAsset
-  return isDraggingFont
-}
 
 function layerName(layer: HandoutLayer) {
   if (isTextLayer(layer)) return layer.text || layer.name
@@ -182,10 +136,6 @@ function imageForLayer(layer: ImageLayer) {
   return asset ? imageElements[asset.id] : undefined
 }
 
-function importFolderForKind(kind: 'background' | 'asset' | 'font') {
-  return folderValue(kind)
-}
-
 function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
   draggedAssetId.value = asset.id
   event.dataTransfer?.setData('application/x-handout-asset', asset.id)
@@ -195,6 +145,20 @@ function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
 
 function clearAssetDrag() {
   draggedAssetId.value = ''
+}
+
+function startLayerListDrag(layer: HandoutLayer, event: DragEvent) {
+  draggedLayerId.value = layer.id
+  event.dataTransfer?.setData('application/x-handout-layer', layer.id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function handleLayerListDrop(targetLayer: HandoutLayer, event: DragEvent) {
+  event.preventDefault()
+  const layerId = event.dataTransfer?.getData('application/x-handout-layer') || draggedLayerId.value
+  if (!layerId || layerId === targetLayer.id) return
+  editor.moveLayerToIndex(layerId, targetLayer.zIndex)
+  draggedLayerId.value = ''
 }
 
 async function addAssetToCanvas(asset: LibraryRecord) {
@@ -210,13 +174,34 @@ function handleCanvasAssetDrop(event: DragEvent) {
   const stage = stageRef.value?.getNode()
   if (!asset || !stage) return
   const rect = stage.container().getBoundingClientRect()
-  const x = (event.clientX - rect.left) / stageScale.value
-  const y = (event.clientY - rect.top) / stageScale.value
+  const x = (event.clientX - rect.left - canvasPan.x) / stageScale.value
+  const y = (event.clientY - rect.top - canvasPan.y) / stageScale.value
   void imageSize(asset).then((size) => {
     editor.addLayerFromAssetAt(asset, x, y, size)
     void updateTransformer()
   })
   draggedAssetId.value = ''
+}
+
+function startCanvasPan(event: PointerEvent) {
+  if (event.button !== 1) return
+  event.preventDefault()
+  panState.active = true
+  panState.startX = event.clientX
+  panState.startY = event.clientY
+  panState.originX = canvasPan.x
+  panState.originY = canvasPan.y
+}
+
+function moveCanvasPan(event: PointerEvent) {
+  if (!panState.active) return
+  event.preventDefault()
+  canvasPan.x = panState.originX + event.clientX - panState.startX
+  canvasPan.y = panState.originY + event.clientY - panState.startY
+}
+
+function stopCanvasPan() {
+  panState.active = false
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -254,7 +239,11 @@ function textConfig(layer: TextLayer) {
     text: layer.text,
     fontFamily: layer.fontFamily,
     fontSize: layer.fontSize,
-    fontStyle: `${layer.fontWeight}`,
+    fontStyle: `${layer.italic ? 'italic ' : ''}${layer.fontWeight || 400}`,
+    textDecoration: [
+      layer.underline ? 'underline' : '',
+      layer.strikethrough ? 'line-through' : '',
+    ].filter(Boolean).join(' '),
     fill: layer.fill,
     align: layer.align,
     lineHeight: layer.lineHeight,
@@ -299,12 +288,65 @@ function onTransformEnd(layer: HandoutLayer) {
 }
 
 function onDragEnd(layer: HandoutLayer) {
+  guideLines.value = []
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
   editor.patchLayer(layer.id, {
     x: Math.round(node.x()),
     y: Math.round(node.y()),
   })
+}
+
+function guidesForLayer(layer: HandoutLayer, node: Konva.Node) {
+  const threshold = 6
+  const x = node.x()
+  const y = node.y()
+  const width = node.width()
+  const height = node.height()
+  const selfX = [x, x + width / 2, x + width]
+  const selfY = [y, y + height / 2, y + height]
+  const candidatesX = [0, editor.document.canvas.width / 2, editor.document.canvas.width]
+  const candidatesY = [0, editor.document.canvas.height / 2, editor.document.canvas.height]
+
+  for (const other of editor.document.layers) {
+    if (other.id === layer.id || !other.visible) continue
+    candidatesX.push(other.x, other.x + other.width / 2, other.x + other.width)
+    candidatesY.push(other.y, other.y + other.height / 2, other.y + other.height)
+  }
+
+  const bestX = candidatesX
+    .flatMap((target) => selfX.map((source, index) => ({ target, source, index, distance: Math.abs(target - source) })))
+    .sort((a, b) => a.distance - b.distance)[0]
+  const bestY = candidatesY
+    .flatMap((target) => selfY.map((source, index) => ({ target, source, index, distance: Math.abs(target - source) })))
+    .sort((a, b) => a.distance - b.distance)[0]
+
+  return {
+    x: bestX && bestX.distance <= threshold ? bestX : undefined,
+    y: bestY && bestY.distance <= threshold ? bestY : undefined,
+  }
+}
+
+function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
+  const node = layerNodeRefs[layer.id]?.getNode()
+  if (!node || event.evt?.ctrlKey) {
+    guideLines.value = []
+    return
+  }
+
+  const guides = guidesForLayer(layer, node)
+  const nextGuides: GuideLine[] = []
+  if (guides.x) {
+    const offset = guides.x.index === 0 ? 0 : guides.x.index === 1 ? node.width() / 2 : node.width()
+    node.x(Math.round(guides.x.target - offset))
+    nextGuides.push({ orientation: 'vertical', value: guides.x.target })
+  }
+  if (guides.y) {
+    const offset = guides.y.index === 0 ? 0 : guides.y.index === 1 ? node.height() / 2 : node.height()
+    node.y(Math.round(guides.y.target - offset))
+    nextGuides.push({ orientation: 'horizontal', value: guides.y.target })
+  }
+  guideLines.value = nextGuides
 }
 
 async function updateTransformer() {
@@ -316,32 +358,16 @@ async function updateTransformer() {
   transformer.getLayer()?.batchDraw()
 }
 
-async function importFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[]) {
+async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[], folder = '') {
   const fileArray = Array.from(files)
   const imported: LibraryRecord[] = []
   for (const file of fileArray) {
-    if (kind === 'background') imported.push(await editor.importBackgroundFile(file, tagsForKind(kind), importFolderForKind(kind)))
-    if (kind === 'asset') imported.push(await editor.importAssetFile(file, tagsForKind(kind), importFolderForKind(kind)))
-    if (kind === 'font') imported.push(await editor.importFontFile(file, tagsForKind(kind), importFolderForKind(kind)))
+    if (kind === 'background') imported.push(await editor.importBackgroundFile(file, '', folder))
+    if (kind === 'asset') imported.push(await editor.importAssetFile(file, '', folder))
+    if (kind === 'font') imported.push(await editor.importFontFile(file, '', folder))
   }
-  clearTags(kind)
   syncImages(editor.library)
   return imported
-}
-
-async function handleFileInput(kind: 'background' | 'asset' | 'font', event: Event) {
-  const files = (event.target as HTMLInputElement).files
-  if (!files?.length) return
-  await importFiles(kind, files)
-  ;(event.target as HTMLInputElement).value = ''
-}
-
-async function handleDrop(kind: 'background' | 'asset' | 'font', event: DragEvent) {
-  event.preventDefault()
-  draggingRef(kind).value = false
-  const files = event.dataTransfer?.files
-  if (!files?.length) return
-  await importFiles(kind, files)
 }
 
 async function createProject() {
@@ -409,7 +435,7 @@ function handleFinderSelect(kind: 'handout' | 'background' | 'asset' | 'font', i
 async function handleCreateBackgroundInput(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
-  const [background] = await importFiles('background', [file])
+  const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
   await createProjectFromBackground(background)
   ;(event.target as HTMLInputElement).value = ''
 }
@@ -418,40 +444,76 @@ async function handleCreateBackgroundDrop(event: DragEvent) {
   event.preventDefault()
   const file = event.dataTransfer?.files?.[0]
   if (!file) return
-  const [background] = await importFiles('background', [file])
+  const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
   await createProjectFromBackground(background)
 }
 
-async function openProjectFromPath() {
-  if (!projectPathInput.value.trim()) return
-  await editor.openProjectFromPath(projectPathInput.value)
-}
-
 async function saveProject() {
-  await editor.saveCurrentProject()
+  const saved = await editor.saveCurrentProject()
+  if (saved && editor.currentProjectId) {
+    const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, 0.25, imageElements)
+    await saveProjectPreview(editor.currentProjectId, dataUrl)
+    await editor.refreshProjects()
+  }
 }
 
 async function exportCurrentImage() {
-  const path = exportPathInput.value.trim()
-  const stage = stageRef.value?.getNode()
-  if (!path || !stage) return
-  const dataUrl = stage.toDataURL({
-    pixelRatio: Math.max(0.1, Number(exportScale.value) || 1) / stageScale.value,
-    mimeType: path.toLowerCase().endsWith('.jpg') || path.toLowerCase().endsWith('.jpeg')
-      ? 'image/jpeg'
-      : 'image/png',
-  })
-  await exportImage(path, dataUrl)
+  const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
+  const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
   editor.status = `Exported image to ${path}`
+}
+
+async function exportHandoutProject(project: ProjectSummary) {
+  const payload = await openManagedProject(project.id)
+  const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
+  const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
+  editor.status = `Exported image to ${path}`
+}
+
+function selectedHandoutProject() {
+  const selected = selectedFinderItems.handout
+  if (selected.length !== 1) return undefined
+  return projectFromFinderEntry(selected[0])
+}
+
+function selectedHandoutStatus() {
+  const selected = selectedFinderItems.handout
+  if (selected.length === 0) return 'No handout selected'
+  if (selected.length > 1) return `${selected.length} items selected`
+  const project = selectedHandoutProject()
+  return project ? `Selected: ${project.title}` : 'Select a handout'
+}
+
+async function exportSelectedHandout() {
+  const project = selectedHandoutProject()
+  if (!project) return
+  await exportHandoutProject(project)
+}
+
+async function ensureProjectPreviews() {
+  for (const project of editor.projects) {
+    if (project.previewPath) continue
+    try {
+      const payload = await openManagedProject(project.id)
+      const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 0.25, imageElements)
+      await saveProjectPreview(project.id, dataUrl)
+    } catch (error) {
+      console.warn(error)
+    }
+  }
+  await editor.refreshProjects()
 }
 
 onMounted(async () => {
   try {
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
     syncImages(editor.library)
+    await ensureProjectPreviews()
     window.addEventListener('keydown', handleGlobalKeydown)
   } catch (error) {
     editor.status = String(error)
+  } finally {
+    isBooting.value = false
   }
 })
 
@@ -466,7 +528,17 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
 </script>
 
 <template>
-  <div v-if="editor.view === 'manager'" class="manager-shell">
+  <div v-if="isBooting" class="loading-shell">
+    <div class="loading-mark">
+      <span />
+      <span />
+      <span />
+    </div>
+    <strong>Handout Generator</strong>
+    <p>Loading library and projects...</p>
+  </div>
+
+  <div v-else-if="editor.view === 'manager'" class="manager-shell">
     <header class="manager-header">
       <div>
         <h1>Handout Generator</h1>
@@ -486,11 +558,6 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       <TabsContent value="handouts" class="manager-tab-content">
         <section class="manager-actions">
           <div class="create-header">
-            <Input v-model="projectPathInput" placeholder="/path/to/existing/project-folder" />
-            <Button variant="outline" @click="openProjectFromPath">
-              <FolderOpen data-icon="inline-start" />
-              Open folder
-            </Button>
             <Button @click="isCreateDialogOpen = true">
               <Plus data-icon="inline-start" />
               New handout
@@ -502,52 +569,32 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
           id="handout-finder"
           class="manager-finder"
           :driver="finderDrivers.handout"
-          :features="finderFeatures"
+          :features="finderFeaturesForKind('handout')"
+          :context-menu-items="handoutContextMenuItems"
           selection-mode="single"
           selection-filter-type="both"
           @select="(items) => handleFinderSelect('handout', items)"
           @path-change="(path) => handleFinderPathChange('handout', path)"
           @file-dclick="(event) => handleFinderFileDoubleClick('handout', event)"
-        />
+        >
+          <template #status-bar="{ count }">
+            <div class="finder-status-bar">
+              <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
+              <Button size="sm" :disabled="!selectedHandoutProject()" @click="exportSelectedHandout">
+                <Save data-icon="inline-start" />
+                Export PNG
+              </Button>
+            </div>
+          </template>
+        </VueFinder>
       </TabsContent>
 
       <TabsContent value="backgrounds" class="manager-tab-content">
-        <section
-          class="drop-panel"
-          :class="{ dragging: isDraggingBackground }"
-          @dragenter.prevent="isDraggingBackground = true"
-          @dragover.prevent="isDraggingBackground = true"
-          @dragleave.prevent="isDraggingBackground = false"
-          @drop="handleDrop('background', $event)"
-        >
-          <Image />
-          <strong>Drop background images here</strong>
-          <span>Used as full-canvas base images in handout projects.</span>
-          <div class="drop-actions">
-            <Input v-model="backgroundTags" placeholder="tags: map, paper, room" />
-            <Button as="label" variant="outline">
-              <Upload data-icon="inline-start" />
-              Upload
-              <input class="sr-only" type="file" accept="image/*" multiple @change="handleFileInput('background', $event)" />
-            </Button>
-          </div>
-        </section>
-        <div class="folder-toolbar">
-          <label>
-            Background folder
-            <select v-model="selectedBackgroundFolder" class="folder-select">
-              <option value="">Root</option>
-              <option v-for="folder in foldersForKind('background')" :key="folder" :value="folder">{{ folder }}</option>
-            </select>
-          </label>
-          <Input v-model="newBackgroundFolder" placeholder="New folder" />
-          <Button variant="outline" @click="createResourceFolder('background')">New folder</Button>
-        </div>
         <VueFinder
           id="background-finder"
           class="manager-finder compact-finder"
           :driver="finderDrivers.background"
-          :features="finderFeatures"
+          :features="finderFeaturesForKind('background')"
           :context-menu-items="imageHandoutContextMenuItems.background"
           selection-mode="single"
           selection-filter-type="both"
@@ -572,42 +619,11 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </TabsContent>
 
       <TabsContent value="assets" class="manager-tab-content">
-        <section
-          class="drop-panel"
-          :class="{ dragging: isDraggingAsset }"
-          @dragenter.prevent="isDraggingAsset = true"
-          @dragover.prevent="isDraggingAsset = true"
-          @dragleave.prevent="isDraggingAsset = false"
-          @drop="handleDrop('asset', $event)"
-        >
-          <Image />
-          <strong>Drop image assets and textures here</strong>
-          <span>Assets can be inserted as movable layers inside a handout.</span>
-          <div class="drop-actions">
-            <Input v-model="assetTags" placeholder="tags: clue, texture, token" />
-            <Button as="label" variant="outline">
-              <Upload data-icon="inline-start" />
-              Upload
-              <input class="sr-only" type="file" accept="image/*" multiple @change="handleFileInput('asset', $event)" />
-            </Button>
-          </div>
-        </section>
-        <div class="folder-toolbar">
-          <label>
-            Asset folder
-            <select v-model="selectedAssetFolder" class="folder-select">
-              <option value="">Root</option>
-              <option v-for="folder in foldersForKind('asset')" :key="folder" :value="folder">{{ folder }}</option>
-            </select>
-          </label>
-          <Input v-model="newAssetFolder" placeholder="New folder" />
-          <Button variant="outline" @click="createResourceFolder('asset')">New folder</Button>
-        </div>
         <VueFinder
           id="asset-finder"
           class="manager-finder compact-finder"
           :driver="finderDrivers.asset"
-          :features="finderFeatures"
+          :features="finderFeaturesForKind('asset')"
           :context-menu-items="imageHandoutContextMenuItems.asset"
           selection-mode="single"
           selection-filter-type="both"
@@ -632,48 +648,11 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
       </TabsContent>
 
       <TabsContent value="fonts" class="manager-tab-content">
-        <section
-          class="drop-panel"
-          :class="{ dragging: isDraggingFont }"
-          @dragenter.prevent="isDraggingFont = true"
-          @dragover.prevent="isDraggingFont = true"
-          @dragleave.prevent="isDraggingFont = false"
-          @drop="handleDrop('font', $event)"
-        >
-          <Type />
-          <strong>Drop font files here</strong>
-          <span>Fonts are added to the global font library and can be tagged.</span>
-          <div class="drop-actions">
-            <Input v-model="fontTags" placeholder="tags: serif, handwriting, title" />
-            <Button as="label" variant="outline">
-              <Upload data-icon="inline-start" />
-              Upload
-              <input
-                class="sr-only"
-                type="file"
-                accept=".ttf,.otf,.woff,.woff2,font/*"
-                multiple
-                @change="handleFileInput('font', $event)"
-              />
-            </Button>
-          </div>
-        </section>
-        <div class="folder-toolbar">
-          <label>
-            Font folder
-            <select v-model="selectedFontFolder" class="folder-select">
-              <option value="">Root</option>
-              <option v-for="folder in foldersForKind('font')" :key="folder" :value="folder">{{ folder }}</option>
-            </select>
-          </label>
-          <Input v-model="newFontFolder" placeholder="New folder" />
-          <Button variant="outline" @click="createResourceFolder('font')">New folder</Button>
-        </div>
         <VueFinder
           id="font-finder"
           class="manager-finder compact-finder"
           :driver="finderDrivers.font"
-          :features="finderFeatures"
+          :features="finderFeaturesForKind('font')"
           selection-mode="single"
           selection-filter-type="both"
           @select="(items) => handleFinderSelect('font', items)"
@@ -723,40 +702,11 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         </TabsList>
 
         <TabsContent value="assets" class="rail-tab-content">
-          <section
-            class="mini-drop"
-            :class="{ dragging: isDraggingAsset }"
-            @dragenter.prevent="isDraggingAsset = true"
-            @dragover.prevent="isDraggingAsset = true"
-            @dragleave.prevent="isDraggingAsset = false"
-            @drop="handleDrop('asset', $event)"
-          >
-            Drop assets here
-          </section>
-          <div class="import-row">
-            <Input v-model="assetTags" placeholder="tags: paper, clue" />
-            <Button as="label" size="sm" variant="outline">
-              <Upload data-icon="inline-start" />
-              Import
-              <input class="sr-only" type="file" accept="image/*" multiple @change="handleFileInput('asset', $event)" />
-            </Button>
-          </div>
-          <div class="folder-toolbar compact">
-            <label>
-              Folder
-              <select v-model="selectedAssetFolder" class="folder-select">
-                <option value="">Root</option>
-                <option v-for="folder in foldersForKind('asset')" :key="folder" :value="folder">{{ folder }}</option>
-              </select>
-            </label>
-            <Input v-model="newAssetFolder" placeholder="New folder" />
-            <Button size="sm" variant="outline" @click="createResourceFolder('asset')">New</Button>
-          </div>
           <VueFinder
             id="editor-asset-finder"
             class="rail-finder"
             :driver="finderDrivers.asset"
-            :features="finderFeatures"
+            :features="finderFeaturesForKind('asset')"
             selection-mode="single"
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('asset', path)"
@@ -784,46 +734,11 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
         </TabsContent>
 
         <TabsContent value="fonts" class="rail-tab-content">
-          <section
-            class="mini-drop"
-            :class="{ dragging: isDraggingFont }"
-            @dragenter.prevent="isDraggingFont = true"
-            @dragover.prevent="isDraggingFont = true"
-            @dragleave.prevent="isDraggingFont = false"
-            @drop="handleDrop('font', $event)"
-          >
-            Drop fonts here
-          </section>
-          <div class="import-row">
-            <Input v-model="fontTags" placeholder="tags: serif, title" />
-            <Button as="label" size="sm" variant="outline">
-              <Upload data-icon="inline-start" />
-              Import
-              <input
-                class="sr-only"
-                type="file"
-                accept=".ttf,.otf,.woff,.woff2,font/*"
-                multiple
-                @change="handleFileInput('font', $event)"
-              />
-            </Button>
-          </div>
-          <div class="folder-toolbar compact">
-            <label>
-              Folder
-              <select v-model="selectedFontFolder" class="folder-select">
-                <option value="">Root</option>
-                <option v-for="folder in foldersForKind('font')" :key="folder" :value="folder">{{ folder }}</option>
-              </select>
-            </label>
-            <Input v-model="newFontFolder" placeholder="New folder" />
-            <Button size="sm" variant="outline" @click="createResourceFolder('font')">New</Button>
-          </div>
           <VueFinder
             id="editor-font-finder"
             class="rail-finder"
             :driver="finderDrivers.font"
-            :features="finderFeatures"
+            :features="finderFeaturesForKind('font')"
             selection-mode="single"
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('font', path)"
@@ -862,10 +777,15 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
               v-for="layer in editor.layers"
               :key="layer.id"
               class="layer-row"
-              :class="{ selected: editor.selectedLayerId === layer.id }"
+              :class="{ selected: editor.selectedLayerId === layer.id, dragging: draggedLayerId === layer.id }"
               role="button"
               tabindex="0"
+              draggable="true"
               @click="selectCanvasLayer(layer.id)"
+              @dragstart="startLayerListDrag(layer, $event)"
+              @dragover.prevent
+              @drop="handleLayerListDrop(layer, $event)"
+              @dragend="draggedLayerId = ''"
               @keydown.enter="selectCanvasLayer(layer.id)"
             >
               <Layers class="layer-icon" />
@@ -891,12 +811,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
 
     <main class="workspace">
       <header class="topbar">
-        <div class="project-fields">
-          <Input v-model="projectPathInput" placeholder="/path/to/project-folder" />
-          <Button variant="outline" @click="openProjectFromPath">
-            <FolderOpen data-icon="inline-start" />
-            Open
-          </Button>
+        <div class="topbar-actions">
           <Button @click="saveProject">
             <Save data-icon="inline-start" />
             Save
@@ -924,9 +839,13 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
 
         <div
           class="stage-frame"
-          :class="{ 'stage-frame-dropping': draggedAssetId }"
+          :class="{ 'stage-frame-dropping': draggedAssetId, 'stage-frame-panning': panState.active }"
           @dragover.prevent
           @drop="handleCanvasAssetDrop"
+          @pointerdown="startCanvasPan"
+          @pointermove="moveCanvasPan"
+          @pointerup="stopCanvasPan"
+          @pointerleave="stopCanvasPan"
         >
           <v-stage ref="stageRef" :config="stageConfig" @click="handleStagePointer" @tap="handleStagePointer">
             <v-layer>
@@ -958,6 +877,7 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                   @click="selectCanvasLayer(layer.id, $event)"
                   @tap="selectCanvasLayer(layer.id, $event)"
                   @dragstart="selectCanvasLayer(layer.id, $event)"
+                  @dragmove="onDragMove(layer, $event)"
                   @dragend="onDragEnd(layer)"
                   @transformend="onTransformEnd(layer)"
                 />
@@ -968,8 +888,31 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
                   @click="selectCanvasLayer(layer.id, $event)"
                   @tap="selectCanvasLayer(layer.id, $event)"
                   @dragstart="selectCanvasLayer(layer.id, $event)"
+                  @dragmove="onDragMove(layer, $event)"
                   @dragend="onDragEnd(layer)"
                   @transformend="onTransformEnd(layer)"
+                />
+              </template>
+              <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">
+                <v-line
+                  v-if="guide.orientation === 'vertical'"
+                  :config="{
+                    points: [guide.value, 0, guide.value, editor.document.canvas.height],
+                    stroke: '#0ea5e9',
+                    strokeWidth: 1,
+                    dash: [6, 4],
+                    listening: false,
+                  }"
+                />
+                <v-line
+                  v-else
+                  :config="{
+                    points: [0, guide.value, editor.document.canvas.width, guide.value],
+                    stroke: '#0ea5e9',
+                    strokeWidth: 1,
+                    dash: [6, 4],
+                    listening: false,
+                  }"
                 />
               </template>
               <v-transformer
@@ -988,7 +931,6 @@ watch(() => editor.document.layers, updateTransformer, { deep: true })
     </main>
 
     <RightInspector
-      v-model:export-path="exportPathInput"
       v-model:export-scale="exportScale"
       @export-image="exportCurrentImage"
     />

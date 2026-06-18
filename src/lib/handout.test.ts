@@ -8,6 +8,7 @@ import {
   updateLayer,
 } from './handout'
 import { createHistory } from './history'
+import { downloadFileName } from './render'
 
 describe('handout document model', () => {
   it('creates a versioned pixel-based document', () => {
@@ -49,6 +50,9 @@ describe('handout document model', () => {
       text: 'Missing witness report',
       fontSize: 42,
       align: 'left',
+      italic: false,
+      underline: false,
+      strikethrough: false,
     })
   })
 
@@ -84,5 +88,13 @@ describe('command history', () => {
     history.redo()
     expect(history.current.layers[0]).toMatchObject({ text: 'A', x: 24 })
     expect('history' in history.current).toBe(false)
+  })
+})
+
+describe('export helpers', () => {
+  it('creates safe timestamped png file names', () => {
+    expect(downloadFileName('Case File: Alpha.png', new Date(2026, 5, 18, 7, 8, 9))).toBe(
+      'Case-File-Alpha-20260618-070809.png',
+    )
   })
 })

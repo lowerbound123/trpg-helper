@@ -1,7 +1,7 @@
 import { computed, type Ref } from 'vue'
 import { contextMenuItems as defaultContextMenuItems, type DirEntry, type Driver, type FsData, type Item } from 'vuefinder'
 
-import type { LibraryRecord, ProjectSummary } from '@/lib/backend'
+import { fileUrl, type LibraryRecord, type ProjectSummary } from '@/lib/backend'
 import { useEditorStore } from '@/stores/editor'
 
 export type FinderKind = 'handout' | 'background' | 'asset' | 'font'
@@ -27,9 +27,18 @@ export const finderFeatures = {
   upload: false,
 }
 
+export function finderFeaturesForKind(kind: FinderKind) {
+  return {
+    ...finderFeatures,
+    upload: kind !== 'handout',
+  }
+}
+
 type UseFinderOptions = {
   addAssetToCanvas: (asset: LibraryRecord) => void | Promise<void>
   createHandoutFromImageRecord: (kind: 'background' | 'asset', record: LibraryRecord) => void | Promise<void>
+  exportHandoutProject: (project: ProjectSummary) => void | Promise<void>
+  uploadFiles: (kind: 'background' | 'asset' | 'font', files: File[], folder: string) => unknown | Promise<unknown>
   previewUrl: (record: LibraryRecord) => string
   selectedFolders: {
     handout: Ref<string>
@@ -70,7 +79,8 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     return editor.library.fontFolders
   }
 
-  function projectPreviewUrl(project: { backgroundAssetId?: string | null }) {
+  function projectPreviewUrl(project: { backgroundAssetId?: string | null; previewPath?: string | null }) {
+    if (project.previewPath) return fileUrl(project.previewPath)
     const image = editor.resolveBackground(project.backgroundAssetId || undefined)
       || editor.resolveAsset(project.backgroundAssetId || undefined)
     return image ? options.previewUrl(image) : ''
@@ -248,6 +258,12 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     return record
   }
 
+  function projectFromFinderEntry(entry?: DirEntry | null) {
+    if (!entry || entry.type !== 'file') return undefined
+    const id = idFromFinderEntry('handout', entry)
+    return editor.projects.find((project) => project.id === id)
+  }
+
   async function createFolderFromFinder(kind: FinderKind, parentPath: string, name: string) {
     const parent = normalizeFinderFolder(parentPath)
     const folder = [parent, name.trim()].filter(Boolean).join('/')
@@ -280,6 +296,23 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     }
 
     return {
+      configureUploader(uppy, context) {
+        if (kind === 'handout') return
+        uppy.addUploader(async (fileIDs: string[]) => {
+          const files = fileIDs
+            .map((id) => uppy.getFile(id))
+            .filter(Boolean)
+          const folder = normalizeFinderFolder(context.getTargetPath())
+          await options.uploadFiles(kind, files.map((file) => file.data as File), folder)
+          for (const file of files) {
+            uppy.emit('upload-success', file, { status: 200, body: {} })
+          }
+          return {
+            successful: fileIDs,
+            failed: [],
+          }
+        })
+      },
       async list(params) {
         return finderData(kind, params?.path)
       },
@@ -315,7 +348,8 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
       getPreviewUrl(params) {
         const id = idFromFinderPath(kind, params.path)
         if (kind === 'handout') {
-          return projectPreviewUrl({ backgroundAssetId: editor.projects.find((project) => project.id === id)?.backgroundAssetId })
+          const project = editor.projects.find((item) => item.id === id)
+          return project ? projectPreviewUrl(project) : ''
         }
         const record = recordsForKindWithoutSearch(kind).find((item) => item.id === id)
         return record ? options.previewUrl(record) : ''
@@ -364,6 +398,26 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     asset: createImageHandoutContextMenu('asset'),
   }))
 
+  function createHandoutContextMenu(): Item[] {
+    let contextTarget: DirEntry | null = null
+    const exportItem: Item = {
+      id: 'export_handout_png',
+      title: () => 'Export PNG',
+      order: 46,
+      show(_app, context) {
+        contextTarget = context.target
+        return Boolean(projectFromFinderEntry(contextTarget))
+      },
+      action(_app, selectedItems) {
+        const project = projectFromFinderEntry(selectedItems.find((item) => item.type === 'file')) || projectFromFinderEntry(contextTarget)
+        if (project) void options.exportHandoutProject(project)
+      },
+    }
+    return [...defaultContextMenuItems, exportItem]
+  }
+
+  const handoutContextMenuItems = computed(() => createHandoutContextMenu())
+
   function handleFinderPathChange(kind: FinderKind, path: string) {
     setSelectedFolderForFinder(kind, normalizeFinderFolder(path))
   }
@@ -384,9 +438,11 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     foldersForKind,
     handleFinderFileDoubleClick,
     handleFinderPathChange,
+    handoutContextMenuItems,
     imageHandoutContextMenuItems,
     imageRecordFromFinderEntry,
     projectPreviewUrl,
+    projectFromFinderEntry,
     recordFromFinderEntry,
   }
 }

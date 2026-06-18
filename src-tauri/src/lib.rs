@@ -7,7 +7,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -89,6 +89,7 @@ struct ProjectSummary {
     #[serde(default)]
     folder: String,
     background_asset_id: Option<String>,
+    preview_path: Option<String>,
     updated_at: DateTime<Utc>,
 }
 
@@ -372,6 +373,11 @@ fn project_summary(root: &Path, payload: &ProjectPayload) -> ProjectSummary {
             .and_then(|canvas| canvas.get("backgroundAssetId"))
             .and_then(Value::as_str)
             .map(ToString::to_string),
+        preview_path: {
+            let path = root.join("preview.png");
+            path.exists()
+                .then(|| path.to_string_lossy().to_string())
+        },
         updated_at,
     }
 }
@@ -721,6 +727,36 @@ fn export_image(file_path: String, data_url: String) -> CommandResult<String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn export_image_to_downloads(app: AppHandle, file_name: String, data_url: String) -> CommandResult<String> {
+    let clean_name = clean_file_name(&file_name);
+    let file_name = if clean_name.to_lowercase().ends_with(".png") {
+        clean_name
+    } else {
+        format!("{clean_name}.png")
+    };
+    let downloads = app.path().download_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&downloads)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    let path = downloads.join(file_name);
+    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+        .map_err(AppError::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn save_project_preview(app: AppHandle, project_id: String, data_url: String) -> CommandResult<String> {
+    let root = project_dir(&app, &project_id).map_err(String::from)?;
+    fs::create_dir_all(&root)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    let path = root.join("preview.png");
+    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+        .map_err(AppError::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -737,6 +773,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             export_image,
+            export_image_to_downloads,
+            save_project_preview,
             create_project,
             create_library_folder,
             create_project_folder,

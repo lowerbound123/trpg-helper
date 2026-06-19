@@ -115,9 +115,11 @@ const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.find
 const backgroundFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.backgroundGridScale) }
 let previewMaintenanceRunning = false
 let exportProgressTimer: number | undefined
+let effectCacheRaf: number | undefined
 let lastSnapLogSignature = ''
 let suppressNextStageClick = false
 let lastLayerListSelectionId = ''
+const pendingEffectCacheLayerIds = new Set<string>()
 
 const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 const shapeItems: Array<{ kind: ShapeKind; label: string; detail: string }> = [
@@ -176,10 +178,30 @@ const selectedLayerTransformSignature = computed(() => {
 
 const selectedLayerRenderSignature = computed(() => {
   const layer = editor.selectedLayer
-  return layer ? JSON.stringify(layer) : ''
+  if (!layer) return ''
+  const { effects: _effects, ...cacheRelevantLayer } = layer
+  return JSON.stringify(cacheRelevantLayer)
 })
 
 const selectedLayerIdsSignature = computed(() => editor.selectedLayerIds.join('|'))
+
+const selectedOnlyLineShape = computed(() =>
+  editor.selectedLayers.length === 1
+  && isShapeLayer(editor.selectedLayers[0])
+  && editor.selectedLayers[0].shape === 'line',
+)
+
+const transformerConfig = computed(() => ({
+  rotateEnabled: true,
+  ignoreStroke: true,
+  enabledAnchors: selectedOnlyLineShape.value
+    ? ['middle-left', 'middle-right']
+    : ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left'],
+  boundBoxFunc: (oldBox: unknown, newBox: { width: number; height: number }) => {
+    if (selectedOnlyLineShape.value) return Math.abs(newBox.width) < 12 ? oldBox : newBox
+    return newBox.width < 12 || newBox.height < 12 ? oldBox : newBox
+  },
+}))
 
 const stageConfig = computed(() => ({
   width: stageViewport.width,
@@ -570,6 +592,17 @@ function addFontTextToCanvas(font: LibraryRecord, position?: { x?: number; y?: n
   void updateTransformer()
 }
 
+function createFontTextOnCanvas(font: LibraryRecord, position?: { x?: number; y?: number }) {
+  logText('font-drop-create-text', {
+    fontId: font.id,
+    name: font.name,
+    family: fontFamily(font),
+    position,
+  })
+  editor.addText(font, position)
+  void updateTransformer()
+}
+
 function addShapeToCanvas(shape: ShapeKind, position?: { x?: number; y?: number }) {
   editor.addShape(shape, position)
   void updateTransformer()
@@ -579,9 +612,12 @@ function handleCanvasDrop(event: DragEvent) {
   event.preventDefault()
   const point = canvasPointFromClient(event.clientX, event.clientY)
 
-  const font = editor.resolveFont(event.dataTransfer?.getData('application/x-handout-font') || draggedFontId.value)
+  const fontId = event.dataTransfer?.getData('application/x-handout-font') || draggedFontId.value
+  const fontName = event.dataTransfer?.getData('text/plain') || ''
+  const font = editor.resolveFont(fontId)
+    || editor.library.fonts.find((item) => item.name === fontName || fontFamily(item) === fontName)
   if (font) {
-    addFontTextToCanvas(font, point)
+    createFontTextOnCanvas(font, point)
     draggedFontId.value = ''
     return
   }
@@ -1013,26 +1049,60 @@ async function updateTransformer() {
   transformer.getLayer()?.batchDraw()
 }
 
-function refreshLayerEffectCache(layerId: string) {
+function refreshLayerEffectCache(layerId: string, options?: { recache?: boolean }) {
   const layer = editor.document.layers.find((item) => item.id === layerId)
   const node = layerNodeRefs[layerId]?.getNode()
   if (!layer || !node) return
-  node.clearCache()
-  if (hasVisibleEffects(layer.effects)) node.cache()
+  if (hasVisibleEffects(layer.effects)) {
+    if (options?.recache || !node.isCached()) {
+      node.clearCache()
+      node.cache({ pixelRatio: 1 })
+    }
+  } else if (node.isCached()) {
+    node.clearCache()
+  }
   node.getLayer()?.batchDraw()
 }
 
 async function refreshLayerEffectCacheAfterUpdate(layerId: string) {
   await nextTick()
-  refreshLayerEffectCache(layerId)
+  refreshLayerEffectCache(layerId, { recache: true })
 }
 
-async function refreshLayerEffectCaches() {
-  await nextTick()
-  for (const layer of editor.document.layers) {
-    refreshLayerEffectCache(layer.id)
-  }
-  stageRef.value?.getNode().batchDraw()
+function scheduleLayerEffectCacheRefresh(layerIds: string[], options?: { recache?: boolean }) {
+  for (const layerId of layerIds) pendingEffectCacheLayerIds.add(layerId)
+  if (effectCacheRaf) return
+  effectCacheRaf = window.requestAnimationFrame(async () => {
+    effectCacheRaf = undefined
+    const ids = Array.from(pendingEffectCacheLayerIds)
+    pendingEffectCacheLayerIds.clear()
+    await nextTick()
+    const startedAt = performance.now()
+    for (const layerId of ids) refreshLayerEffectCache(layerId, options)
+    stageRef.value?.getNode().batchDraw()
+    if (ids.length) {
+      logViewport('effect-cache-refresh', {
+        layerIds: ids,
+        recache: Boolean(options?.recache),
+        durationMs: Math.round(performance.now() - startedAt),
+      })
+    }
+  })
+}
+
+function changedEffectLayerIds(nextSignature: string, previousSignature?: string) {
+  if (!previousSignature) return editor.document.layers.map((layer) => layer.id)
+  const previous = new Map(previousSignature.split('|').map((item) => {
+    const [id, ...rest] = item.split(':')
+    return [id, rest.join(':')]
+  }))
+  return nextSignature
+    .split('|')
+    .map((item) => {
+      const [id, ...rest] = item.split(':')
+      return previous.get(id) === rest.join(':') ? undefined : id
+    })
+    .filter((id): id is string => Boolean(id))
 }
 
 async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[], folder = '') {
@@ -1105,7 +1175,7 @@ function handleDirectFinderDragover(kind: 'background' | 'asset' | 'font', event
 
 function beginExportProgress() {
   if (exportProgressTimer) window.clearInterval(exportProgressTimer)
-  exportProgress.value = 0
+  exportProgress.value = 1
   exportProgressTimer = window.setInterval(() => {
     const current = exportProgress.value
     if (current < 70) exportProgress.value = Math.min(70, current + Math.max(1, Math.round((70 - current) * 0.16)))
@@ -1124,7 +1194,12 @@ function waitForNextPaint() {
 async function prepareExportProgress() {
   beginExportProgress()
   await nextTick()
-  exportProgress.value = 1
+  await nextTick()
+  await waitForNextPaint()
+}
+
+async function setExportProgress(value: number) {
+  exportProgress.value = Math.max(exportProgress.value, value)
   await nextTick()
   await waitForNextPaint()
 }
@@ -1250,27 +1325,36 @@ async function exportCurrentImage() {
   if (isExportingCurrent.value) return
   const clickedAt = performance.now()
   isExportingCurrent.value = true
-  await prepareExportProgress()
+  exportProgress.value = 1
   exportLog.value = 'Preparing export...'
+  await prepareExportProgress()
   const clickToProgressMs = Math.round(performance.now() - clickedAt)
   logExport('export current start', { title: editor.document.title, scale: exportScale.value, clickToProgressMs })
   try {
+    exportLog.value = 'Checking export changes...'
+    await setExportProgress(8)
     const signatureStartedAt = performance.now()
     const signature = JSON.stringify({ document: editor.document, scale: exportScale.value })
     const signatureMs = Math.round(performance.now() - signatureStartedAt)
     if (lastCurrentExport.value?.signature === signature) {
       exportLog.value = `Unchanged image already exported to ${lastCurrentExport.value.path}`
       logExport('export current unchanged', { signatureMs, clickToProgressMs, path: lastCurrentExport.value.path })
-      finishExportProgress(false)
+      finishExportProgress(true)
       return
     }
+    exportLog.value = 'Loading export images...'
+    await setExportProgress(18)
     const imageLoadStartedAt = performance.now()
     await ensureDocumentImages(editor.document)
     const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
+    exportLog.value = 'Rendering export image...'
+    await setExportProgress(42)
     const renderStartedAt = performance.now()
     const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
     const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
     logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
+    exportLog.value = 'Writing PNG to Downloads...'
+    await setExportProgress(86)
     const writeStartedAt = performance.now()
     const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
     const writeMs = Math.round(performance.now() - writeStartedAt)
@@ -1429,6 +1513,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeStageViewport)
   if (exportProgressTimer) window.clearInterval(exportProgressTimer)
+  if (effectCacheRaf) window.cancelAnimationFrame(effectCacheRaf)
 })
 
 watch(() => editor.library.backgrounds, () => { void syncImages(editor.library) }, { deep: true })
@@ -1442,7 +1527,9 @@ watch(selectedLayerRenderSignature, () => {
 watch(textLayerRenderSignature, () => {
   if (editor.view === 'editor') void logTextLayerMetrics('text-signature-change')
 }, { flush: 'post' })
-watch(layerEffectsSignature, () => { void refreshLayerEffectCaches() })
+watch(layerEffectsSignature, (nextSignature, previousSignature) => {
+  scheduleLayerEffectCacheRefresh(changedEffectLayerIds(nextSignature, previousSignature))
+})
 watch(
   backgroundRenderSignature,
   () => {
@@ -1993,12 +2080,7 @@ watch(
                 />
                 <v-transformer
                   ref="transformerRef"
-                  :config="{
-                    rotateEnabled: true,
-                    ignoreStroke: true,
-                    boundBoxFunc: (oldBox: unknown, newBox: { width: number; height: number }) =>
-                      newBox.width < 12 || newBox.height < 12 ? oldBox : newBox,
-                  }"
+                  :config="transformerConfig"
                 />
               </v-group>
               </v-layer>

@@ -34,6 +34,7 @@ const selectedTextLayers = computed(() => selectedLayers.value.filter(isTextLaye
 const selectedShapeLayers = computed(() => selectedLayers.value.filter(isShapeLayer))
 const allSelectedText = computed(() => selectedLayers.value.length > 0 && selectedTextLayers.value.length === selectedLayers.value.length)
 const allSelectedShapes = computed(() => selectedLayers.value.length > 0 && selectedShapeLayers.value.length === selectedLayers.value.length)
+const allSelectedLines = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'line'))
 const backgroundAsset = computed(() =>
   editor.resolveBackground(editor.document.canvas.backgroundAssetId)
     || editor.resolveAsset(editor.document.canvas.backgroundAssetId),
@@ -65,6 +66,7 @@ const commonStrikethrough = computed(() => commonTextValue((layer) => layer.stri
 const commonShapeFill = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.fill), undefined))
 const commonShapeStroke = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.stroke), undefined))
 const commonShapeStrokeWidth = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.strokeWidth), undefined))
+const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
 const continuousEditTimers = new Map<string, number>()
@@ -364,6 +366,17 @@ function patchDocumentSaturation(value: number[] | undefined) {
             </label>
           </template>
           <template v-if="allSelectedShapes">
+            <label v-if="allSelectedLines">
+              Line length
+              <Input
+                type="number"
+                min="12"
+                step="1"
+                :model-value="commonWidth ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ width: Math.max(12, Number(value) || 12) })"
+              />
+            </label>
             <div class="two-col">
               <label>
                 Fill

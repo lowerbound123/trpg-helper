@@ -10,6 +10,7 @@ import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { appConfiguration } from '@/lib/configuration'
+import { fontRecordFamily } from '@/lib/backend'
 import { isShapeLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
@@ -94,7 +95,7 @@ function setFont(fontId: string) {
   const font = editor.resolveFont(fontId)
   editor.patchSelectedLayers({
     fontId,
-    fontFamily: font?.name.replace(/\.[^.]+$/, '') || 'Inter',
+    fontFamily: fontRecordFamily(font),
   })
 }
 

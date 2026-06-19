@@ -1,6 +1,6 @@
 import Konva from 'konva'
 
-import { appendDebugLog, readFileDataUrl, type LibraryIndex, type LibraryRecord } from './backend'
+import { appendDebugLog, fontRecordFamily, readFileDataUrl, type LibraryIndex, type LibraryRecord } from './backend'
 import { hasVisibleEffects, konvaEffectConfig } from './effects'
 import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeLayer, TextLayer } from './handout'
 
@@ -29,7 +29,7 @@ function isShapeLayer(layer: HandoutLayer): layer is ShapeLayer {
 }
 
 function fontFamily(font: LibraryRecord) {
-  return font.name.replace(/\.[^.]+$/, '') || font.name
+  return fontRecordFamily(font)
 }
 
 async function loadImage(record: LibraryRecord, cache: ImageCache) {
@@ -71,6 +71,7 @@ async function ensureFont(font: LibraryRecord) {
     id: font.id,
     name: font.name,
     family,
+    recordFamily: font.fontFamily,
     mediaType: font.mediaType,
     sourceLength: source.length,
   })
@@ -90,6 +91,7 @@ async function ensureFont(font: LibraryRecord) {
       id: font.id,
       name: font.name,
       family,
+      recordFamily: font.fontFamily,
       error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
     })
     throw error
@@ -262,10 +264,11 @@ async function renderHandoutStage(
     if (isTextLayer(item)) {
       const font = library.fonts.find((record) => record.id === item.fontId)
       if (font) await ensureFont(font)
+      const resolvedFontFamily = font ? fontFamily(font) : item.fontFamily
       const node = new Konva.Text({
         ...commonConfig(item),
         text: item.text,
-        fontFamily: item.fontFamily,
+        fontFamily: resolvedFontFamily,
         fontSize: item.fontSize,
         fontStyle: fontStyle(item),
         fill: item.fill,
@@ -279,12 +282,14 @@ async function renderHandoutStage(
         text: item.text,
         fontId: item.fontId,
         fontFamily: item.fontFamily,
+        recordFontFamily: font?.fontFamily,
+        renderFontFamily: resolvedFontFamily,
         fontSize: item.fontSize,
         fontStyle: fontStyle(item),
         measuredWidth: node.textWidth,
         measuredHeight: node.textHeight,
         clientRect: node.getClientRect({ skipTransform: true }),
-        fontCheck: globalThis.document.fonts?.check?.(`${item.fontSize}px "${item.fontFamily}"`),
+        fontCheck: globalThis.document.fonts?.check?.(`${item.fontSize}px "${resolvedFontFamily}"`),
       })
       content.add(prepareEffectNode(node, item.effects))
     }

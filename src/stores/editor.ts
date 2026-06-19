@@ -25,6 +25,7 @@ import {
   emptyLibrary,
   appendDebugLog,
   fileUrl,
+  fontRecordFamily,
   createLibraryFolder,
   createProject,
   createProjectFolder,
@@ -59,7 +60,7 @@ const tagList = (value: string) =>
     .filter(Boolean)
 
 function fontFamily(font?: LibraryRecord) {
-  return font?.name?.replace(/\.[^.]+$/, '') || 'Inter'
+  return fontRecordFamily(font)
 }
 
 function logText(message: string, data?: Record<string, unknown>) {
@@ -440,6 +441,7 @@ export const useEditorStore = defineStore('editor', () => {
       id: font.id,
       name: font.name,
       family,
+      recordFamily: font.fontFamily,
       mediaType: font.mediaType,
       source,
     })
@@ -451,6 +453,7 @@ export const useEditorStore = defineStore('editor', () => {
         id: font.id,
         name: font.name,
         family,
+        recordFamily: font.fontFamily,
         status: face.status,
         check: globalThis.document.fonts.check(`16px "${family}"`),
       })

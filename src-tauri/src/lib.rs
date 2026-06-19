@@ -48,6 +48,8 @@ struct LibraryRecord {
     file_name: String,
     path: String,
     thumbnail_path: Option<String>,
+    #[serde(default)]
+    font_family: Option<String>,
     tags: Vec<String>,
     #[serde(default)]
     folder: String,
@@ -287,6 +289,132 @@ fn clean_file_name(file_name: &str) -> String {
         .collect()
 }
 
+fn be_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_be_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+    ]))
+}
+
+fn be_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_be_bytes([
+        *bytes.get(offset)?,
+        *bytes.get(offset + 1)?,
+        *bytes.get(offset + 2)?,
+        *bytes.get(offset + 3)?,
+    ]))
+}
+
+fn decode_font_name(bytes: &[u8], platform_id: u16) -> Option<String> {
+    let value = if platform_id == 0 || platform_id == 3 {
+        if bytes.len() % 2 != 0 {
+            return None;
+        }
+        let units = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        String::from_utf16(&units).ok()?
+    } else {
+        String::from_utf8_lossy(bytes).to_string()
+    };
+    let value = value.trim_matches(char::from(0)).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn extract_font_family_from_bytes(bytes: &[u8]) -> Option<String> {
+    let num_tables = usize::from(be_u16(bytes, 4)?);
+    let mut name_offset = 0usize;
+    let mut name_length = 0usize;
+    for index in 0..num_tables {
+        let record_offset = 12 + index * 16;
+        let tag = bytes.get(record_offset..record_offset + 4)?;
+        if tag == b"name" {
+            name_offset = usize::try_from(be_u32(bytes, record_offset + 8)?).ok()?;
+            name_length = usize::try_from(be_u32(bytes, record_offset + 12)?).ok()?;
+            break;
+        }
+    }
+    if name_offset == 0 || name_offset.checked_add(name_length)? > bytes.len() {
+        return None;
+    }
+
+    let count = usize::from(be_u16(bytes, name_offset + 2)?);
+    let string_base = name_offset + usize::from(be_u16(bytes, name_offset + 4)?);
+    let mut candidates: Vec<(u16, bool, bool, String)> = Vec::new();
+    for index in 0..count {
+        let offset = name_offset + 6 + index * 12;
+        let platform_id = be_u16(bytes, offset)?;
+        let language_id = be_u16(bytes, offset + 4)?;
+        let name_id = be_u16(bytes, offset + 6)?;
+        if !matches!(name_id, 16 | 1 | 4 | 6) {
+            continue;
+        }
+        let length = usize::from(be_u16(bytes, offset + 8)?);
+        let string_offset = string_base + usize::from(be_u16(bytes, offset + 10)?);
+        let string_end = string_offset.checked_add(length)?;
+        let value = decode_font_name(bytes.get(string_offset..string_end)?, platform_id)?;
+        let unicode = platform_id == 0 || platform_id == 3;
+        let english = language_id == 0x0409 || language_id == 0;
+        candidates.push((name_id, unicode, english, value));
+    }
+
+    for preferred_name_id in [16u16, 1, 4, 6] {
+        if let Some((_, _, _, value)) = candidates
+            .iter()
+            .filter(|candidate| candidate.0 == preferred_name_id)
+            .max_by_key(|candidate| (candidate.1, candidate.2))
+        {
+            return Some(value.clone());
+        }
+    }
+    None
+}
+
+fn ensure_font_metadata(index: &mut LibraryIndex) -> bool {
+    let mut changed = false;
+    for record in &mut index.fonts {
+        if record
+            .font_family
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            continue;
+        }
+        match fs::read(&record.path)
+            .ok()
+            .and_then(|bytes| extract_font_family_from_bytes(&bytes))
+        {
+            Some(font_family) => {
+                record.font_family = Some(font_family.clone());
+                record.updated_at = Utc::now();
+                changed = true;
+                let _ = append_debug_log(format!(
+                    "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repaired\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"fontFamily\":\"{}\"}}}}",
+                    Utc::now().to_rfc3339(),
+                    record.id.replace('"', "\\\""),
+                    record.name.replace('"', "\\\""),
+                    font_family.replace('"', "\\\"")
+                ));
+            }
+            None => {
+                let _ = append_debug_log(format!(
+                    "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repair-failed\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"path\":\"{}\"}}}}",
+                    Utc::now().to_rfc3339(),
+                    record.id.replace('"', "\\\""),
+                    record.name.replace('"', "\\\""),
+                    record.path.replace('"', "\\\"")
+                ));
+            }
+        }
+    }
+    changed
+}
+
 fn import_record(
     app: &AppHandle,
     bucket: &str,
@@ -321,6 +449,21 @@ fn import_record(
     } else {
         None
     };
+    let font_family = if bucket == "fonts" {
+        let extracted = extract_font_family_from_bytes(&data);
+        let _ = append_debug_log(format!(
+            "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-import\",\"data\":{{\"fileName\":\"{}\",\"fontFamily\":{}}}}}",
+            Utc::now().to_rfc3339(),
+            file_name.replace('"', "\\\""),
+            extracted
+                .as_ref()
+                .map(|value| format!("\"{}\"", value.replace('"', "\\\"")))
+                .unwrap_or_else(|| "null".to_string())
+        ));
+        extracted
+    } else {
+        None
+    };
 
     let now = Utc::now();
     let record = LibraryRecord {
@@ -329,6 +472,7 @@ fn import_record(
         file_name: stored_name,
         path: destination.to_string_lossy().to_string(),
         thumbnail_path,
+        font_family,
         tags,
         folder: folder.clone(),
         media_type,
@@ -527,13 +671,17 @@ fn project_summary(root: &Path, payload: &ProjectPayload) -> ProjectSummary {
 
 #[tauri::command]
 fn get_library(app: AppHandle) -> CommandResult<LibraryIndex> {
-    read_index(&app).map_err(Into::into)
+    let mut index = read_index(&app).map_err(String::from)?;
+    if ensure_font_metadata(&mut index) {
+        write_index(&app, &index).map_err(String::from)?;
+    }
+    Ok(index)
 }
 
 #[tauri::command]
 fn repair_missing_thumbnails(app: AppHandle) -> CommandResult<LibraryIndex> {
     let mut index = read_index(&app).map_err(String::from)?;
-    let mut changed = false;
+    let mut changed = ensure_font_metadata(&mut index);
     for record in index.backgrounds.iter_mut().chain(index.assets.iter_mut()) {
         match ensure_record_thumbnail(&app, record) {
             Ok(record_changed) => changed |= record_changed,

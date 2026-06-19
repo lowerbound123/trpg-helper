@@ -35,6 +35,7 @@ import { useResourceImages } from '@/composables/useResourceImages'
 import {
   appendDebugLog,
   exportImageToDownloads,
+  fontRecordFamily,
   openManagedProject,
   saveProjectPreview,
   type LibraryRecord,
@@ -297,7 +298,7 @@ function clearAssetDrag() {
 }
 
 function fontFamily(font: LibraryRecord) {
-  return font.name.replace(/\.[^.]+$/, '') || font.name
+  return fontRecordFamily(font)
 }
 
 function startFontDrag(font: LibraryRecord, event: DragEvent) {
@@ -687,10 +688,12 @@ function layerPositionFromNode(layer: HandoutLayer, node: Konva.Node) {
 }
 
 function textConfig(layer: TextLayer) {
+  const resolvedFont = editor.resolveFont(layer.fontId)
+  const family = resolvedFont ? fontFamily(resolvedFont) : layer.fontFamily
   return {
     ...layerConfig(layer),
     text: layer.text,
-    fontFamily: layer.fontFamily,
+    fontFamily: family,
     fontSize: layer.fontSize,
     fontStyle: `${layer.italic ? 'italic ' : ''}${layer.fontWeight || 400}`,
     textDecoration: [
@@ -726,6 +729,7 @@ function shapeConfig(layer: ShapeLayer) {
       fill: undefined,
       stroke: layer.stroke,
       strokeWidth: layer.strokeWidth,
+      hitStrokeWidth: Math.max(16, layer.strokeWidth * 3),
       lineCap: 'round',
       lineJoin: 'round',
     }
@@ -751,12 +755,14 @@ async function logTextLayerMetrics(reason: string) {
       fontId: layer.fontId,
       fontName: font?.name,
       fontPath: font?.path,
+      recordFontFamily: font?.fontFamily,
       fontFamily: layer.fontFamily,
+      renderFontFamily: font ? fontFamily(font) : layer.fontFamily,
       fontSize: layer.fontSize,
       fontStyle: `${layer.italic ? 'italic ' : ''}${layer.fontWeight || 400}`,
       lineHeight: layer.lineHeight,
       nodeExists: Boolean(node),
-      fontCheck: globalThis.document.fonts?.check?.(`${layer.fontSize}px "${layer.fontFamily}"`),
+      fontCheck: globalThis.document.fonts?.check?.(`${layer.fontSize}px "${font ? fontFamily(font) : layer.fontFamily}"`),
       textWidth: node?.textWidth,
       textHeight: node?.textHeight,
       clientRect: node?.getClientRect({ skipTransform: true }),
@@ -858,9 +864,13 @@ function onTransformEnd(layer: HandoutLayer) {
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
   const scaleX = Math.abs(node.scaleX())
-  const scaleY = node.scaleY()
-  const width = Math.max(12, Math.round(node.width() * scaleX))
-  const height = Math.max(12, Math.round(node.height() * scaleY))
+  const scaleY = Math.abs(node.scaleY())
+  const width = isShapeLayer(layer) && layer.shape === 'line'
+    ? Math.max(12, Math.round(layer.width * scaleX))
+    : Math.max(12, Math.round(node.width() * scaleX))
+  const height = isShapeLayer(layer) && layer.shape === 'line'
+    ? Math.max(12, Math.round(layer.height * scaleY))
+    : Math.max(12, Math.round(node.height() * scaleY))
   const position = isShapeLayer(layer) && layer.shape === 'ellipse'
     ? {
         x: Math.round(node.x() - width / 2),

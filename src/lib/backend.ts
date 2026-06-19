@@ -8,6 +8,7 @@ export interface LibraryRecord {
   fileName: string
   path: string
   thumbnailPath?: string | null
+  fontFamily?: string | null
   tags: string[]
   folder: string
   mediaType: string
@@ -53,6 +54,10 @@ export const emptyLibrary = (): LibraryIndex => ({
   assetFolders: [],
   fontFolders: [],
 })
+
+export function fontRecordFamily(font?: LibraryRecord | null): string {
+  return font?.fontFamily?.trim() || font?.name?.replace(/\.[^.]+$/, '') || 'Inter'
+}
 
 function isTauriRuntime() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window

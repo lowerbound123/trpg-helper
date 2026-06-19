@@ -157,6 +157,21 @@ const backgroundImage = computed(() =>
   backgroundAsset.value ? imageElements[backgroundAsset.value.id] : undefined,
 )
 
+const backgroundRenderSignature = computed(() => [
+  editor.view,
+  backgroundAsset.value?.id || 'none',
+  backgroundImage.value?.naturalWidth || backgroundImage.value?.width || 0,
+  backgroundImage.value?.naturalHeight || backgroundImage.value?.height || 0,
+  editor.document.canvas.width,
+  editor.document.canvas.height,
+  stageViewport.width,
+  stageViewport.height,
+  fitScale.value,
+  canvasZoom.value,
+  canvasPan.x,
+  canvasPan.y,
+].join(':'))
+
 const filteredAssets = computed(() =>
   filterRecords(editor.library.assets, assetSearch.value, selectedAssetFolder.value),
 )
@@ -256,6 +271,83 @@ function logViewport(message: string, data?: Record<string, unknown>) {
   })
   console.debug(`[viewport] ${message}`, payload)
   void appendDebugLog('viewport', message, payload)
+}
+
+function roundMetric(value: number) {
+  return Math.round(value * 1000) / 1000
+}
+
+function backgroundRenderMetrics() {
+  const image = backgroundImage.value
+  const sourceWidth = image?.naturalWidth || image?.width || 0
+  const sourceHeight = image?.naturalHeight || image?.height || 0
+  const canvasWidth = editor.document.canvas.width
+  const canvasHeight = editor.document.canvas.height
+  const screenWidth = canvasWidth * stageScale.value
+  const screenHeight = canvasHeight * stageScale.value
+  const left = canvasPan.x
+  const top = canvasPan.y
+  const right = left + screenWidth
+  const bottom = top + screenHeight
+  const imageScaleToCanvas = {
+    x: sourceWidth ? canvasWidth / sourceWidth : 1,
+    y: sourceHeight ? canvasHeight / sourceHeight : 1,
+  }
+
+  return {
+    asset: backgroundAsset.value
+      ? {
+          id: backgroundAsset.value.id,
+          name: backgroundAsset.value.name,
+          path: backgroundAsset.value.path,
+        }
+      : null,
+    sourceSize: {
+      width: sourceWidth,
+      height: sourceHeight,
+    },
+    canvasSize: {
+      width: canvasWidth,
+      height: canvasHeight,
+    },
+    imageScaleToCanvas: {
+      x: roundMetric(imageScaleToCanvas.x),
+      y: roundMetric(imageScaleToCanvas.y),
+    },
+    viewportScale: {
+      fitScale: roundMetric(fitScale.value),
+      canvasZoom: roundMetric(canvasZoom.value),
+      stageScale: roundMetric(stageScale.value),
+    },
+    effectiveScreenScale: {
+      x: roundMetric(imageScaleToCanvas.x * stageScale.value),
+      y: roundMetric(imageScaleToCanvas.y * stageScale.value),
+    },
+    pan: {
+      x: roundMetric(canvasPan.x),
+      y: roundMetric(canvasPan.y),
+    },
+    corners: {
+      topLeft: { x: roundMetric(left), y: roundMetric(top) },
+      topRight: { x: roundMetric(right), y: roundMetric(top) },
+      bottomRight: { x: roundMetric(right), y: roundMetric(bottom) },
+      bottomLeft: { x: roundMetric(left), y: roundMetric(bottom) },
+    },
+    screenSize: {
+      width: roundMetric(screenWidth),
+      height: roundMetric(screenHeight),
+    },
+  }
+}
+
+function logBackgroundRender(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData({
+    ...data,
+    ...backgroundRenderMetrics(),
+    selectedLayerId: editor.selectedLayerId,
+  })
+  console.debug(`[background-render] ${message}`, payload)
+  void appendDebugLog('background-render', message, payload)
 }
 
 function logUpload(message: string, data?: Record<string, unknown>) {
@@ -480,6 +572,11 @@ function onTransformEnd(layer: HandoutLayer) {
     height,
     rotation: Math.round(node.rotation()),
   })
+  logBackgroundRender('after-layer-transform', {
+    layerId: layer.id,
+    layerType: layer.type,
+    layerBounds: { x: Math.round(position.x), y: Math.round(position.y), width, height },
+  })
   void refreshLayerEffectCacheAfterUpdate(layer.id)
 }
 
@@ -491,6 +588,11 @@ function onDragEnd(layer: HandoutLayer) {
   editor.patchLayer(layer.id, {
     x: Math.round(node.x()),
     y: Math.round(node.y()),
+  })
+  logBackgroundRender('after-layer-drag', {
+    layerId: layer.id,
+    layerType: layer.type,
+    layerPosition: { x: Math.round(node.x()), y: Math.round(node.y()) },
   })
   void refreshLayerEffectCacheAfterUpdate(layer.id)
 }
@@ -982,6 +1084,14 @@ watch(selectedLayerRenderSignature, () => {
   if (editor.selectedLayerId) void refreshLayerEffectCacheAfterUpdate(editor.selectedLayerId)
 })
 watch(layerEffectsSignature, () => { void refreshLayerEffectCaches() })
+watch(
+  backgroundRenderSignature,
+  () => {
+    if (editor.view !== 'editor') return
+    void nextTick(() => logBackgroundRender('render-signature-change'))
+  },
+  { flush: 'post' },
+)
 watch(
   () => [editor.document.canvas.width, editor.document.canvas.height],
   () => nextTick(() => {

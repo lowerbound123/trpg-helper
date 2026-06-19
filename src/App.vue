@@ -40,11 +40,11 @@ import {
 import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
 import type { HandoutDocument, HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
 import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
+import { calculateSnapGuides, SNAP_THRESHOLD_SCREEN_PX, type GuideLine, type SnapLayer } from '@/lib/snapping'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
-type GuideLine = { orientation: 'vertical' | 'horizontal'; value: number }
 
 Konva.dragButtons = [0]
 const PREVIEW_TARGET_BYTES = 512 * 1024
@@ -95,6 +95,7 @@ const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>
 })
 let previewMaintenanceRunning = false
 let exportProgressTimer: number | undefined
+let lastSnapLogSignature = ''
 
 const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
@@ -366,6 +367,12 @@ function logExport(message: string, data?: Record<string, unknown>) {
   void appendDebugLog('export', message, payload)
 }
 
+function logSnap(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData(data)
+  console.debug(`[snap] ${message}`, payload)
+  void appendDebugLog('snap', message, payload)
+}
+
 function clampZoom(value: number) {
   return Math.min(8, Math.max(0.1, Number(value) || 1))
 }
@@ -586,6 +593,7 @@ function onTransformEnd(layer: HandoutLayer) {
 
 function onDragEnd(layer: HandoutLayer) {
   guideLines.value = []
+  lastSnapLogSignature = ''
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
   node.clearCache()
@@ -601,33 +609,25 @@ function onDragEnd(layer: HandoutLayer) {
   void refreshLayerEffectCacheAfterUpdate(layer.id)
 }
 
-function guidesForLayer(layer: HandoutLayer, node: Konva.Node) {
-  const threshold = 6
-  const x = node.x()
-  const y = node.y()
-  const width = node.width()
-  const height = node.height()
-  const selfX = [x, x + width / 2, x + width]
-  const selfY = [y, y + height / 2, y + height]
-  const candidatesX = [0, editor.document.canvas.width / 2, editor.document.canvas.width]
-  const candidatesY = [0, editor.document.canvas.height / 2, editor.document.canvas.height]
-
-  for (const other of editor.document.layers) {
-    if (other.id === layer.id || !other.visible) continue
-    candidatesX.push(other.x, other.x + other.width / 2, other.x + other.width)
-    candidatesY.push(other.y, other.y + other.height / 2, other.y + other.height)
-  }
-
-  const bestX = candidatesX
-    .flatMap((target) => selfX.map((source, index) => ({ target, source, index, distance: Math.abs(target - source) })))
-    .sort((a, b) => a.distance - b.distance)[0]
-  const bestY = candidatesY
-    .flatMap((target) => selfY.map((source, index) => ({ target, source, index, distance: Math.abs(target - source) })))
-    .sort((a, b) => a.distance - b.distance)[0]
-
+function snapLayerFromDocumentLayer(layer: HandoutLayer): SnapLayer {
   return {
-    x: bestX && bestX.distance <= threshold ? bestX : undefined,
-    y: bestY && bestY.distance <= threshold ? bestY : undefined,
+    id: layer.id,
+    x: layer.x,
+    y: layer.y,
+    width: layer.width,
+    height: layer.height,
+    visible: layer.visible,
+    locked: layer.locked,
+  }
+}
+
+function snapLayerFromNode(layer: HandoutLayer, node: Konva.Node): SnapLayer {
+  return {
+    ...snapLayerFromDocumentLayer(layer),
+    x: node.x(),
+    y: node.y(),
+    width: node.width(),
+    height: node.height(),
   }
 }
 
@@ -635,22 +635,38 @@ function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node || event.evt?.ctrlKey) {
     guideLines.value = []
+    lastSnapLogSignature = ''
     return
   }
 
-  const guides = guidesForLayer(layer, node)
-  const nextGuides: GuideLine[] = []
-  if (guides.x) {
-    const offset = guides.x.index === 0 ? 0 : guides.x.index === 1 ? node.width() / 2 : node.width()
-    node.x(Math.round(guides.x.target - offset))
-    nextGuides.push({ orientation: 'vertical', value: guides.x.target })
+  const snap = calculateSnapGuides({
+    movingLayer: snapLayerFromNode(layer, node),
+    layers: editor.document.layers.map(snapLayerFromDocumentLayer),
+    canvas: {
+      width: editor.document.canvas.width,
+      height: editor.document.canvas.height,
+    },
+    stageScale: stageScale.value,
+  })
+  if (snap.x) node.x(snap.nextPosition.x)
+  if (snap.y) node.y(snap.nextPosition.y)
+  if (snap.lines.length > 0) {
+    const signature = `${layer.id}:${snap.lines.map((line) => `${line.orientation}:${line.value}`).join('|')}`
+    if (signature !== lastSnapLogSignature) {
+      lastSnapLogSignature = signature
+      logSnap('drag-snap', {
+        layerId: layer.id,
+        stageScale: stageScale.value,
+        screenThresholdPx: SNAP_THRESHOLD_SCREEN_PX,
+        canvasThresholdPx: snap.thresholdCanvas,
+        x: snap.x,
+        y: snap.y,
+      })
+    }
+  } else {
+    lastSnapLogSignature = ''
   }
-  if (guides.y) {
-    const offset = guides.y.index === 0 ? 0 : guides.y.index === 1 ? node.height() / 2 : node.height()
-    node.y(Math.round(guides.y.target - offset))
-    nextGuides.push({ orientation: 'horizontal', value: guides.y.target })
-  }
-  guideLines.value = nextGuides
+  guideLines.value = snap.lines
 }
 
 async function updateTransformer() {

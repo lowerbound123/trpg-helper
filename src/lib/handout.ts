@@ -9,7 +9,9 @@ export type BlendMode =
   | 'lighten'
 
 export type LayerType = 'image' | 'text' | 'shape'
-export type ShapeKind = 'rect' | 'ellipse' | 'line'
+export type ShapeKind = 'rect' | 'round-rect' | 'ellipse' | 'diamond' | 'hexagon-h' | 'hexagon-v' | 'line'
+export type LineArrowKind = 'none' | 'triangle' | 'bar' | 'dot'
+export type LineStyleKind = 'solid' | 'dashed' | 'dotted' | 'double'
 
 export interface CanvasSettings {
   width: number
@@ -70,6 +72,10 @@ export interface ShapeLayer extends BaseLayer {
   fill: string
   stroke: string
   strokeWidth: number
+  cornerRadius: number
+  lineStartArrow: LineArrowKind
+  lineEndArrow: LineArrowKind
+  lineStyle: LineStyleKind
 }
 
 export type HandoutLayer = ImageLayer | TextLayer | ShapeLayer
@@ -112,6 +118,10 @@ export type NewShapeLayerInput = {
   fill?: string
   stroke?: string
   strokeWidth?: number
+  cornerRadius?: number
+  lineStartArrow?: LineArrowKind
+  lineEndArrow?: LineArrowKind
+  lineStyle?: LineStyleKind
 }
 
 export type LayerPatch = Partial<
@@ -156,6 +166,10 @@ function shapeDefaults(layer: HandoutLayer): Partial<ShapeLayer> {
     fill: layer.fill ?? 'rgba(14,165,233,0.12)',
     stroke: layer.stroke ?? '#0f766e',
     strokeWidth: layer.strokeWidth ?? 3,
+    cornerRadius: layer.cornerRadius ?? 16,
+    lineStartArrow: layer.lineStartArrow ?? 'none',
+    lineEndArrow: layer.lineEndArrow ?? 'none',
+    lineStyle: layer.lineStyle ?? 'solid',
   }
 }
 
@@ -258,6 +272,10 @@ export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInp
     fill: input.fill ?? (input.shape === 'line' ? 'rgba(0,0,0,0)' : 'rgba(14,165,233,0.12)'),
     stroke: input.stroke ?? '#0f766e',
     strokeWidth: input.strokeWidth ?? 3,
+    cornerRadius: input.cornerRadius ?? 16,
+    lineStartArrow: input.lineStartArrow ?? 'none',
+    lineEndArrow: input.lineEndArrow ?? 'none',
+    lineStyle: input.lineStyle ?? 'solid',
     rotation: 0,
     flipX: false,
     opacity: 1,

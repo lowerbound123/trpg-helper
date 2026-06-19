@@ -42,7 +42,7 @@ import {
   type ProjectSummary,
 } from '@/lib/backend'
 import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
-import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
+import type { HandoutDocument, HandoutLayer, ImageLayer, LineArrowKind, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
 import { appConfiguration } from '@/lib/configuration'
 import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
 import { containsRect } from '@/lib/selection'
@@ -126,7 +126,11 @@ const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResou
 const shapeItems: Array<{ kind: ShapeKind; label: string; detail: string }> = [
   { kind: 'line', label: 'Line', detail: 'Stroke-only horizontal line' },
   { kind: 'rect', label: 'Rectangle', detail: 'Filled rectangle with stroke' },
+  { kind: 'round-rect', label: 'Round rect', detail: 'Rectangle with configurable corners' },
   { kind: 'ellipse', label: 'Ellipse', detail: 'Circle or oval shape' },
+  { kind: 'diamond', label: 'Diamond', detail: 'Centered rhombus shape' },
+  { kind: 'hexagon-h', label: 'Hexagon H', detail: 'Horizontal hexagon' },
+  { kind: 'hexagon-v', label: 'Hexagon V', detail: 'Vertical hexagon' },
 ]
 
 function computeFitScale() {
@@ -191,15 +195,21 @@ const selectedOnlyLineShape = computed(() =>
   && isShapeLayer(editor.selectedLayers[0])
   && editor.selectedLayers[0].shape === 'line',
 )
+const selectedOnlyTextLayer = computed(() =>
+  editor.selectedLayers.length === 1 && isTextLayer(editor.selectedLayers[0]),
+)
 
 const transformerConfig = computed(() => ({
   rotateEnabled: true,
   ignoreStroke: true,
   enabledAnchors: selectedOnlyLineShape.value
     ? ['middle-left', 'middle-right']
-    : ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left'],
+    : selectedOnlyTextLayer.value
+      ? ['middle-left', 'middle-right']
+      : ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left'],
   boundBoxFunc: (oldBox: unknown, newBox: { width: number; height: number }) => {
     if (selectedOnlyLineShape.value) return Math.abs(newBox.width) < 12 ? oldBox : newBox
+    if (selectedOnlyTextLayer.value) return Math.abs(newBox.width) < 24 ? oldBox : newBox
     return newBox.width < 12 || newBox.height < 12 ? oldBox : newBox
   },
 }))
@@ -336,6 +346,10 @@ function startFontDrag(font: LibraryRecord, event: DragEvent) {
     name: font.name,
     family: fontFamily(font),
   })
+}
+
+function prepareFontDrag(font: LibraryRecord) {
+  draggedFontId.value = font.id
 }
 
 function clearFontDrag() {
@@ -638,7 +652,7 @@ function handleCanvasDrop(event: DragEvent) {
   }
 
   const shape = (event.dataTransfer?.getData('application/x-handout-shape') || draggedShapeKind.value) as ShapeKind | ''
-  if (shape && ['line', 'rect', 'ellipse'].includes(shape)) {
+  if (shape && ['line', 'rect', 'round-rect', 'ellipse', 'diamond', 'hexagon-h', 'hexagon-v'].includes(shape)) {
     addShapeToCanvas(shape, point)
     draggedShapeKind.value = undefined
     return
@@ -778,8 +792,29 @@ function shapeConfig(layer: ShapeLayer) {
     }
   }
 
+  if (layer.shape === 'round-rect') {
+    return {
+      ...base,
+      fill: layer.fill,
+      stroke: layer.stroke,
+      strokeWidth: layer.strokeWidth,
+      cornerRadius: layer.cornerRadius,
+    }
+  }
+
   if (layer.shape === 'line') {
     return base
+  }
+
+  if (['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)) {
+    return {
+      ...base,
+      points: polygonPoints(layer),
+      fill: layer.fill,
+      stroke: layer.stroke,
+      strokeWidth: layer.strokeWidth,
+      closed: true,
+    }
   }
 
   return {
@@ -790,24 +825,119 @@ function shapeConfig(layer: ShapeLayer) {
   }
 }
 
+function polygonPoints(layer: ShapeLayer) {
+  if (layer.shape === 'diamond') {
+    return [
+      layer.width / 2, 0,
+      layer.width, layer.height / 2,
+      layer.width / 2, layer.height,
+      0, layer.height / 2,
+    ]
+  }
+  if (layer.shape === 'hexagon-v') {
+    return [
+      layer.width / 2, 0,
+      layer.width, layer.height * 0.25,
+      layer.width, layer.height * 0.75,
+      layer.width / 2, layer.height,
+      0, layer.height * 0.75,
+      0, layer.height * 0.25,
+    ]
+  }
+  return [
+    layer.width * 0.25, 0,
+    layer.width * 0.75, 0,
+    layer.width, layer.height / 2,
+    layer.width * 0.75, layer.height,
+    layer.width * 0.25, layer.height,
+    0, layer.height / 2,
+  ]
+}
+
+function lineDash(layer: ShapeLayer) {
+  if (layer.lineStyle === 'dashed') return [18, 12]
+  if (layer.lineStyle === 'dotted') return [2, 10]
+  return undefined
+}
+
 function lineHitConfig(layer: ShapeLayer) {
+  const padding = Math.max(24, layer.strokeWidth + 18)
   return {
     x: 0,
-    y: 0,
+    y: -padding / 2,
     width: layer.width,
-    height: layer.height,
+    height: layer.height + padding,
     fill: 'rgba(0,0,0,0.001)',
     strokeEnabled: false,
   }
 }
 
-function lineVisualConfig(layer: ShapeLayer) {
+function lineVisualConfig(layer: ShapeLayer, offsetY = 0) {
   return {
-    points: [0, layer.height / 2, layer.width, layer.height / 2],
+    points: [0, layer.height / 2 + offsetY, layer.width, layer.height / 2 + offsetY],
     stroke: layer.stroke,
     strokeWidth: layer.strokeWidth,
+    dash: lineDash(layer),
     lineCap: 'round',
     lineJoin: 'round',
+    listening: false,
+  }
+}
+
+function lineDoubleOffset(layer: ShapeLayer) {
+  return Math.max(3, layer.strokeWidth * 1.2)
+}
+
+function lineHandleConfig(layer: ShapeLayer) {
+  return {
+    x: layer.width / 2,
+    y: layer.height / 2,
+    radius: Math.max(6, layer.strokeWidth + 4),
+    fill: '#14b8a6',
+    stroke: '#ffffff',
+    strokeWidth: 2,
+    opacity: 0.9,
+  }
+}
+
+function arrowPoints(kind: LineArrowKind, side: 'start' | 'end', layer: ShapeLayer) {
+  const y = layer.height / 2
+  const size = Math.max(10, layer.strokeWidth * 4)
+  const x = side === 'start' ? 0 : layer.width
+  const direction = side === 'start' ? 1 : -1
+  if (kind === 'triangle') {
+    return [
+      x, y,
+      x + direction * size, y - size * 0.55,
+      x + direction * size, y + size * 0.55,
+    ]
+  }
+  if (kind === 'bar') {
+    return [
+      x, y - size * 0.6,
+      x, y + size * 0.6,
+    ]
+  }
+  return []
+}
+
+function arrowDotConfig(side: 'start' | 'end', layer: ShapeLayer) {
+  return {
+    x: side === 'start' ? 0 : layer.width,
+    y: layer.height / 2,
+    radius: Math.max(4, layer.strokeWidth * 1.8),
+    fill: layer.stroke,
+    listening: false,
+  }
+}
+
+function arrowLineConfig(kind: LineArrowKind, side: 'start' | 'end', layer: ShapeLayer) {
+  return {
+    points: arrowPoints(kind, side, layer),
+    fill: kind === 'triangle' ? layer.stroke : undefined,
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+    closed: kind === 'triangle',
     listening: false,
   }
 }
@@ -838,6 +968,18 @@ async function logTextLayerMetrics(reason: string) {
       absoluteScale: node?.getAbsoluteScale(),
     })
   }
+}
+
+async function autoResizeTextLayerHeights() {
+  await nextTick()
+  const patches: Array<{ id: string; height: number }> = []
+  for (const layer of editor.document.layers.filter(isTextLayer)) {
+    const node = layerNodeRefs[layer.id]?.getNode() as Konva.Text | undefined
+    if (!node) continue
+    const height = Math.max(12, Math.ceil(node.getClientRect({ skipTransform: true }).height))
+    if (Math.abs(height - layer.height) > 1) patches.push({ id: layer.id, height })
+  }
+  for (const patch of patches) editor.patchLayer(patch.id, { height: patch.height })
 }
 
 function selectCanvasLayer(layerId: string, event?: KonvaEvent) {
@@ -937,9 +1079,15 @@ function onTransformEnd(layer: HandoutLayer) {
   const width = isShapeLayer(layer) && layer.shape === 'line'
     ? Math.max(12, Math.round(layer.width * scaleX))
     : Math.max(12, Math.round(node.width() * scaleX))
-  const height = isShapeLayer(layer) && layer.shape === 'line'
+  let height = isShapeLayer(layer) && layer.shape === 'line'
     ? Math.max(12, Math.round(layer.height * scaleY))
     : Math.max(12, Math.round(node.height() * scaleY))
+  if (isTextLayer(layer)) {
+    node.width(width)
+    node.scaleX(1)
+    node.scaleY(1)
+    height = Math.max(12, Math.ceil((node as Konva.Text).getClientRect({ skipTransform: true }).height))
+  }
   const position = isShapeLayer(layer) && layer.shape === 'ellipse'
     ? {
         x: Math.round(node.x() - width / 2),
@@ -964,6 +1112,14 @@ function onTransformEnd(layer: HandoutLayer) {
     layerBounds: { x: Math.round(position.x), y: Math.round(position.y), width, height },
   })
   void refreshLayerEffectCacheAfterUpdate(layer.id)
+}
+
+function onTransform(layer: HandoutLayer, event: KonvaEvent) {
+  if (!event.evt?.shiftKey) return
+  const node = layerNodeRefs[layer.id]?.getNode()
+  if (!node) return
+  const snapped = Math.round(node.rotation() / 45) * 45
+  if (Math.abs(snapped - node.rotation()) <= 22.5) node.rotation(snapped)
 }
 
 function onDragEnd(layer: HandoutLayer) {
@@ -1566,6 +1722,7 @@ watch(selectedLayerRenderSignature, () => {
   if (editor.selectedLayerId) void refreshLayerEffectCacheAfterUpdate(editor.selectedLayerId)
 })
 watch(textLayerRenderSignature, () => {
+  if (editor.view === 'editor') void autoResizeTextLayerHeights()
   if (editor.view === 'editor') void logTextLayerMetrics('text-signature-change')
 }, { flush: 'post' })
 watch(layerEffectsSignature, (nextSignature, previousSignature) => {
@@ -1848,6 +2005,7 @@ watch(
               class="font-row"
               type="button"
               draggable="true"
+              @pointerdown="prepareFontDrag(font)"
               @click="addFontTextToCanvas(font)"
               @dragstart="startFontDrag(font, $event)"
               @dragend="clearFontDrag"
@@ -2037,6 +2195,7 @@ watch(
                     @dragstart="onLayerDragStart(layer, $event)"
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-text
@@ -2048,10 +2207,11 @@ watch(
                     @dragstart="onLayerDragStart(layer, $event)"
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-rect
-                    v-else-if="isShapeLayer(layer) && layer.shape === 'rect'"
+                    v-else-if="isShapeLayer(layer) && ['rect', 'round-rect'].includes(layer.shape)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="shapeConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2059,6 +2219,19 @@ watch(
                     @dragstart="onLayerDragStart(layer, $event)"
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
+                    @transformend="onTransformEnd(layer)"
+                  />
+                  <v-line
+                    v-else-if="isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="shapeConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-ellipse
@@ -2070,6 +2243,7 @@ watch(
                     @dragstart="onLayerDragStart(layer, $event)"
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-group
@@ -2081,10 +2255,32 @@ watch(
                     @dragstart="onLayerDragStart(layer, $event)"
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
                     @transformend="onTransformEnd(layer)"
                   >
                     <v-rect :config="lineHitConfig(layer)" />
-                    <v-line :config="lineVisualConfig(layer)" />
+                    <template v-if="layer.lineStyle === 'double'">
+                      <v-line :config="lineVisualConfig(layer, -lineDoubleOffset(layer))" />
+                      <v-line :config="lineVisualConfig(layer, lineDoubleOffset(layer))" />
+                    </template>
+                    <v-line v-else :config="lineVisualConfig(layer)" />
+                    <v-line
+                      v-if="layer.lineStartArrow !== 'none' && layer.lineStartArrow !== 'dot'"
+                      :config="arrowLineConfig(layer.lineStartArrow, 'start', layer)"
+                    />
+                    <v-circle
+                      v-if="layer.lineStartArrow === 'dot'"
+                      :config="arrowDotConfig('start', layer)"
+                    />
+                    <v-line
+                      v-if="layer.lineEndArrow !== 'none' && layer.lineEndArrow !== 'dot'"
+                      :config="arrowLineConfig(layer.lineEndArrow, 'end', layer)"
+                    />
+                    <v-circle
+                      v-if="layer.lineEndArrow === 'dot'"
+                      :config="arrowDotConfig('end', layer)"
+                    />
+                    <v-circle :config="lineHandleConfig(layer)" />
                   </v-group>
                 </template>
                 <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">

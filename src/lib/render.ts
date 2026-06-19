@@ -152,11 +152,43 @@ function shapeNode(layer: ShapeLayer) {
   }
 
   if (layer.shape === 'line') {
+    const group = new Konva.Group(commonConfig(layer))
+    const addLine = (offsetY = 0) => {
+      group.add(new Konva.Line({
+        points: [0, layer.height / 2 + offsetY, layer.width, layer.height / 2 + offsetY],
+        stroke: layer.stroke,
+        strokeWidth: layer.strokeWidth,
+        dash: lineDash(layer),
+        lineCap: 'round',
+        lineJoin: 'round',
+      }))
+    }
+    if (layer.lineStyle === 'double') {
+      const offset = Math.max(3, layer.strokeWidth * 1.2)
+      addLine(-offset)
+      addLine(offset)
+    } else {
+      addLine()
+    }
+    addArrow(group, layer, 'start')
+    addArrow(group, layer, 'end')
+    return group
+  }
+
+  if (['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)) {
     return new Konva.Line({
       ...config,
-      points: [0, layer.height / 2, layer.width, layer.height / 2],
-      lineCap: 'round',
-      lineJoin: 'round',
+      points: polygonPoints(layer),
+      closed: true,
+    })
+  }
+
+  if (layer.shape === 'round-rect') {
+    return new Konva.Rect({
+      ...config,
+      width: layer.width,
+      height: layer.height,
+      cornerRadius: layer.cornerRadius,
     })
   }
 
@@ -165,6 +197,64 @@ function shapeNode(layer: ShapeLayer) {
     width: layer.width,
     height: layer.height,
   })
+}
+
+function polygonPoints(layer: ShapeLayer) {
+  if (layer.shape === 'diamond') {
+    return [layer.width / 2, 0, layer.width, layer.height / 2, layer.width / 2, layer.height, 0, layer.height / 2]
+  }
+  if (layer.shape === 'hexagon-v') {
+    return [
+      layer.width / 2, 0,
+      layer.width, layer.height * 0.25,
+      layer.width, layer.height * 0.75,
+      layer.width / 2, layer.height,
+      0, layer.height * 0.75,
+      0, layer.height * 0.25,
+    ]
+  }
+  return [
+    layer.width * 0.25, 0,
+    layer.width * 0.75, 0,
+    layer.width, layer.height / 2,
+    layer.width * 0.75, layer.height,
+    layer.width * 0.25, layer.height,
+    0, layer.height / 2,
+  ]
+}
+
+function lineDash(layer: ShapeLayer) {
+  if (layer.lineStyle === 'dashed') return [18, 12]
+  if (layer.lineStyle === 'dotted') return [2, 10]
+  return undefined
+}
+
+function addArrow(group: Konva.Group, layer: ShapeLayer, side: 'start' | 'end') {
+  const kind = side === 'start' ? layer.lineStartArrow : layer.lineEndArrow
+  if (kind === 'none') return
+  const y = layer.height / 2
+  const size = Math.max(10, layer.strokeWidth * 4)
+  const x = side === 'start' ? 0 : layer.width
+  const direction = side === 'start' ? 1 : -1
+  if (kind === 'dot') {
+    group.add(new Konva.Circle({
+      x,
+      y,
+      radius: Math.max(4, layer.strokeWidth * 1.8),
+      fill: layer.stroke,
+    }))
+    return
+  }
+  const points = kind === 'triangle'
+    ? [x, y, x + direction * size, y - size * 0.55, x + direction * size, y + size * 0.55]
+    : [x, y - size * 0.6, x, y + size * 0.6]
+  group.add(new Konva.Line({
+    points,
+    fill: kind === 'triangle' ? layer.stroke : undefined,
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+    closed: kind === 'triangle',
+  }))
 }
 
 function prepareEffectNode<T extends Konva.Shape | Konva.Group>(node: T, effects?: HandoutLayer['effects']) {

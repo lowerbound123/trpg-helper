@@ -35,6 +35,7 @@ const selectedShapeLayers = computed(() => selectedLayers.value.filter(isShapeLa
 const allSelectedText = computed(() => selectedLayers.value.length > 0 && selectedTextLayers.value.length === selectedLayers.value.length)
 const allSelectedShapes = computed(() => selectedLayers.value.length > 0 && selectedShapeLayers.value.length === selectedLayers.value.length)
 const allSelectedLines = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'line'))
+const allSelectedRoundRects = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'round-rect'))
 const backgroundAsset = computed(() =>
   editor.resolveBackground(editor.document.canvas.backgroundAssetId)
     || editor.resolveAsset(editor.document.canvas.backgroundAssetId),
@@ -66,6 +67,10 @@ const commonStrikethrough = computed(() => commonTextValue((layer) => layer.stri
 const commonShapeFill = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.fill), undefined))
 const commonShapeStroke = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.stroke), undefined))
 const commonShapeStrokeWidth = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.strokeWidth), undefined))
+const commonShapeCornerRadius = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.cornerRadius), undefined))
+const commonLineStartArrow = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineStartArrow), undefined))
+const commonLineEndArrow = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineEndArrow), undefined))
+const commonLineStyle = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineStyle), undefined))
 const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
@@ -377,6 +382,17 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 @update:model-value="(value) => editor.patchSelectedLayers({ width: Math.max(12, Number(value) || 12) })"
               />
             </label>
+            <label v-if="allSelectedRoundRects">
+              Corner radius
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                :model-value="commonShapeCornerRadius ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: Math.max(0, Number(value) || 0) })"
+              />
+            </label>
             <div class="two-col">
               <label>
                 Fill
@@ -408,6 +424,46 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: Math.max(0, Number(value) || 0) })"
               />
             </label>
+            <template v-if="allSelectedLines">
+              <label>
+                Line style
+                <Select :model-value="commonLineStyle" @update:model-value="(value) => editor.patchSelectedLayers({ lineStyle: value as any })">
+                  <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="solid">Solid</SelectItem>
+                    <SelectItem value="dashed">Dashed</SelectItem>
+                    <SelectItem value="dotted">Dotted</SelectItem>
+                    <SelectItem value="double">Double</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <div class="two-col">
+                <label>
+                  Start arrow
+                  <Select :model-value="commonLineStartArrow" @update:model-value="(value) => editor.patchSelectedLayers({ lineStartArrow: value as any })">
+                    <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="triangle">Triangle</SelectItem>
+                      <SelectItem value="bar">Bar</SelectItem>
+                      <SelectItem value="dot">Dot</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label>
+                  End arrow
+                  <Select :model-value="commonLineEndArrow" @update:model-value="(value) => editor.patchSelectedLayers({ lineEndArrow: value as any })">
+                    <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="triangle">Triangle</SelectItem>
+                      <SelectItem value="bar">Bar</SelectItem>
+                      <SelectItem value="dot">Dot</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+              </div>
+            </template>
           </template>
           <Separator />
           <div class="effect-grid">

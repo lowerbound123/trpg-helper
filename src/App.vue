@@ -106,6 +106,26 @@ function computeFitScale() {
 
 const stageScale = computed(() => fitScale.value * canvasZoom.value)
 
+const canvasLayers = computed(() => [...editor.document.layers].sort((a, b) => a.zIndex - b.zIndex))
+
+const layerEffectsSignature = computed(() =>
+  editor.document.layers
+    .map((layer) => `${layer.id}:${JSON.stringify(layer.effects || {})}`)
+    .join('|'),
+)
+
+const selectedLayerTransformSignature = computed(() => {
+  const layer = editor.selectedLayer
+  return layer
+    ? [layer.id, layer.x, layer.y, layer.width, layer.height, layer.rotation, layer.visible, layer.locked].join(':')
+    : ''
+})
+
+const selectedLayerRenderSignature = computed(() => {
+  const layer = editor.selectedLayer
+  return layer ? JSON.stringify(layer) : ''
+})
+
 const stageConfig = computed(() => ({
   width: stageViewport.width,
   height: stageViewport.height,
@@ -446,25 +466,33 @@ function onTransformEnd(layer: HandoutLayer) {
   const scaleX = node.scaleX()
   const scaleY = node.scaleY()
   const position = node.position()
+  const width = Math.max(12, Math.round(node.width() * scaleX))
+  const height = Math.max(12, Math.round(node.height() * scaleY))
+  node.clearCache()
   node.scaleX(1)
   node.scaleY(1)
+  node.width(width)
+  node.height(height)
   editor.patchLayer(layer.id, {
     x: Math.round(position.x),
     y: Math.round(position.y),
-    width: Math.max(12, Math.round(node.width() * scaleX)),
-    height: Math.max(12, Math.round(node.height() * scaleY)),
+    width,
+    height,
     rotation: Math.round(node.rotation()),
   })
+  void refreshLayerEffectCacheAfterUpdate(layer.id)
 }
 
 function onDragEnd(layer: HandoutLayer) {
   guideLines.value = []
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
+  node.clearCache()
   editor.patchLayer(layer.id, {
     x: Math.round(node.x()),
     y: Math.round(node.y()),
   })
+  void refreshLayerEffectCacheAfterUpdate(layer.id)
 }
 
 function guidesForLayer(layer: HandoutLayer, node: Konva.Node) {
@@ -521,7 +549,6 @@ function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
 
 async function updateTransformer() {
   await nextTick()
-  refreshLayerEffectCaches()
   const transformer = transformerRef.value?.getNode()
   if (!transformer) return
   const selected = editor.selectedLayerId ? layerNodeRefs[editor.selectedLayerId]?.getNode() : undefined
@@ -529,15 +556,24 @@ async function updateTransformer() {
   transformer.getLayer()?.batchDraw()
 }
 
-function refreshLayerEffectCaches() {
+function refreshLayerEffectCache(layerId: string) {
+  const layer = editor.document.layers.find((item) => item.id === layerId)
+  const node = layerNodeRefs[layerId]?.getNode()
+  if (!layer || !node) return
+  node.clearCache()
+  if (hasVisibleEffects(layer.effects)) node.cache()
+  node.getLayer()?.batchDraw()
+}
+
+async function refreshLayerEffectCacheAfterUpdate(layerId: string) {
+  await nextTick()
+  refreshLayerEffectCache(layerId)
+}
+
+async function refreshLayerEffectCaches() {
+  await nextTick()
   for (const layer of editor.document.layers) {
-    const node = layerNodeRefs[layer.id]?.getNode()
-    if (!node) continue
-    if (hasVisibleEffects(layer.effects)) {
-      node.cache()
-    } else {
-      node.clearCache()
-    }
+    refreshLayerEffectCache(layer.id)
   }
   stageRef.value?.getNode().batchDraw()
 }
@@ -941,7 +977,11 @@ onBeforeUnmount(() => {
 watch(() => editor.library.backgrounds, () => { void syncImages(editor.library) }, { deep: true })
 watch(() => editor.library.assets, () => { void syncImages(editor.library) }, { deep: true })
 watch(() => editor.selectedLayerId, updateTransformer)
-watch(() => editor.document.layers, updateTransformer, { deep: true })
+watch(selectedLayerTransformSignature, updateTransformer)
+watch(selectedLayerRenderSignature, () => {
+  if (editor.selectedLayerId) void refreshLayerEffectCacheAfterUpdate(editor.selectedLayerId)
+})
+watch(layerEffectsSignature, () => { void refreshLayerEffectCaches() })
 watch(
   () => [editor.document.canvas.width, editor.document.canvas.height],
   () => nextTick(() => {
@@ -1338,7 +1378,7 @@ watch(
                     listening: false,
                   }"
                 />
-                <template v-for="layer in editor.document.layers" :key="layer.id">
+                <template v-for="layer in canvasLayers" :key="layer.id">
                   <v-image
                     v-if="isImageLayer(layer) && imageForLayer(layer)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"

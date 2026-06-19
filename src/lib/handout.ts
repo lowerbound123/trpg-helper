@@ -34,6 +34,7 @@ export interface BaseLayer {
   width: number
   height: number
   rotation: number
+  flipX: boolean
   opacity: number
   blendMode: BlendMode
   visible: boolean
@@ -119,6 +120,7 @@ export function normalizeHandoutDocument(document: HandoutDocument): HandoutDocu
     },
     layers: document.layers.map((layer) => ({
       ...layer,
+      flipX: layer.flipX ?? false,
       effects: normalizeEffects(layer.effects),
     })) as HandoutLayer[],
   }
@@ -159,6 +161,7 @@ export function addImageLayer(document: HandoutDocument, input: NewImageLayerInp
     width: input.width ?? 360,
     height: input.height ?? 240,
     rotation: 0,
+    flipX: false,
     opacity: 1,
     blendMode: 'source-over',
     visible: true,
@@ -194,6 +197,7 @@ export function addTextLayer(document: HandoutDocument, input: NewTextLayerInput
     width: input.width ?? 520,
     height: input.height ?? 120,
     rotation: 0,
+    flipX: false,
     opacity: 1,
     blendMode: 'source-over',
     visible: true,

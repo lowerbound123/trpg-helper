@@ -45,6 +45,7 @@ import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
+type SelectionBox = { visible: boolean; startX: number; startY: number; x: number; y: number; width: number; height: number }
 
 Konva.dragButtons = [0]
 const PREVIEW_TARGET_BYTES = 512 * 1024
@@ -69,6 +70,14 @@ const canvasPan = reactive({ x: 0, y: 0 })
 const panState = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const stageViewport = reactive({ width: 920, height: 620 })
 const guideLines = ref<GuideLine[]>([])
+const selectionBox = reactive<SelectionBox>({ visible: false, startX: 0, startY: 0, x: 0, y: 0, width: 0, height: 0 })
+const multiDragState = reactive({
+  active: false,
+  layerId: '',
+  originX: 0,
+  originY: 0,
+  positions: {} as Record<string, { x: number; y: number }>,
+})
 const isExportingCurrent = ref(false)
 const exportingHandoutIds = reactive(new Set<string>())
 const lastCurrentExport = ref<{ signature: string; path: string }>()
@@ -96,6 +105,8 @@ const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>
 let previewMaintenanceRunning = false
 let exportProgressTimer: number | undefined
 let lastSnapLogSignature = ''
+let suppressNextStageClick = false
+let lastLayerListSelectionId = ''
 
 const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
@@ -130,6 +141,8 @@ const selectedLayerRenderSignature = computed(() => {
   const layer = editor.selectedLayer
   return layer ? JSON.stringify(layer) : ''
 })
+
+const selectedLayerIdsSignature = computed(() => editor.selectedLayerIds.join('|'))
 
 const stageConfig = computed(() => ({
   width: stageViewport.width,
@@ -437,6 +450,31 @@ function handleLayerListDrop(targetLayer: HandoutLayer, event: DragEvent) {
   draggedLayerId.value = ''
 }
 
+function selectLayerFromList(layerId: string, event?: MouseEvent | KeyboardEvent) {
+  if (event?.shiftKey && lastLayerListSelectionId) {
+    const layerIds = editor.layers.map((layer) => layer.id)
+    const from = layerIds.indexOf(lastLayerListSelectionId)
+    const to = layerIds.indexOf(layerId)
+    if (from >= 0 && to >= 0) {
+      const [start, end] = from < to ? [from, to] : [to, from]
+      editor.setLayerSelection(layerIds.slice(start, end + 1))
+    } else {
+      editor.setLayerSelection([layerId])
+    }
+  } else if (event?.metaKey) {
+    editor.toggleLayerSelection(layerId)
+  } else {
+    editor.selectLayer(layerId)
+  }
+  lastLayerListSelectionId = layerId
+  void updateTransformer()
+}
+
+function toggleLayerVisibility(layer: HandoutLayer) {
+  editor.patchLayer(layer.id, { visible: !layer.visible })
+  void updateTransformer()
+}
+
 async function addAssetToCanvas(asset: LibraryRecord) {
   const size = await imageSize(asset)
   editor.addLayerFromAsset(asset, size)
@@ -512,16 +550,25 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 function layerConfig(layer: HandoutLayer) {
   return {
     id: layer.id,
-    x: layer.x,
+    x: layer.flipX ? layer.x + layer.width / 2 : layer.x,
     y: layer.y,
     width: layer.width,
     height: layer.height,
+    offsetX: layer.flipX ? layer.width / 2 : 0,
+    scaleX: layer.flipX ? -1 : 1,
     rotation: layer.rotation,
     opacity: layer.opacity,
     visible: layer.visible,
     draggable: !layer.locked,
     globalCompositeOperation: layer.blendMode,
     ...konvaEffectConfig(layer.effects),
+  }
+}
+
+function layerPositionFromNode(layer: HandoutLayer, node: Konva.Node) {
+  return {
+    x: Math.round(layer.flipX ? node.x() - node.width() / 2 : node.x()),
+    y: Math.round(node.y()),
   }
 }
 
@@ -545,7 +592,8 @@ function textConfig(layer: TextLayer) {
 
 function selectCanvasLayer(layerId: string, event?: KonvaEvent) {
   if (event) event.cancelBubble = true
-  editor.selectLayer(layerId)
+  if (event?.evt?.metaKey || event?.evt?.shiftKey) editor.toggleLayerSelection(layerId)
+  else editor.selectLayer(layerId)
   void updateTransformer()
 }
 
@@ -555,30 +603,103 @@ function deleteLayer(layerId?: string) {
   void updateTransformer()
 }
 
+function onLayerDragStart(layer: HandoutLayer, event: KonvaEvent) {
+  if (event.evt?.metaKey || event.evt?.shiftKey || !editor.selectedLayerIds.includes(layer.id)) {
+    selectCanvasLayer(layer.id, event)
+  } else {
+    event.cancelBubble = true
+  }
+  if (!editor.selectedLayerIds.includes(layer.id) || editor.selectedLayerIds.length < 2) {
+    multiDragState.active = false
+    return
+  }
+  const position = layerPositionFromNode(layer, event.target)
+  multiDragState.active = true
+  multiDragState.layerId = layer.id
+  multiDragState.originX = position.x
+  multiDragState.originY = position.y
+  multiDragState.positions = Object.fromEntries(
+    editor.selectedLayers.map((item) => [item.id, { x: item.x, y: item.y }]),
+  )
+}
+
 function handleStagePointer(event: KonvaEvent) {
+  if (suppressNextStageClick) {
+    suppressNextStageClick = false
+    return
+  }
   const stage = stageRef.value?.getNode()
+  if (selectionBox.visible) return
   if (stage && (event.target === stage || event.target.name() === 'canvas-background')) {
     editor.selectLayer(undefined)
     void updateTransformer()
   }
 }
 
+function updateSelectionBox(from: { x: number; y: number }, to: { x: number; y: number }) {
+  selectionBox.x = Math.min(from.x, to.x)
+  selectionBox.y = Math.min(from.y, to.y)
+  selectionBox.width = Math.abs(to.x - from.x)
+  selectionBox.height = Math.abs(to.y - from.y)
+}
+
+function startSelectionBox(event: KonvaEvent) {
+  if (event.evt?.button !== 0 || event.target.name() !== 'canvas-background') return
+  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
+  selectionBox.visible = true
+  selectionBox.startX = point.x
+  selectionBox.startY = point.y
+  updateSelectionBox(point, point)
+}
+
+function moveSelectionBox(event: KonvaEvent) {
+  if (!selectionBox.visible || !event.evt) return
+  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
+  updateSelectionBox({ x: selectionBox.startX, y: selectionBox.startY }, point)
+}
+
+function intersectsSelection(layer: HandoutLayer) {
+  return !(
+    layer.x + layer.width < selectionBox.x
+    || layer.x > selectionBox.x + selectionBox.width
+    || layer.y + layer.height < selectionBox.y
+    || layer.y > selectionBox.y + selectionBox.height
+  )
+}
+
+function stopSelectionBox() {
+  if (!selectionBox.visible) return
+  const hasArea = selectionBox.width > 3 / stageScale.value || selectionBox.height > 3 / stageScale.value
+  if (hasArea) {
+    editor.setLayerSelection(
+      editor.document.layers
+        .filter((layer) => layer.visible && intersectsSelection(layer))
+        .map((layer) => layer.id),
+    )
+    void updateTransformer()
+    suppressNextStageClick = true
+  }
+  selectionBox.visible = false
+  selectionBox.width = 0
+  selectionBox.height = 0
+}
+
 function onTransformEnd(layer: HandoutLayer) {
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
-  const scaleX = node.scaleX()
+  const scaleX = Math.abs(node.scaleX())
   const scaleY = node.scaleY()
-  const position = node.position()
+  const position = layerPositionFromNode(layer, node)
   const width = Math.max(12, Math.round(node.width() * scaleX))
   const height = Math.max(12, Math.round(node.height() * scaleY))
   node.clearCache()
-  node.scaleX(1)
+  node.scaleX(layer.flipX ? -1 : 1)
   node.scaleY(1)
   node.width(width)
   node.height(height)
   editor.patchLayer(layer.id, {
-    x: Math.round(position.x),
-    y: Math.round(position.y),
+    x: position.x,
+    y: position.y,
     width,
     height,
     rotation: Math.round(node.rotation()),
@@ -597,14 +718,24 @@ function onDragEnd(layer: HandoutLayer) {
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
   node.clearCache()
-  editor.patchLayer(layer.id, {
-    x: Math.round(node.x()),
-    y: Math.round(node.y()),
-  })
+  if (multiDragState.active) {
+    const patches = editor.selectedLayers
+      .map((item) => {
+        const selectedNode = layerNodeRefs[item.id]?.getNode()
+        if (!selectedNode) return undefined
+        return { id: item.id, patch: layerPositionFromNode(item, selectedNode) }
+      })
+      .filter((item): item is { id: string; patch: { x: number; y: number } } => Boolean(item))
+    for (const item of patches) editor.patchLayer(item.id, item.patch)
+    multiDragState.active = false
+    multiDragState.positions = {}
+  } else {
+    editor.patchLayer(layer.id, layerPositionFromNode(layer, node))
+  }
   logBackgroundRender('after-layer-drag', {
     layerId: layer.id,
     layerType: layer.type,
-    layerPosition: { x: Math.round(node.x()), y: Math.round(node.y()) },
+    layerPosition: layerPositionFromNode(layer, node),
   })
   void refreshLayerEffectCacheAfterUpdate(layer.id)
 }
@@ -624,7 +755,7 @@ function snapLayerFromDocumentLayer(layer: HandoutLayer): SnapLayer {
 function snapLayerFromNode(layer: HandoutLayer, node: Konva.Node): SnapLayer {
   return {
     ...snapLayerFromDocumentLayer(layer),
-    x: node.x(),
+    x: layerPositionFromNode(layer, node).x,
     y: node.y(),
     width: node.width(),
     height: node.height(),
@@ -636,6 +767,23 @@ function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
   if (!node || event.evt?.ctrlKey) {
     guideLines.value = []
     lastSnapLogSignature = ''
+    return
+  }
+
+  if (multiDragState.active && multiDragState.layerId === layer.id) {
+    const position = layerPositionFromNode(layer, node)
+    const dx = position.x - multiDragState.originX
+    const dy = position.y - multiDragState.originY
+    for (const id of editor.selectedLayerIds) {
+      if (id === layer.id) continue
+      const selectedLayer = editor.document.layers.find((item) => item.id === id)
+      const selectedNode = layerNodeRefs[id]?.getNode()
+      const origin = multiDragState.positions[id]
+      if (!selectedLayer || !selectedNode || !origin) continue
+      selectedNode.x(selectedLayer.flipX ? origin.x + dx + selectedLayer.width / 2 : origin.x + dx)
+      selectedNode.y(origin.y + dy)
+    }
+    guideLines.value = []
     return
   }
 
@@ -673,8 +821,10 @@ async function updateTransformer() {
   await nextTick()
   const transformer = transformerRef.value?.getNode()
   if (!transformer) return
-  const selected = editor.selectedLayerId ? layerNodeRefs[editor.selectedLayerId]?.getNode() : undefined
-  transformer.nodes(selected ? [selected] : [])
+  const selectedNodes = editor.selectedLayerIds
+    .map((layerId) => layerNodeRefs[layerId]?.getNode())
+    .filter((node): node is Konva.Node => Boolean(node))
+  transformer.nodes(selectedNodes)
   transformer.getLayer()?.batchDraw()
 }
 
@@ -1099,6 +1249,7 @@ onBeforeUnmount(() => {
 watch(() => editor.library.backgrounds, () => { void syncImages(editor.library) }, { deep: true })
 watch(() => editor.library.assets, () => { void syncImages(editor.library) }, { deep: true })
 watch(() => editor.selectedLayerId, updateTransformer)
+watch(selectedLayerIdsSignature, updateTransformer)
 watch(selectedLayerTransformSignature, updateTransformer)
 watch(selectedLayerRenderSignature, () => {
   if (editor.selectedLayerId) void refreshLayerEffectCacheAfterUpdate(editor.selectedLayerId)
@@ -1403,24 +1554,32 @@ watch(
               v-for="layer in editor.layers"
               :key="layer.id"
               class="layer-row"
-              :class="{ selected: editor.selectedLayerId === layer.id, dragging: draggedLayerId === layer.id }"
+              :class="{ selected: editor.selectedLayerIds.includes(layer.id), dragging: draggedLayerId === layer.id }"
               role="button"
               tabindex="0"
               draggable="true"
-              @click="selectCanvasLayer(layer.id)"
+              @click="selectLayerFromList(layer.id, $event)"
               @dragstart="startLayerListDrag(layer, $event)"
               @dragover.prevent
               @drop="handleLayerListDrop(layer, $event)"
               @dragend="draggedLayerId = ''"
-              @keydown.enter="selectCanvasLayer(layer.id)"
+              @keydown.enter="selectLayerFromList(layer.id, $event)"
             >
               <Layers class="layer-icon" />
               <span>
                 <strong>{{ layerName(layer) }}</strong>
                 <em>{{ layer.type }} · z{{ layer.zIndex }}</em>
               </span>
-              <Eye v-if="layer.visible" class="layer-state" />
-              <EyeOff v-else class="layer-state" />
+              <Button
+                class="layer-visibility"
+                size="icon"
+                variant="ghost"
+                :data-visible="layer.visible"
+                @click.stop="toggleLayerVisibility(layer)"
+              >
+                <Eye v-if="layer.visible" />
+                <EyeOff v-else />
+              </Button>
               <Button
                 class="row-delete"
                 size="icon"
@@ -1484,7 +1643,15 @@ watch(
           @pointerleave="stopCanvasPan"
         >
           <div class="stage-surface" :style="{ filter: documentFilterStyle }">
-            <v-stage ref="stageRef" :config="stageConfig" @click="handleStagePointer" @tap="handleStagePointer">
+            <v-stage
+              ref="stageRef"
+              :config="stageConfig"
+              @click="handleStagePointer"
+              @tap="handleStagePointer"
+              @mousedown="startSelectionBox"
+              @mousemove="moveSelectionBox"
+              @mouseup="stopSelectionBox"
+            >
               <v-layer>
               <v-group :config="contentGroupConfig">
                 <v-rect
@@ -1515,7 +1682,7 @@ watch(
                     :config="{ ...layerConfig(layer), image: imageForLayer(layer) }"
                     @click="selectCanvasLayer(layer.id, $event)"
                     @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
                     @transformend="onTransformEnd(layer)"
@@ -1526,7 +1693,7 @@ watch(
                     :config="textConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
                     @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
                     @transformend="onTransformEnd(layer)"
@@ -1554,6 +1721,20 @@ watch(
                     }"
                   />
                 </template>
+                <v-rect
+                  v-if="selectionBox.visible"
+                  :config="{
+                    x: selectionBox.x,
+                    y: selectionBox.y,
+                    width: selectionBox.width,
+                    height: selectionBox.height,
+                    fill: 'rgba(14, 165, 233, 0.12)',
+                    stroke: '#0ea5e9',
+                    strokeWidth: 1 / stageScale,
+                    dash: [4 / stageScale, 4 / stageScale],
+                    listening: false,
+                  }"
+                />
                 <v-transformer
                   ref="transformerRef"
                   :config="{

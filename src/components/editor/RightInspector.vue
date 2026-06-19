@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Download, Eye, Italic, Strikethrough, Trash2, Underline } from '@lucide/vue'
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Download, Eye, FlipHorizontal, Italic, Strikethrough, Trash2, Underline } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,14 +24,46 @@ defineEmits<{
 }>()
 
 const editor = useEditorStore()
+const activeLayer = computed(() => editor.selectedLayer)
+const activeTextLayer = computed(() => isTextLayer(activeLayer.value) ? activeLayer.value : undefined)
+const selectedLayers = computed(() => editor.selectedLayers)
+const selectedCount = computed(() => selectedLayers.value.length)
+const selectedTextLayers = computed(() => selectedLayers.value.filter(isTextLayer))
+const allSelectedText = computed(() => selectedLayers.value.length > 0 && selectedTextLayers.value.length === selectedLayers.value.length)
 const backgroundAsset = computed(() =>
   editor.resolveBackground(editor.document.canvas.backgroundAssetId)
     || editor.resolveAsset(editor.document.canvas.backgroundAssetId),
 )
 
+function commonValue<T>(values: T[], fallback?: T) {
+  if (!values.length) return fallback
+  return values.every((value) => value === values[0]) ? values[0] : fallback
+}
+
+function commonLayerValue<T>(getter: (layer: NonNullable<typeof activeLayer.value>) => T, fallback?: T) {
+  return commonValue(selectedLayers.value.map(getter), fallback)
+}
+
+function commonTextValue<T>(getter: (layer: (typeof selectedTextLayers.value)[number]) => T, fallback?: T) {
+  return commonValue(selectedTextLayers.value.map(getter), fallback)
+}
+
+const commonFontId = computed(() => commonTextValue((layer) => layer.fontId, ''))
+const commonFontFamily = computed(() => commonTextValue((layer) => layer.fontFamily, 'Mixed fonts'))
+const commonFontSize = computed(() => commonTextValue((layer) => layer.fontSize, undefined))
+const commonFill = computed(() => commonTextValue((layer) => layer.fill, undefined))
+const commonLineHeight = computed(() => commonTextValue((layer) => layer.lineHeight, undefined))
+const commonAlign = computed(() => commonTextValue((layer) => layer.align, undefined))
+const commonBold = computed(() => commonTextValue((layer) => layer.fontWeight >= 700, undefined))
+const commonItalic = computed(() => commonTextValue((layer) => layer.italic, undefined))
+const commonUnderline = computed(() => commonTextValue((layer) => layer.underline, undefined))
+const commonStrikethrough = computed(() => commonTextValue((layer) => layer.strikethrough, undefined))
+const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
+const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
+
 function setFont(fontId: string) {
   const font = editor.resolveFont(fontId)
-  editor.patchSelectedLayer({
+  editor.patchSelectedLayers({
     fontId,
     fontFamily: font?.name.replace(/\.[^.]+$/, '') || 'Inter',
   })
@@ -42,7 +74,7 @@ function deleteLayer() {
 }
 
 function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean) {
-  editor.patchSelectedLayer({ [kind]: value })
+  editor.patchSelectedLayers({ [kind]: value })
 }
 
 function sliderValue(value: number[] | undefined, fallback = 0) {
@@ -50,17 +82,11 @@ function sliderValue(value: number[] | undefined, fallback = 0) {
 }
 
 function patchOpacity(value: number[] | undefined) {
-  editor.patchSelectedLayer({ opacity: sliderValue(value, 100) / 100 })
+  editor.patchSelectedLayers({ opacity: sliderValue(value, 100) / 100 })
 }
 
 function patchEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number[] | undefined) {
-  if (!editor.selectedLayer) return
-  editor.patchSelectedLayer({
-    effects: {
-      ...editor.selectedLayer.effects,
-      [kind]: sliderValue(value),
-    },
-  })
+  editor.patchSelectedLayerEffect(kind, sliderValue(value))
 }
 
 function patchBlur(value: number[] | undefined) {
@@ -115,35 +141,61 @@ function patchDocumentSaturation(value: number[] | undefined) {
       </TabsList>
 
       <TabsContent value="inspect" class="rail-tab-content">
-        <div v-if="editor.selectedLayer" class="panel-stack inspector-panel">
-          <label>
+        <div v-if="activeLayer" class="panel-stack inspector-panel">
+          <div v-if="selectedCount > 1" class="selection-summary">
+            {{ selectedCount }} layers selected
+          </div>
+          <label v-if="selectedCount === 1">
             Name
-            <Input :model-value="editor.selectedLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
+            <Input :model-value="activeLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
           </label>
           <div class="two-col">
             <label>
               X
-              <Input type="number" :model-value="editor.selectedLayer.x" @update:model-value="(value) => editor.patchSelectedLayer({ x: Number(value) || 0 })" />
+              <Input type="number" :model-value="activeLayer.x" @update:model-value="(value) => editor.patchSelectedLayer({ x: Number(value) || 0 })" />
             </label>
             <label>
               Y
-              <Input type="number" :model-value="editor.selectedLayer.y" @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })" />
+              <Input type="number" :model-value="activeLayer.y" @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })" />
             </label>
           </div>
           <div class="two-col">
             <label>
               Width
-              <Input type="number" :model-value="editor.selectedLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
+              <Input type="number" :model-value="activeLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
             </label>
             <label>
               Height
-              <Input type="number" :model-value="editor.selectedLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
+              <Input type="number" :model-value="activeLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
+            </label>
+          </div>
+          <div class="two-col">
+            <label>
+              Rotation
+              <Input
+                type="number"
+                :model-value="commonRotation ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ rotation: Number(value) || 0 })"
+              />
+            </label>
+            <label>
+              Flip
+              <Button
+                type="button"
+                variant="outline"
+                :data-active="commonFlipX === true"
+                @click="editor.patchSelectedLayers({ flipX: !(commonFlipX === true) })"
+              >
+                <FlipHorizontal data-icon="inline-start" />
+                Horizontal
+              </Button>
             </label>
           </div>
           <label>
-            Opacity {{ Math.round(editor.selectedLayer.opacity * 100) }}%
+            Opacity {{ Math.round(activeLayer.opacity * 100) }}%
               <Slider
-                :model-value="[editor.selectedLayer.opacity * 100]"
+                :model-value="[activeLayer.opacity * 100]"
                 :max="100"
                 :step="1"
                 @update:model-value="patchOpacity"
@@ -151,7 +203,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
           </label>
           <label>
             Blend mode
-            <Select :model-value="editor.selectedLayer.blendMode" @update:model-value="(value) => editor.patchSelectedLayer({ blendMode: value as any })">
+            <Select :model-value="activeLayer.blendMode" @update:model-value="(value) => editor.patchSelectedLayers({ blendMode: value as any })">
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="source-over">Normal</SelectItem>
@@ -163,19 +215,29 @@ function patchDocumentSaturation(value: number[] | undefined) {
               </SelectContent>
             </Select>
           </label>
-          <template v-if="isTextLayer(editor.selectedLayer)">
-            <label>
+          <template v-if="allSelectedText">
+            <label v-if="selectedCount === 1">
               Text
-              <Textarea :model-value="editor.selectedLayer.text" @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })" />
+              <Textarea :model-value="activeTextLayer?.text" @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })" />
             </label>
             <div class="two-col">
               <label>
                 Font size
-                <Input type="number" :model-value="editor.selectedLayer.fontSize" @update:model-value="(value) => editor.patchSelectedLayer({ fontSize: Number(value) || 1 })" />
+                <Input
+                  type="number"
+                  :model-value="commonFontSize ?? ''"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => editor.patchSelectedLayers({ fontSize: Number(value) || 1 })"
+                />
               </label>
               <label>
                 Color
-                <Input type="color" :model-value="editor.selectedLayer.fill" @update:model-value="(value) => editor.patchSelectedLayer({ fill: String(value) })" />
+                <Input
+                  :type="commonFill ? 'color' : 'text'"
+                  :model-value="commonFill ?? ''"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
+                />
               </label>
             </div>
             <label>
@@ -184,40 +246,41 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 type="number"
                 step="0.05"
                 min="0.5"
-                :model-value="editor.selectedLayer.lineHeight"
-                @update:model-value="(value) => editor.patchSelectedLayer({ lineHeight: Math.max(0.5, Number(value) || 1) })"
+                :model-value="commonLineHeight ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ lineHeight: Math.max(0.5, Number(value) || 1) })"
               />
             </label>
             <div class="icon-button-grid">
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.align === 'left'"
-                @click="editor.patchSelectedLayer({ align: 'left' })"
+                :data-active="commonAlign === 'left'"
+                @click="editor.patchSelectedLayers({ align: 'left' })"
               >
                 <AlignLeft />
               </Button>
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.align === 'center'"
-                @click="editor.patchSelectedLayer({ align: 'center' })"
+                :data-active="commonAlign === 'center'"
+                @click="editor.patchSelectedLayers({ align: 'center' })"
               >
                 <AlignCenter />
               </Button>
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.align === 'right'"
-                @click="editor.patchSelectedLayer({ align: 'right' })"
+                :data-active="commonAlign === 'right'"
+                @click="editor.patchSelectedLayers({ align: 'right' })"
               >
                 <AlignRight />
               </Button>
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.align === 'justify'"
-                @click="editor.patchSelectedLayer({ align: 'justify' })"
+                :data-active="commonAlign === 'justify'"
+                @click="editor.patchSelectedLayers({ align: 'justify' })"
               >
                 <AlignJustify />
               </Button>
@@ -226,40 +289,40 @@ function patchDocumentSaturation(value: number[] | undefined) {
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.fontWeight >= 700"
-                @click="editor.patchSelectedLayer({ fontWeight: editor.selectedLayer.fontWeight >= 700 ? 400 : 700 })"
+                :data-active="commonBold === true"
+                @click="editor.patchSelectedLayers({ fontWeight: commonBold === true ? 400 : 700 })"
               >
                 <Bold />
               </Button>
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.italic"
-                @click="editor.patchSelectedLayer({ italic: !editor.selectedLayer.italic })"
+                :data-active="commonItalic === true"
+                @click="editor.patchSelectedLayers({ italic: !(commonItalic === true) })"
               >
                 <Italic />
               </Button>
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.underline"
-                @click="patchTextDecoration('underline', !editor.selectedLayer.underline)"
+                :data-active="commonUnderline === true"
+                @click="patchTextDecoration('underline', !(commonUnderline === true))"
               >
                 <Underline />
               </Button>
               <Button
                 size="icon"
                 variant="outline"
-                :data-active="editor.selectedLayer.strikethrough"
-                @click="patchTextDecoration('strikethrough', !editor.selectedLayer.strikethrough)"
+                :data-active="commonStrikethrough === true"
+                @click="patchTextDecoration('strikethrough', !(commonStrikethrough === true))"
               >
                 <Strikethrough />
               </Button>
             </div>
             <label>
               Font
-              <Select :model-value="editor.selectedLayer.fontId" @update:model-value="(value) => setFont(String(value))">
-                <SelectTrigger><SelectValue :placeholder="editor.selectedLayer.fontFamily" /></SelectTrigger>
+              <Select :model-value="commonFontId" @update:model-value="(value) => setFont(String(value))">
+                <SelectTrigger><SelectValue :placeholder="commonFontFamily" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem v-for="font in editor.library.fonts" :key="font.id" :value="font.id">
                     {{ font.name }}
@@ -271,18 +334,18 @@ function patchDocumentSaturation(value: number[] | undefined) {
           <Separator />
           <div class="effect-grid">
             <label>
-              Blur {{ editor.selectedLayer.effects.blur }}
+              Blur {{ activeLayer.effects.blur }}
               <Slider
-                :model-value="[editor.selectedLayer.effects.blur]"
+                :model-value="[activeLayer.effects.blur]"
                 :max="40"
                 :step="1"
                 @update:model-value="patchBlur"
               />
             </label>
             <label>
-              Brightness {{ editor.selectedLayer.effects.brightness }}
+              Brightness {{ activeLayer.effects.brightness }}
               <Slider
-                :model-value="[editor.selectedLayer.effects.brightness]"
+                :model-value="[activeLayer.effects.brightness]"
                 :min="-100"
                 :max="100"
                 :step="1"
@@ -290,9 +353,9 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Contrast {{ editor.selectedLayer.effects.contrast }}
+              Contrast {{ activeLayer.effects.contrast }}
               <Slider
-                :model-value="[editor.selectedLayer.effects.contrast]"
+                :model-value="[activeLayer.effects.contrast]"
                 :min="-100"
                 :max="100"
                 :step="1"
@@ -300,9 +363,9 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Saturation {{ editor.selectedLayer.effects.saturation }}
+              Saturation {{ activeLayer.effects.saturation }}
               <Slider
-                :model-value="[editor.selectedLayer.effects.saturation]"
+                :model-value="[activeLayer.effects.saturation]"
                 :min="-100"
                 :max="100"
                 :step="1"
@@ -311,7 +374,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
             </label>
           </div>
           <div class="danger-row">
-            <Button variant="outline" @click="editor.patchSelectedLayer({ visible: !editor.selectedLayer.visible })">
+            <Button variant="outline" @click="editor.patchSelectedLayers({ visible: !activeLayer.visible })">
               <Eye data-icon="inline-start" />
               Toggle
             </Button>

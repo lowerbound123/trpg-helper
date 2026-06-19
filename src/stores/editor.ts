@@ -13,6 +13,7 @@ import {
   type HandoutDocument,
   type HandoutLayer,
   type ImageLayer,
+  type LayerEffects,
   type LayerPatch,
   type TextLayer,
 } from '@/lib/handout'
@@ -56,6 +57,7 @@ const tagList = (value: string) =>
 export const useEditorStore = defineStore('editor', () => {
   const history = shallowRef(createHistory(createDefaultHandout('Untitled handout')))
   const selectedLayerId = ref<string>()
+  const selectedLayerIds = ref<string[]>([])
   const projectDir = ref('')
   const currentProjectId = ref<string>()
   const view = ref<'manager' | 'editor'>('manager')
@@ -70,6 +72,11 @@ export const useEditorStore = defineStore('editor', () => {
   const selectedLayer = computed<HandoutLayer | undefined>(() =>
     document.value.layers.find((layer) => layer.id === selectedLayerId.value),
   )
+  const selectedLayers = computed<HandoutLayer[]>(() =>
+    selectedLayerIds.value
+      .map((id) => document.value.layers.find((layer) => layer.id === id))
+      .filter((layer): layer is HandoutLayer => Boolean(layer)),
+  )
   const canUndo = computed(() => history.value.canUndo.value)
   const canRedo = computed(() => history.value.canRedo.value)
 
@@ -79,6 +86,22 @@ export const useEditorStore = defineStore('editor', () => {
 
   function selectLayer(layerId?: string) {
     selectedLayerId.value = layerId
+    selectedLayerIds.value = layerId ? [layerId] : []
+  }
+
+  function setLayerSelection(layerIds: string[]) {
+    const existing = new Set(document.value.layers.map((layer) => layer.id))
+    selectedLayerIds.value = layerIds.filter((id, index) => existing.has(id) && layerIds.indexOf(id) === index)
+    selectedLayerId.value = selectedLayerIds.value.at(-1)
+  }
+
+  function toggleLayerSelection(layerId: string) {
+    if (!document.value.layers.some((layer) => layer.id === layerId)) return
+    if (selectedLayerIds.value.includes(layerId)) {
+      setLayerSelection(selectedLayerIds.value.filter((id) => id !== layerId))
+      return
+    }
+    setLayerSelection([...selectedLayerIds.value, layerId])
   }
 
   function addLayerFromAsset(asset: LibraryRecord, size?: { width?: number; height?: number }) {
@@ -93,6 +116,7 @@ export const useEditorStore = defineStore('editor', () => {
       }),
     )
     selectedLayerId.value = document.value.layers.at(-1)?.id
+    selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
   }
 
   function addLayerFromAssetAt(asset: LibraryRecord, x: number, y: number, size?: { width?: number; height?: number }) {
@@ -107,6 +131,7 @@ export const useEditorStore = defineStore('editor', () => {
       }),
     )
     selectedLayerId.value = document.value.layers.at(-1)?.id
+    selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
   }
 
   function addText() {
@@ -121,6 +146,7 @@ export const useEditorStore = defineStore('editor', () => {
       }),
     )
     selectedLayerId.value = document.value.layers.at(-1)?.id
+    selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
   }
 
   function patchSelectedLayer(patch: LayerPatch) {
@@ -129,15 +155,39 @@ export const useEditorStore = defineStore('editor', () => {
     commit((doc) => updateLayer(doc, id, patch))
   }
 
+  function patchSelectedLayers(patch: LayerPatch) {
+    const ids = selectedLayerIds.value
+    if (!ids.length) return
+    commit((doc) => ids.reduce((next, id) => updateLayer(next, id, patch), doc))
+  }
+
+  function patchSelectedLayerEffect(kind: keyof LayerEffects, value: number) {
+    const ids = selectedLayerIds.value
+    if (!ids.length) return
+    commit((doc) =>
+      ids.reduce((next, id) => {
+        const layer = next.layers.find((item) => item.id === id)
+        if (!layer) return next
+        return updateLayer(next, id, {
+          effects: {
+            ...layer.effects,
+            [kind]: value,
+          },
+        })
+      }, doc),
+    )
+  }
+
   function patchLayer(layerId: string, patch: LayerPatch) {
     commit((doc) => updateLayer(doc, layerId, patch))
   }
 
   function deleteSelectedLayer() {
-    const id = selectedLayerId.value
-    if (!id) return
-    commit((doc) => removeLayer(doc, id))
+    const ids = selectedLayerIds.value.length ? selectedLayerIds.value : selectedLayerId.value ? [selectedLayerId.value] : []
+    if (!ids.length) return
+    commit((doc) => ids.reduce((next, id) => removeLayer(next, id), doc))
     selectedLayerId.value = undefined
+    selectedLayerIds.value = []
   }
 
   function moveSelectedLayer(delta: number) {
@@ -169,6 +219,7 @@ export const useEditorStore = defineStore('editor', () => {
   function replaceDocument(next: HandoutDocument, dir?: string) {
     history.value.replace(normalizeHandoutDocument(next))
     selectedLayerId.value = undefined
+    selectedLayerIds.value = []
     if (dir !== undefined) projectDir.value = dir
   }
 
@@ -345,6 +396,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   function closeEditor() {
     selectedLayerId.value = undefined
+    selectedLayerIds.value = []
     view.value = 'manager'
   }
 
@@ -387,7 +439,9 @@ export const useEditorStore = defineStore('editor', () => {
     openProjectFromPath,
     patchLayer,
     patchCanvas,
+    patchSelectedLayerEffect,
     patchSelectedLayer,
+    patchSelectedLayers,
     projects,
     projectFolders,
     projectDir,
@@ -409,8 +463,12 @@ export const useEditorStore = defineStore('editor', () => {
     selectLayer,
     selectedLayer,
     selectedLayerId,
+    selectedLayerIds,
+    selectedLayers,
+    setLayerSelection,
     setBackground,
     status,
+    toggleLayerSelection,
     undo,
     view,
     saveCurrentProject,

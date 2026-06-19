@@ -68,10 +68,12 @@ function fontStyle(layer: TextLayer) {
 
 function commonConfig(layer: HandoutLayer) {
   return {
-    x: layer.x,
+    x: layer.flipX ? layer.x + layer.width / 2 : layer.x,
     y: layer.y,
     width: layer.width,
     height: layer.height,
+    offsetX: layer.flipX ? layer.width / 2 : 0,
+    scaleX: layer.flipX ? -1 : 1,
     rotation: layer.rotation,
     opacity: layer.opacity,
     visible: layer.visible,

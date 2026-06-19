@@ -54,6 +54,7 @@ describe('handout document model', () => {
       assetId: 'asset-1',
       opacity: 1,
       blendMode: 'source-over',
+      flipX: false,
     })
     expect(withText.layers[1]).toMatchObject({
       type: 'text',
@@ -63,6 +64,7 @@ describe('handout document model', () => {
       italic: false,
       underline: false,
       strikethrough: false,
+      flipX: false,
     })
   })
 

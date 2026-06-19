@@ -544,15 +544,22 @@ textarea {
 }
 
 .layer-icon,
-.layer-state {
+.layer-state,
+.layer-visibility svg {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
   color: hsl(var(--muted-foreground));
 }
 
-.layer-state {
+.layer-visibility {
   margin-left: auto;
+  width: 28px !important;
+  height: 28px !important;
+}
+
+.layer-visibility[data-visible='true'] svg {
+  color: hsl(var(--accent));
 }
 
 .row-delete {
@@ -672,6 +679,16 @@ textarea {
 
 .inspector-panel {
   padding: 2px;
+}
+
+.selection-summary {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 650;
+  color: hsl(var(--accent-foreground));
+  background: hsl(174 40% 93%);
+  border: 1px solid hsl(var(--accent));
+  border-radius: 6px;
 }
 
 .document-summary {

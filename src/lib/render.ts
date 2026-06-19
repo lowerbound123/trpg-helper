@@ -159,6 +159,7 @@ function shapeNode(layer: ShapeLayer) {
         stroke: layer.stroke,
         strokeWidth: layer.strokeWidth,
         dash: lineDash(layer),
+        dashEnabled: layer.lineStyle === 'dashed' || layer.lineStyle === 'dotted',
         lineCap: 'round',
         lineJoin: 'round',
       }))
@@ -225,35 +226,37 @@ function polygonPoints(layer: ShapeLayer) {
 
 function lineDash(layer: ShapeLayer) {
   if (layer.lineStyle === 'dashed') return [18, 12]
-  if (layer.lineStyle === 'dotted') return [2, 10]
-  return undefined
+  if (layer.lineStyle === 'dotted') return [1, 10]
+  return []
 }
 
 function addArrow(group: Konva.Group, layer: ShapeLayer, side: 'start' | 'end') {
   const kind = side === 'start' ? layer.lineStartArrow : layer.lineEndArrow
   if (kind === 'none') return
   const y = layer.height / 2
-  const size = Math.max(10, layer.strokeWidth * 4)
+  const size = Math.max(8, layer.strokeWidth * 4) * Math.max(0.25, layer.lineArrowSize || 1)
   const x = side === 'start' ? 0 : layer.width
   const direction = side === 'start' ? 1 : -1
   if (kind === 'dot') {
     group.add(new Konva.Circle({
       x,
       y,
-      radius: Math.max(4, layer.strokeWidth * 1.8),
+      radius: Math.max(4, layer.strokeWidth * 1.8) * Math.max(0.25, layer.lineArrowSize || 1),
       fill: layer.stroke,
     }))
     return
   }
   const points = kind === 'triangle'
     ? [x, y, x + direction * size, y - size * 0.55, x + direction * size, y + size * 0.55]
-    : [x, y - size * 0.6, x, y + size * 0.6]
+    : kind === 'notched'
+      ? [x, y, x + direction * size, y - size * 0.58, x + direction * size * 0.62, y, x + direction * size, y + size * 0.58]
+      : [x, y - size * 0.6, x, y + size * 0.6]
   group.add(new Konva.Line({
     points,
-    fill: kind === 'triangle' ? layer.stroke : undefined,
+    fill: kind === 'triangle' || kind === 'notched' ? layer.stroke : undefined,
     stroke: layer.stroke,
     strokeWidth: layer.strokeWidth,
-    closed: kind === 'triangle',
+    closed: kind === 'triangle' || kind === 'notched',
   }))
 }
 

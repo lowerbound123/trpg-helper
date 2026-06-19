@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from 'vue'
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Download, Eye, FlipHorizontal, Italic, Strikethrough, Trash2, Underline } from '@lucide/vue'
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Download, FlipHorizontal, Italic, Strikethrough, Trash2, Underline } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -70,6 +70,7 @@ const commonShapeStrokeWidth = computed(() => commonValue(selectedShapeLayers.va
 const commonShapeCornerRadius = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.cornerRadius), undefined))
 const commonLineStartArrow = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineStartArrow), undefined))
 const commonLineEndArrow = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineEndArrow), undefined))
+const commonLineArrowSize = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineArrowSize), undefined))
 const commonLineStyle = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineStyle), undefined))
 const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
@@ -187,7 +188,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
             Name
             <Input :model-value="activeLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
           </label>
-          <div class="two-col">
+          <div class="transform-grid">
             <label>
               X
               <Input type="number" :model-value="activeLayer.x" @update:model-value="(value) => editor.patchSelectedLayer({ x: Number(value) || 0 })" />
@@ -196,8 +197,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
               Y
               <Input type="number" :model-value="activeLayer.y" @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })" />
             </label>
-          </div>
-          <div class="two-col">
             <label>
               Width
               <Input type="number" :model-value="activeLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
@@ -206,8 +205,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
               Height
               <Input type="number" :model-value="activeLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
             </label>
-          </div>
-          <div class="two-col">
             <label>
               Rotation
               <Input
@@ -425,18 +422,31 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <template v-if="allSelectedLines">
-              <label>
-                Line style
-                <Select :model-value="commonLineStyle" @update:model-value="(value) => editor.patchSelectedLayers({ lineStyle: value as any })">
-                  <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="solid">Solid</SelectItem>
-                    <SelectItem value="dashed">Dashed</SelectItem>
-                    <SelectItem value="dotted">Dotted</SelectItem>
-                    <SelectItem value="double">Double</SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
+              <div class="two-col">
+                <label>
+                  Line style
+                  <Select :model-value="commonLineStyle" @update:model-value="(value) => editor.patchSelectedLayers({ lineStyle: value as any })">
+                    <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="solid">Solid</SelectItem>
+                      <SelectItem value="dashed">Dashed</SelectItem>
+                      <SelectItem value="dotted">Dotted</SelectItem>
+                      <SelectItem value="double">Double</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label>
+                  Arrow size
+                  <Input
+                    type="number"
+                    min="0.25"
+                    step="0.25"
+                    :model-value="commonLineArrowSize ?? ''"
+                    placeholder="Mixed"
+                    @update:model-value="(value) => editor.patchSelectedLayers({ lineArrowSize: Math.max(0.25, Number(value) || 1) })"
+                  />
+                </label>
+              </div>
               <div class="two-col">
                 <label>
                   Start arrow
@@ -445,6 +455,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
                       <SelectItem value="triangle">Triangle</SelectItem>
+                      <SelectItem value="notched">Notched</SelectItem>
                       <SelectItem value="bar">Bar</SelectItem>
                       <SelectItem value="dot">Dot</SelectItem>
                     </SelectContent>
@@ -457,6 +468,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
                       <SelectItem value="triangle">Triangle</SelectItem>
+                      <SelectItem value="notched">Notched</SelectItem>
                       <SelectItem value="bar">Bar</SelectItem>
                       <SelectItem value="dot">Dot</SelectItem>
                     </SelectContent>
@@ -512,10 +524,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
             </label>
           </div>
           <div class="danger-row">
-            <Button variant="outline" @click="editor.patchSelectedLayers({ visible: !activeLayer.visible })">
-              <Eye data-icon="inline-start" />
-              Toggle
-            </Button>
             <Button variant="destructive" @click="deleteLayer">
               <Trash2 data-icon="inline-start" />
               Delete

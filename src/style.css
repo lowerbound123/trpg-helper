@@ -525,6 +525,25 @@ textarea {
   object-fit: cover;
 }
 
+.shape-preview {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  color: hsl(173 80% 32%);
+}
+
+.shape-preview :is(line, rect, ellipse, polygon) {
+  fill: hsl(173 55% 90%);
+  stroke: currentColor;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.shape-preview line {
+  fill: none;
+  stroke-linecap: round;
+}
+
 .asset-meta,
 .layer-row span,
 .font-row,
@@ -849,10 +868,16 @@ textarea {
   gap: 8px;
 }
 
+.transform-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .effect-grid {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 7px;
 }
 
 .empty-inspector {

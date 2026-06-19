@@ -5,7 +5,6 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
-  Circle,
   Minus,
   Eye,
   EyeOff,
@@ -13,8 +12,6 @@ import {
   Plus,
   Redo2,
   Save,
-  Slash,
-  Square,
   Trash2,
   Type,
   Undo2,
@@ -856,8 +853,8 @@ function polygonPoints(layer: ShapeLayer) {
 
 function lineDash(layer: ShapeLayer) {
   if (layer.lineStyle === 'dashed') return [18, 12]
-  if (layer.lineStyle === 'dotted') return [2, 10]
-  return undefined
+  if (layer.lineStyle === 'dotted') return [1, 10]
+  return []
 }
 
 function lineHitConfig(layer: ShapeLayer) {
@@ -878,6 +875,7 @@ function lineVisualConfig(layer: ShapeLayer, offsetY = 0) {
     stroke: layer.stroke,
     strokeWidth: layer.strokeWidth,
     dash: lineDash(layer),
+    dashEnabled: layer.lineStyle === 'dashed' || layer.lineStyle === 'dotted',
     lineCap: 'round',
     lineJoin: 'round',
     listening: false,
@@ -892,7 +890,7 @@ function lineHandleConfig(layer: ShapeLayer) {
   return {
     x: layer.width / 2,
     y: layer.height / 2,
-    radius: Math.max(6, layer.strokeWidth + 4),
+    radius: Math.max(4, Math.min(7, layer.strokeWidth + 2)),
     fill: '#14b8a6',
     stroke: '#ffffff',
     strokeWidth: 2,
@@ -902,7 +900,7 @@ function lineHandleConfig(layer: ShapeLayer) {
 
 function arrowPoints(kind: LineArrowKind, side: 'start' | 'end', layer: ShapeLayer) {
   const y = layer.height / 2
-  const size = Math.max(10, layer.strokeWidth * 4)
+  const size = Math.max(8, layer.strokeWidth * 4) * Math.max(0.25, layer.lineArrowSize || 1)
   const x = side === 'start' ? 0 : layer.width
   const direction = side === 'start' ? 1 : -1
   if (kind === 'triangle') {
@@ -910,6 +908,14 @@ function arrowPoints(kind: LineArrowKind, side: 'start' | 'end', layer: ShapeLay
       x, y,
       x + direction * size, y - size * 0.55,
       x + direction * size, y + size * 0.55,
+    ]
+  }
+  if (kind === 'notched') {
+    return [
+      x, y,
+      x + direction * size, y - size * 0.58,
+      x + direction * size * 0.62, y,
+      x + direction * size, y + size * 0.58,
     ]
   }
   if (kind === 'bar') {
@@ -925,7 +931,7 @@ function arrowDotConfig(side: 'start' | 'end', layer: ShapeLayer) {
   return {
     x: side === 'start' ? 0 : layer.width,
     y: layer.height / 2,
-    radius: Math.max(4, layer.strokeWidth * 1.8),
+    radius: Math.max(4, layer.strokeWidth * 1.8) * Math.max(0.25, layer.lineArrowSize || 1),
     fill: layer.stroke,
     listening: false,
   }
@@ -934,12 +940,23 @@ function arrowDotConfig(side: 'start' | 'end', layer: ShapeLayer) {
 function arrowLineConfig(kind: LineArrowKind, side: 'start' | 'end', layer: ShapeLayer) {
   return {
     points: arrowPoints(kind, side, layer),
-    fill: kind === 'triangle' ? layer.stroke : undefined,
+    fill: kind === 'triangle' || kind === 'notched' ? layer.stroke : undefined,
     stroke: layer.stroke,
     strokeWidth: layer.strokeWidth,
-    closed: kind === 'triangle',
+    closed: kind === 'triangle' || kind === 'notched',
     listening: false,
   }
+}
+
+function shapePreviewPoints(kind: ShapeKind) {
+  if (kind === 'diamond') return '18,4 32,18 18,32 4,18'
+  if (kind === 'hexagon-v') return '18,3 31,10 31,26 18,33 5,26 5,10'
+  if (kind === 'hexagon-h') return '10,5 26,5 33,18 26,31 10,31 3,18'
+  return ''
+}
+
+function showLineHandle(layer: ShapeLayer) {
+  return editor.selectedLayerIds.includes(layer.id) && layer.strokeWidth < 10
 }
 
 async function logTextLayerMetrics(reason: string) {
@@ -2028,9 +2045,41 @@ watch(
               @dragstart="startShapeDrag(shape.kind, $event)"
               @dragend="clearShapeDrag"
             >
-              <Slash v-if="shape.kind === 'line'" class="layer-icon" />
-              <Square v-else-if="shape.kind === 'rect'" class="layer-icon" />
-              <Circle v-else class="layer-icon" />
+              <svg class="shape-preview" viewBox="0 0 36 36" aria-hidden="true">
+                <line
+                  v-if="shape.kind === 'line'"
+                  x1="5"
+                  y1="18"
+                  x2="31"
+                  y2="18"
+                />
+                <rect
+                  v-else-if="shape.kind === 'rect'"
+                  x="7"
+                  y="8"
+                  width="22"
+                  height="20"
+                />
+                <rect
+                  v-else-if="shape.kind === 'round-rect'"
+                  x="7"
+                  y="8"
+                  width="22"
+                  height="20"
+                  rx="6"
+                />
+                <ellipse
+                  v-else-if="shape.kind === 'ellipse'"
+                  cx="18"
+                  cy="18"
+                  rx="12"
+                  ry="10"
+                />
+                <polygon
+                  v-else
+                  :points="shapePreviewPoints(shape.kind)"
+                />
+              </svg>
               <span>
                 <strong>{{ shape.label }}</strong>
                 <em>{{ shape.detail }}</em>
@@ -2280,7 +2329,7 @@ watch(
                       v-if="layer.lineEndArrow === 'dot'"
                       :config="arrowDotConfig('end', layer)"
                     />
-                    <v-circle :config="lineHandleConfig(layer)" />
+                    <v-circle v-if="showLineHandle(layer)" :config="lineHandleConfig(layer)" />
                   </v-group>
                 </template>
                 <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">

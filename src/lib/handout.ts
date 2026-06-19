@@ -10,7 +10,7 @@ export type BlendMode =
 
 export type LayerType = 'image' | 'text' | 'shape'
 export type ShapeKind = 'rect' | 'round-rect' | 'ellipse' | 'diamond' | 'hexagon-h' | 'hexagon-v' | 'line'
-export type LineArrowKind = 'none' | 'triangle' | 'bar' | 'dot'
+export type LineArrowKind = 'none' | 'triangle' | 'notched' | 'bar' | 'dot'
 export type LineStyleKind = 'solid' | 'dashed' | 'dotted' | 'double'
 
 export interface CanvasSettings {
@@ -75,6 +75,7 @@ export interface ShapeLayer extends BaseLayer {
   cornerRadius: number
   lineStartArrow: LineArrowKind
   lineEndArrow: LineArrowKind
+  lineArrowSize: number
   lineStyle: LineStyleKind
 }
 
@@ -121,6 +122,7 @@ export type NewShapeLayerInput = {
   cornerRadius?: number
   lineStartArrow?: LineArrowKind
   lineEndArrow?: LineArrowKind
+  lineArrowSize?: number
   lineStyle?: LineStyleKind
 }
 
@@ -169,6 +171,7 @@ function shapeDefaults(layer: HandoutLayer): Partial<ShapeLayer> {
     cornerRadius: layer.cornerRadius ?? 16,
     lineStartArrow: layer.lineStartArrow ?? 'none',
     lineEndArrow: layer.lineEndArrow ?? 'none',
+    lineArrowSize: layer.lineArrowSize ?? 1,
     lineStyle: layer.lineStyle ?? 'solid',
   }
 }
@@ -275,6 +278,7 @@ export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInp
     cornerRadius: input.cornerRadius ?? 16,
     lineStartArrow: input.lineStartArrow ?? 'none',
     lineEndArrow: input.lineEndArrow ?? 'none',
+    lineArrowSize: input.lineArrowSize ?? 1,
     lineStyle: input.lineStyle ?? 'solid',
     rotation: 0,
     flipX: false,

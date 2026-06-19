@@ -65,6 +65,8 @@ const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const exportScale = ref(appConfiguration.export.defaultScale)
+const exportFormat = ref<'png' | 'jpeg' | 'webp'>('png')
+const exportQuality = ref(90)
 const exportLog = ref('')
 const exportProgress = ref(0)
 const fitScale = ref(1)
@@ -115,6 +117,8 @@ let previewMaintenanceRunning = false
 let exportProgressTimer: number | undefined
 let effectCacheRaf: number | undefined
 let lastSnapLogSignature = ''
+let lastEllipseDragLogSignature = ''
+let lastFontDragOverLogAt = 0
 let suppressNextStageClick = false
 let lastLayerListSelectionId = ''
 const pendingEffectCacheLayerIds = new Set<string>()
@@ -351,10 +355,16 @@ function startFontDrag(font: LibraryRecord, event: DragEvent) {
 
 function prepareFontDrag(font: LibraryRecord) {
   draggedFontId.value = font.id
+  logText('font-drag-prepare', {
+    fontId: font.id,
+    name: font.name,
+    family: fontFamily(font),
+  })
 }
 
 function clearFontDrag() {
   window.setTimeout(() => {
+    logText('font-drag-clear', { draggedFontId: draggedFontId.value })
     draggedFontId.value = ''
   }, 0)
 }
@@ -504,6 +514,12 @@ function logSnap(message: string, data?: Record<string, unknown>) {
   const payload = serializableLogData(data)
   console.debug(`[snap] ${message}`, payload)
   void appendDebugLog('snap', message, payload)
+}
+
+function logShape(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData(data)
+  console.debug(`[shape] ${message}`, payload)
+  void appendDebugLog('shape', message, payload)
 }
 
 function clampZoom(value: number) {
@@ -694,12 +710,28 @@ function handleDocumentFontDragOver(event: DragEvent) {
   if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) return
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  const now = window.performance.now()
+  if (now - lastFontDragOverLogAt > 300) {
+    lastFontDragOverLogAt = now
+    logText('font-document-dragover', {
+      draggedFontId: draggedFontId.value,
+      types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
+      client: { x: event.clientX, y: event.clientY },
+      canvas: canvasPointFromClient(event.clientX, event.clientY),
+    })
+  }
 }
 
 function handleDocumentFontDrop(event: DragEvent) {
   if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) return
   event.preventDefault()
   const font = editor.resolveFont(draggedFontId.value)
+  logText('font-document-drop', {
+    draggedFontId: draggedFontId.value,
+    resolved: Boolean(font),
+    client: { x: event.clientX, y: event.clientY },
+    canvas: canvasPointFromClient(event.clientX, event.clientY),
+  })
   if (!font) return
   createFontTextOnCanvas(font, canvasPointFromClient(event.clientX, event.clientY))
   draggedFontId.value = ''
@@ -877,9 +909,14 @@ function polygonPoints(layer: ShapeLayer) {
 }
 
 function lineDash(layer: ShapeLayer) {
-  if (layer.lineStyle === 'dashed') return [18, 12]
+  if (layer.lineStyle === 'dashed') {
+    return [
+      Math.max(18, layer.strokeWidth * 2.8),
+      Math.max(12, layer.strokeWidth * 1.9),
+    ]
+  }
   if (layer.lineStyle === 'dotted') {
-    const gap = Math.max(8, layer.strokeWidth * 3)
+    const gap = Math.max(10, layer.strokeWidth * 2.4)
     return [0.001, gap]
   }
   return []
@@ -1187,6 +1224,9 @@ function onDragEnd(layer: HandoutLayer) {
   lastSnapLogSignature = ''
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
+  logEllipseDrag('ellipse-drag-end-before-patch', layer, node, {
+    patch: layerPositionFromNode(layer, node),
+  })
   node.clearCache()
   if (multiDragState.active) {
     const patches = editor.selectedLayers
@@ -1207,6 +1247,9 @@ function onDragEnd(layer: HandoutLayer) {
     layerType: layer.type,
     layerPosition: layerPositionFromNode(layer, node),
   })
+  if (isShapeLayer(layer) && layer.shape === 'ellipse') {
+    lastEllipseDragLogSignature = ''
+  }
   void refreshLayerEffectCacheAfterUpdate(layer.id)
 }
 
@@ -1231,6 +1274,60 @@ function snapLayerFromNode(layer: HandoutLayer, node: Konva.Node): SnapLayer {
     width: layer.width,
     height: layer.height,
   }
+}
+
+function applySnappedNodePosition(layer: HandoutLayer, node: Konva.Node, axis: 'x' | 'y', value: number) {
+  if (isShapeLayer(layer) && layer.shape === 'ellipse') {
+    if (axis === 'x') node.x(value + layer.width / 2)
+    else node.y(value + layer.height / 2)
+    return
+  }
+  if (axis === 'x') node.x(layer.flipX ? value + layer.width / 2 : value)
+  else node.y(value)
+}
+
+function ellipseDragSnapshot(layer: ShapeLayer, node: Konva.Node) {
+  const position = layerPositionFromNode(layer, node)
+  return {
+    model: {
+      x: layer.x,
+      y: layer.y,
+      width: layer.width,
+      height: layer.height,
+      rotation: layer.rotation,
+    },
+    node: {
+      x: Math.round(node.x() * 100) / 100,
+      y: Math.round(node.y() * 100) / 100,
+      width: Math.round(node.width() * 100) / 100,
+      height: Math.round(node.height() * 100) / 100,
+      scaleX: Math.round(node.scaleX() * 100) / 100,
+      scaleY: Math.round(node.scaleY() * 100) / 100,
+      rotation: Math.round(node.rotation() * 100) / 100,
+    },
+    derivedPosition: position,
+    stageScale: Math.round(stageScale.value * 1000) / 1000,
+  }
+}
+
+function logEllipseDrag(message: string, layer: HandoutLayer, node: Konva.Node, extra?: Record<string, unknown>) {
+  if (!isShapeLayer(layer) || layer.shape !== 'ellipse') return
+  const snapshot = ellipseDragSnapshot(layer, node)
+  const signature = JSON.stringify({
+    message,
+    x: snapshot.derivedPosition.x,
+    y: snapshot.derivedPosition.y,
+    nodeX: snapshot.node.x,
+    nodeY: snapshot.node.y,
+    extra,
+  })
+  if (signature === lastEllipseDragLogSignature) return
+  lastEllipseDragLogSignature = signature
+  logShape(message, {
+    layerId: layer.id,
+    ...snapshot,
+    ...extra,
+  })
 }
 
 function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
@@ -1258,6 +1355,7 @@ function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
     return
   }
 
+  logEllipseDrag('ellipse-drag-move-before-snap', layer, node)
   const snap = calculateSnapGuides({
     movingLayer: snapLayerFromNode(layer, node),
     layers: editor.document.layers.map(snapLayerFromDocumentLayer),
@@ -1267,8 +1365,17 @@ function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
     },
     stageScale: stageScale.value,
   })
-  if (snap.x) node.x(snap.nextPosition.x)
-  if (snap.y) node.y(snap.nextPosition.y)
+  if (snap.x) applySnappedNodePosition(layer, node, 'x', snap.nextPosition.x)
+  if (snap.y) applySnappedNodePosition(layer, node, 'y', snap.nextPosition.y)
+  if (snap.x || snap.y) {
+    logEllipseDrag('ellipse-drag-move-after-snap', layer, node, {
+      snap: {
+        x: snap.x,
+        y: snap.y,
+        nextPosition: snap.nextPosition,
+      },
+    })
+  }
   if (snap.lines.length > 0) {
     const signature = `${layer.id}:${snap.lines.map((line) => `${line.orientation}:${line.value}`).join('|')}`
     if (signature !== lastSnapLogSignature) {
@@ -1468,6 +1575,23 @@ function finishExportProgress(success: boolean) {
   exportProgress.value = success ? 100 : 0
 }
 
+function exportMimeType() {
+  if (exportFormat.value === 'jpeg') return 'image/jpeg'
+  if (exportFormat.value === 'webp') return 'image/webp'
+  return 'image/png'
+}
+
+function exportExtension() {
+  if (exportFormat.value === 'jpeg') return 'jpg'
+  return exportFormat.value
+}
+
+function exportQualityValue() {
+  return exportFormat.value === 'png'
+    ? undefined
+    : Math.min(1, Math.max(0.01, exportQuality.value / 100))
+}
+
 async function ensureDocumentImages(document: HandoutDocument) {
   const records = [
     editor.resolveBackground(document.canvas.backgroundAssetId) || editor.resolveAsset(document.canvas.backgroundAssetId),
@@ -1587,12 +1711,12 @@ async function exportCurrentImage() {
   exportLog.value = 'Preparing export...'
   await prepareExportProgress()
   const clickToProgressMs = Math.round(performance.now() - clickedAt)
-  logExport('export current start', { title: editor.document.title, scale: exportScale.value, clickToProgressMs })
+  logExport('export current start', { title: editor.document.title, scale: exportScale.value, format: exportFormat.value, quality: exportQuality.value, clickToProgressMs })
   try {
     exportLog.value = 'Checking export changes...'
     await setExportProgress(8)
     const signatureStartedAt = performance.now()
-    const signature = JSON.stringify({ document: editor.document, scale: exportScale.value })
+    const signature = JSON.stringify({ document: editor.document, scale: exportScale.value, format: exportFormat.value, quality: exportQuality.value })
     const signatureMs = Math.round(performance.now() - signatureStartedAt)
     if (lastCurrentExport.value?.signature === signature) {
       exportLog.value = `Unchanged image already exported to ${lastCurrentExport.value.path}`
@@ -1608,13 +1732,13 @@ async function exportCurrentImage() {
     exportLog.value = 'Rendering export image...'
     await setExportProgress(42)
     const renderStartedAt = performance.now()
-    const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
+    const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements, exportMimeType(), exportQualityValue())
     const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
     logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
-    exportLog.value = 'Writing PNG to Downloads...'
+    exportLog.value = `Writing ${exportFormat.value.toUpperCase()} to Downloads...`
     await setExportProgress(86)
     const writeStartedAt = performance.now()
-    const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
+    const path = await exportImageToDownloads(downloadFileName(editor.document.title, new Date(), exportExtension()), dataUrl)
     const writeMs = Math.round(performance.now() - writeStartedAt)
     lastCurrentExport.value = { signature, path }
     exportLog.value = `Exported image to ${path}`
@@ -2433,6 +2557,8 @@ watch(
 
     <RightInspector
       v-model:export-scale="exportScale"
+      v-model:export-format="exportFormat"
+      v-model:export-quality="exportQuality"
       :is-exporting="isExportingCurrent"
       :export-log="exportLog"
       :export-progress="exportProgress"

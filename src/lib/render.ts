@@ -237,9 +237,14 @@ function polygonPoints(layer: ShapeLayer) {
 }
 
 function lineDash(layer: ShapeLayer) {
-  if (layer.lineStyle === 'dashed') return [18, 12]
+  if (layer.lineStyle === 'dashed') {
+    return [
+      Math.max(18, layer.strokeWidth * 2.8),
+      Math.max(12, layer.strokeWidth * 1.9),
+    ]
+  }
   if (layer.lineStyle === 'dotted') {
-    const gap = Math.max(8, layer.strokeWidth * 3)
+    const gap = Math.max(10, layer.strokeWidth * 2.4)
     return [0.001, gap]
   }
   return []
@@ -285,10 +290,12 @@ export async function renderHandoutToDataUrl(
   library: LibraryIndex,
   scale = 1,
   cache: ImageCache = {},
+  mimeType = 'image/png',
+  quality?: number,
 ) {
   const { stage, destroy } = await renderHandoutStage(document, library, cache)
   try {
-    return compressedStageDataUrl(stage, 'image/png', Math.max(0.1, Number(scale) || 1))
+    return compressedStageDataUrl(stage, mimeType, Math.max(0.1, Number(scale) || 1), quality)
   } finally {
     destroy()
   }
@@ -451,7 +458,7 @@ export async function renderHandoutPreviewToDataUrl(
   }
 }
 
-export function downloadFileName(title: string, date = new Date()) {
+export function downloadFileName(title: string, date = new Date(), extension = 'png') {
   const safeTitle = (title.trim() || 'handout')
     .replace(/\.[^.]+$/, '')
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
@@ -466,5 +473,5 @@ export function downloadFileName(title: string, date = new Date()) {
     String(date.getMinutes()).padStart(2, '0'),
     String(date.getSeconds()).padStart(2, '0'),
   ].join('')
-  return `${safeTitle}-${stamp}.png`
+  return `${safeTitle}-${stamp}.${extension.replace(/^\./, '') || 'png'}`
 }

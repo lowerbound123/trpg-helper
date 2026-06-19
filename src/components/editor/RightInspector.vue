@@ -14,6 +14,8 @@ import { fontRecordFamily } from '@/lib/backend'
 import { isShapeLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
+const exportFormat = defineModel<'png' | 'jpeg' | 'webp'>('exportFormat', { required: true })
+const exportQuality = defineModel<number>('exportQuality', { required: true })
 
 defineProps<{
   isExporting?: boolean
@@ -237,20 +239,40 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 @value-commit="endContinuousEdit('layer-opacity')"
               />
           </label>
-          <label>
-            Blend mode
-            <Select :model-value="activeLayer.blendMode" @update:model-value="(value) => editor.patchSelectedLayers({ blendMode: value as any })">
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="source-over">Normal</SelectItem>
-                <SelectItem value="multiply">Multiply</SelectItem>
-                <SelectItem value="screen">Screen</SelectItem>
-                <SelectItem value="overlay">Overlay</SelectItem>
-                <SelectItem value="darken">Darken</SelectItem>
-                <SelectItem value="lighten">Lighten</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
+          <div class="appearance-row">
+            <label class="blend-control">
+              Blend mode
+              <Select :model-value="activeLayer.blendMode" @update:model-value="(value) => editor.patchSelectedLayers({ blendMode: value as any })">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="source-over">Normal</SelectItem>
+                  <SelectItem value="multiply">Multiply</SelectItem>
+                  <SelectItem value="screen">Screen</SelectItem>
+                  <SelectItem value="overlay">Overlay</SelectItem>
+                  <SelectItem value="darken">Darken</SelectItem>
+                  <SelectItem value="lighten">Lighten</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label v-if="allSelectedShapes" class="compact-color-control">
+              Fill
+              <Input
+                :type="commonShapeFill ? 'color' : 'text'"
+                :model-value="commonShapeFill ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
+              />
+            </label>
+            <label v-if="allSelectedShapes" class="compact-color-control">
+              Stroke
+              <Input
+                :type="commonShapeStroke ? 'color' : 'text'"
+                :model-value="commonShapeStroke ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ stroke: String(value) })"
+              />
+            </label>
+          </div>
           <template v-if="allSelectedText">
             <label v-if="selectedCount === 1">
               Text
@@ -390,26 +412,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: Math.max(0, Number(value) || 0) })"
               />
             </label>
-            <div class="two-col">
-              <label>
-                Fill
-                <Input
-                  :type="commonShapeFill ? 'color' : 'text'"
-                  :model-value="commonShapeFill ?? ''"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
-                />
-              </label>
-              <label>
-                Stroke
-                <Input
-                  :type="commonShapeStroke ? 'color' : 'text'"
-                  :model-value="commonShapeStroke ?? ''"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => editor.patchSelectedLayers({ stroke: String(value) })"
-                />
-              </label>
-            </div>
             <label>
               Stroke width
               <Input
@@ -626,9 +628,33 @@ function patchDocumentSaturation(value: number[] | undefined) {
               @update:model-value="(value) => (exportScale = Math.max(0.1, Number(value) || 1))"
             />
           </label>
+          <div class="two-col">
+            <label>
+              Format
+              <Select :model-value="exportFormat" @update:model-value="(value) => (exportFormat = value as 'png' | 'jpeg' | 'webp')">
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="png">PNG</SelectItem>
+                  <SelectItem value="jpeg">JPG</SelectItem>
+                  <SelectItem value="webp">WebP</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label v-if="exportFormat !== 'png'">
+              Quality
+              <Input
+                type="number"
+                min="1"
+                max="100"
+                step="1"
+                :model-value="exportQuality"
+                @update:model-value="(value) => (exportQuality = Math.min(100, Math.max(1, Number(value) || 90)))"
+              />
+            </label>
+          </div>
           <Button variant="outline" :disabled="isExporting" @click="$emit('exportImage')">
             <Download data-icon="inline-start" />
-            {{ isExporting ? 'Exporting...' : 'Export PNG' }}
+            {{ isExporting ? 'Exporting...' : `Export ${exportFormat.toUpperCase()}` }}
           </Button>
           <div class="export-progress" role="progressbar" :aria-valuenow="exportProgress || 0" aria-valuemin="0" aria-valuemax="100">
             <div class="export-progress-track">

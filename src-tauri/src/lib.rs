@@ -1207,7 +1207,12 @@ fn export_image_to_downloads(
     data_url: String,
 ) -> CommandResult<String> {
     let clean_name = clean_file_name(&file_name);
-    let file_name = if clean_name.to_lowercase().ends_with(".png") {
+    let lower_name = clean_name.to_lowercase();
+    let file_name = if lower_name.ends_with(".png")
+        || lower_name.ends_with(".jpg")
+        || lower_name.ends_with(".jpeg")
+        || lower_name.ends_with(".webp")
+    {
         clean_name
     } else {
         format!("{clean_name}.png")

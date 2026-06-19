@@ -896,6 +896,28 @@ textarea {
   gap: 8px;
 }
 
+.appearance-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.appearance-row .blend-control {
+  min-width: 0;
+}
+
+.compact-color-control {
+  width: 58px;
+}
+
+.compact-color-control [data-slot='input'] {
+  width: 54px;
+  min-width: 54px;
+  height: 32px;
+  padding: 2px;
+}
+
 .effect-grid {
   display: flex;
   flex-direction: column;

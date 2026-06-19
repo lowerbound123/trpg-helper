@@ -184,6 +184,20 @@ const touch = (document: HandoutDocument): HandoutDocument => ({
 const normalizeZIndex = (layers: HandoutLayer[]): HandoutLayer[] =>
   layers.map((layer, index) => ({ ...layer, zIndex: index }))
 
+function shapeNameBase(shape: ShapeKind) {
+  return shape
+}
+
+function nextLayerName(layers: HandoutLayer[], base: string) {
+  const pattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:-(\\d+))?$`)
+  const max = layers.reduce((value, layer) => {
+    const match = layer.name.match(pattern)
+    if (!match) return value
+    return Math.max(value, match[1] ? Number(match[1]) : 0)
+  }, 0)
+  return `${base}-${max + 1}`
+}
+
 export function createDefaultHandout(title = 'Untitled handout'): HandoutDocument {
   return {
     schemaVersion: 1,
@@ -266,7 +280,7 @@ export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInp
   const layer: ShapeLayer = {
     id: uuidv4(),
     type: 'shape',
-    name: input.name ?? `${input.shape[0].toUpperCase()}${input.shape.slice(1)}`,
+    name: input.name ?? nextLayerName(document.layers, shapeNameBase(input.shape)),
     shape: input.shape,
     x: input.x ?? 180,
     y: input.y ?? 160,

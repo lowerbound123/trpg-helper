@@ -9,7 +9,7 @@ export type FinderKind = 'handout' | 'background' | 'asset' | 'font'
 export const finderFeatures = {
   archive: false,
   copy: false,
-  delete: false,
+  delete: true,
   download: false,
   edit: false,
   fullscreen: false,
@@ -322,6 +322,29 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     }
   }
 
+  async function deleteFromFinder(kind: FinderKind, params: { items: { path: string; type: string }[] }) {
+    const ids: string[] = []
+    const folders: string[] = []
+    for (const item of params.items) {
+      const basename = entryBase(item.path)
+      if (item.type === 'file' || basename.startsWith(`__${kind}-`)) {
+        ids.push(idFromFinderPath(kind, item.path))
+      } else {
+        folders.push(normalizeFinderFolder(item.path))
+      }
+    }
+
+    if (kind === 'handout') await editor.deleteProjectEntriesFromLibrary({ ids, folders })
+    else await editor.deleteResourceEntries(kind, { ids, folders })
+    if (folders.some((folder) => folderIsOrDescendant(selectedFolderForFinder(kind), folder))) {
+      setSelectedFolderForFinder(kind, '')
+    }
+  }
+
+  function folderIsOrDescendant(value: string, folder: string) {
+    return value === folder || value.startsWith(`${folder}/`)
+  }
+
   function createFinderDriver(kind: FinderKind): Driver {
     const unsupported = async () => {
       throw new Error('This file operation is not supported in the handout library yet.')
@@ -356,8 +379,12 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
         await renameFromFinder(kind, params)
         return finderResult(kind, params.path)
       },
-      async delete() {
-        return unsupported()
+      async delete(params) {
+        await deleteFromFinder(kind, params)
+        return {
+          ...finderResult(kind, params.path),
+          deleted: params.items as DirEntry[],
+        }
       },
       async copy() {
         return unsupported()

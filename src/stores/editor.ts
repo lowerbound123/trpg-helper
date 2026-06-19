@@ -23,6 +23,8 @@ import {
   createLibraryFolder,
   createProject,
   createProjectFolder,
+  deleteLibraryEntries,
+  deleteProjectEntries,
   getLibrary,
   importAsset,
   importBackground,
@@ -37,6 +39,7 @@ import {
   renameLibraryRecord,
   renameManagedProject,
   renameProjectFolder,
+  repairMissingThumbnails,
   saveManagedProject,
   saveProject,
   type LibraryIndex,
@@ -182,6 +185,10 @@ export const useEditorStore = defineStore('editor', () => {
     await loadFonts()
   }
 
+  async function repairLibraryThumbnails() {
+    library.value = await repairMissingThumbnails()
+  }
+
   async function refreshProjects() {
     const [nextProjects, nextFolders] = await Promise.all([listProjects(), listProjectFolders()])
     projects.value = nextProjects
@@ -253,6 +260,18 @@ export const useEditorStore = defineStore('editor', () => {
     if (currentProjectId.value === projectId) replaceDocument(payload.document)
     await refreshProjects()
     status.value = `Moved project to ${folder.trim() || 'root'}`
+  }
+
+  async function deleteResourceEntries(kind: 'background' | 'asset' | 'font', entries: { ids: string[]; folders: string[] }) {
+    library.value = await deleteLibraryEntries(kind, entries)
+    status.value = `Deleted ${kind} item${entries.ids.length + entries.folders.length === 1 ? '' : 's'}`
+  }
+
+  async function deleteProjectEntriesFromLibrary(entries: { ids: string[]; folders: string[] }) {
+    projectFolders.value = await deleteProjectEntries(entries)
+    if (currentProjectId.value && entries.ids.includes(currentProjectId.value)) closeEditor()
+    await refreshProjects()
+    status.value = `Deleted handout item${entries.ids.length + entries.folders.length === 1 ? '' : 's'}`
   }
 
   async function loadFont(font: LibraryRecord) {
@@ -373,11 +392,14 @@ export const useEditorStore = defineStore('editor', () => {
     projectFolders,
     projectDir,
     redo,
+    repairLibraryThumbnails,
     renameDocument,
     renameProject,
     renameProjectFolderPath,
     renameResource,
     renameResourceFolder,
+    deleteProjectEntriesFromLibrary,
+    deleteResourceEntries,
     refreshLibrary,
     refreshProjects,
     replaceDocument,

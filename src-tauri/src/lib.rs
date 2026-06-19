@@ -6,11 +6,15 @@ use std::{
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
+use image::{imageops::FilterType, GenericImageView};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use uuid::Uuid;
+
+const THUMBNAIL_MAX_EDGE: u32 = 256;
+const THUMBNAIL_QUALITY: f32 = 80.0;
 
 type CommandResult<T> = Result<T, String>;
 
@@ -26,6 +30,8 @@ enum AppError {
     InvalidDataUrl,
     #[error("base64 decode error: {0}")]
     Base64(#[from] base64::DecodeError),
+    #[error("image error: {0}")]
+    Image(#[from] image::ImageError),
 }
 
 impl From<AppError> for String {
@@ -102,6 +108,15 @@ struct ProjectFolderIndex {
     folders: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteEntries {
+    #[serde(default)]
+    ids: Vec<String>,
+    #[serde(default)]
+    folders: Vec<String>,
+}
+
 fn app_root(_app: &AppHandle) -> Result<PathBuf, AppError> {
     let cwd = std::env::current_dir().map_err(|_| AppError::DataDir)?;
     let project_root = if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
@@ -126,6 +141,10 @@ fn library_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(app_root(app)?.join("library"))
 }
 
+fn thumbnails_root(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(library_root(app)?.join("thumbnails"))
+}
+
 fn projects_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(app_root(app)?.join("projects"))
 }
@@ -143,6 +162,7 @@ fn ensure_library(app: &AppHandle) -> Result<(), AppError> {
     fs::create_dir_all(root.join("backgrounds"))?;
     fs::create_dir_all(root.join("assets"))?;
     fs::create_dir_all(root.join("fonts"))?;
+    fs::create_dir_all(root.join("thumbnails"))?;
 
     let path = index_path(app)?;
     if !path.exists() {
@@ -195,6 +215,13 @@ fn rename_folder_value(value: &str, old_folder: &str, new_folder: &str) -> Strin
         return format!("{new_folder}/{}", &value[prefix.len()..]);
     }
     value.to_string()
+}
+
+fn folder_is_or_descendant(value: &str, folder: &str) -> bool {
+    if folder.is_empty() {
+        return value.is_empty();
+    }
+    value == folder || value.starts_with(&format!("{folder}/"))
 }
 
 fn library_folders_mut<'a>(index: &'a mut LibraryIndex, kind: &str) -> Option<&'a mut Vec<String>> {
@@ -275,7 +302,25 @@ fn import_record(
     let clean_name = clean_file_name(&file_name);
     let stored_name = format!("{id}-{clean_name}");
     let destination = library_root(app)?.join(bucket).join(&stored_name);
-    fs::write(&destination, data)?;
+    fs::write(&destination, &data)?;
+
+    let thumbnail_path = if matches!(bucket, "backgrounds" | "assets") {
+        match write_webp_thumbnail(app, &id, &data) {
+            Ok(path) => Some(path.to_string_lossy().to_string()),
+            Err(error) => {
+                let _ = append_debug_log(format!(
+                    "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to generate import thumbnail\",\"data\":{{\"id\":\"{}\",\"fileName\":\"{}\",\"error\":\"{}\"}}}}",
+                    Utc::now().to_rfc3339(),
+                    id,
+                    file_name.replace('"', "\\\""),
+                    error.to_string().replace('"', "\\\"")
+                ));
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let now = Utc::now();
     let record = LibraryRecord {
@@ -283,7 +328,7 @@ fn import_record(
         name: file_name,
         file_name: stored_name,
         path: destination.to_string_lossy().to_string(),
-        thumbnail_path: None,
+        thumbnail_path,
         tags,
         folder: folder.clone(),
         media_type,
@@ -320,26 +365,81 @@ fn decode_data_url(data_url: &str) -> Result<Vec<u8>, AppError> {
     Ok(general_purpose::STANDARD.decode(data)?)
 }
 
-fn data_url_media_type(data_url: &str) -> &str {
-    data_url
-        .strip_prefix("data:")
-        .and_then(|rest| rest.split_once(';').map(|(media_type, _)| media_type))
-        .unwrap_or("image/png")
-}
-
-fn preview_file_name(data_url: &str) -> &'static str {
-    match data_url_media_type(data_url) {
-        "image/webp" => "preview.webp",
-        "image/jpeg" | "image/jpg" => "preview.jpg",
-        _ => "preview.png",
-    }
-}
-
 fn preview_path(root: &Path) -> Option<PathBuf> {
     ["preview.webp", "preview.jpg", "preview.png"]
         .iter()
         .map(|name| root.join(name))
         .find(|path| path.exists())
+}
+
+fn thumbnail_path(app: &AppHandle, id: &str) -> Result<PathBuf, AppError> {
+    Ok(thumbnails_root(app)?.join(format!("{id}.webp")))
+}
+
+fn encode_webp_thumbnail_bytes(input: &[u8]) -> Result<Vec<u8>, AppError> {
+    let image = image::load_from_memory(input)?;
+    let (width, height) = image.dimensions();
+    let largest = width.max(height).max(1);
+    let resized = if largest > THUMBNAIL_MAX_EDGE {
+        let ratio = THUMBNAIL_MAX_EDGE as f32 / largest as f32;
+        let next_width = ((width as f32 * ratio).round() as u32).max(1);
+        let next_height = ((height as f32 * ratio).round() as u32).max(1);
+        image.resize(next_width, next_height, FilterType::Lanczos3)
+    } else {
+        image
+    };
+    let rgba = resized.to_rgba8();
+    let encoder = webp::Encoder::from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
+    Ok(encoder.encode(THUMBNAIL_QUALITY).to_vec())
+}
+
+fn write_webp_thumbnail(app: &AppHandle, id: &str, input: &[u8]) -> Result<PathBuf, AppError> {
+    let output = thumbnail_path(app, id)?;
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&output, encode_webp_thumbnail_bytes(input)?)?;
+    Ok(output)
+}
+
+fn ensure_record_thumbnail(app: &AppHandle, record: &mut LibraryRecord) -> Result<bool, AppError> {
+    let should_generate = record
+        .thumbnail_path
+        .as_ref()
+        .map(|path| !Path::new(path).exists())
+        .unwrap_or(true);
+    if !should_generate {
+        return Ok(false);
+    }
+    let bytes = fs::read(&record.path)?;
+    let path = write_webp_thumbnail(app, &record.id, &bytes)?;
+    record.thumbnail_path = Some(path.to_string_lossy().to_string());
+    record.updated_at = Utc::now();
+    Ok(true)
+}
+
+fn delete_record_files(record: &LibraryRecord) -> Result<(), AppError> {
+    remove_file_if_exists(&record.path)?;
+    if let Some(path) = &record.thumbnail_path {
+        remove_file_if_exists(path)?;
+    }
+    Ok(())
+}
+
+fn remove_file_if_exists(path: impl AsRef<Path>) -> Result<(), AppError> {
+    let path = path.as_ref();
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn remove_dir_if_exists(path: impl AsRef<Path>) -> Result<(), AppError> {
+    let path = path.as_ref();
+    if path.exists() {
+        fs::remove_dir_all(path)?;
+    }
+    Ok(())
 }
 
 fn encode_data_url(path: &Path, media_type: &str) -> Result<String, AppError> {
@@ -431,6 +531,30 @@ fn get_library(app: AppHandle) -> CommandResult<LibraryIndex> {
 }
 
 #[tauri::command]
+fn repair_missing_thumbnails(app: AppHandle) -> CommandResult<LibraryIndex> {
+    let mut index = read_index(&app).map_err(String::from)?;
+    let mut changed = false;
+    for record in index.backgrounds.iter_mut().chain(index.assets.iter_mut()) {
+        match ensure_record_thumbnail(&app, record) {
+            Ok(record_changed) => changed |= record_changed,
+            Err(error) => {
+                let _ = append_debug_log(format!(
+                    "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to repair thumbnail\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"error\":\"{}\"}}}}",
+                    Utc::now().to_rfc3339(),
+                    record.id.replace('"', "\\\""),
+                    record.name.replace('"', "\\\""),
+                    error.to_string().replace('"', "\\\"")
+                ));
+            }
+        }
+    }
+    if changed {
+        write_index(&app, &index).map_err(String::from)?;
+    }
+    Ok(index)
+}
+
+#[tauri::command]
 fn read_file_data_url(path: String, media_type: String) -> CommandResult<String> {
     encode_data_url(Path::new(&path), &media_type).map_err(Into::into)
 }
@@ -498,6 +622,53 @@ fn move_library_record(
             .ok_or_else(|| "unknown library folder kind".to_string())?;
         ensure_folder(folders, &folder);
     }
+    write_index(&app, &index).map_err(String::from)?;
+    Ok(index)
+}
+
+#[tauri::command]
+fn delete_library_entries(
+    app: AppHandle,
+    kind: String,
+    entries: DeleteEntries,
+) -> CommandResult<LibraryIndex> {
+    let mut index = read_index(&app).map_err(String::from)?;
+    let ids: std::collections::HashSet<String> = entries.ids.into_iter().collect();
+    let folders: Vec<String> = entries
+        .folders
+        .into_iter()
+        .map(normalize_folder)
+        .filter(|folder| !folder.is_empty())
+        .collect();
+
+    {
+        let records = library_records_mut(&mut index, &kind)
+            .ok_or_else(|| "unknown library record kind".to_string())?;
+        let mut kept = Vec::with_capacity(records.len());
+        for record in records.drain(..) {
+            let should_delete = ids.contains(&record.id)
+                || folders
+                    .iter()
+                    .any(|folder| folder_is_or_descendant(&record.folder, folder));
+            if should_delete {
+                delete_record_files(&record).map_err(String::from)?;
+            } else {
+                kept.push(record);
+            }
+        }
+        *records = kept;
+    }
+
+    {
+        let folder_index = library_folders_mut(&mut index, &kind)
+            .ok_or_else(|| "unknown library folder kind".to_string())?;
+        folder_index.retain(|folder| {
+            !folders
+                .iter()
+                .any(|deleted| folder_is_or_descendant(folder, deleted))
+        });
+    }
+
     write_index(&app, &index).map_err(String::from)?;
     Ok(index)
 }
@@ -791,6 +962,59 @@ fn move_managed_project(
 }
 
 #[tauri::command]
+fn delete_project_entries(app: AppHandle, entries: DeleteEntries) -> CommandResult<Vec<String>> {
+    let ids: std::collections::HashSet<String> = entries.ids.into_iter().collect();
+    let folders: Vec<String> = entries
+        .folders
+        .into_iter()
+        .map(normalize_folder)
+        .filter(|folder| !folder.is_empty())
+        .collect();
+
+    let root = projects_root(&app).map_err(String::from)?;
+    fs::create_dir_all(&root)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+
+    for entry in fs::read_dir(&root)
+        .map_err(AppError::from)
+        .map_err(String::from)?
+    {
+        let path = entry.map_err(AppError::from).map_err(String::from)?.path();
+        if !path.is_dir() || !path.join("handout.json").exists() {
+            continue;
+        }
+        let project_id = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let payload = read_project_files(&path).map_err(String::from)?;
+        let folder = payload
+            .metadata
+            .get("folder")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let should_delete = ids.contains(&project_id)
+            || folders
+                .iter()
+                .any(|deleted| folder_is_or_descendant(folder, deleted));
+        if should_delete {
+            remove_dir_if_exists(path).map_err(String::from)?;
+        }
+    }
+
+    let mut folder_index = read_project_folder_index(&app).map_err(String::from)?;
+    folder_index.folders.retain(|folder| {
+        !folders
+            .iter()
+            .any(|deleted| folder_is_or_descendant(folder, deleted))
+    });
+    write_project_folder_index(&app, &folder_index).map_err(String::from)?;
+    Ok(folder_index.folders)
+}
+
+#[tauri::command]
 fn save_managed_project(
     app: AppHandle,
     project_id: String,
@@ -865,15 +1089,17 @@ fn save_project_preview(
         .map_err(String::from)?;
     for file_name in ["preview.webp", "preview.jpg", "preview.png"] {
         let stale = root.join(file_name);
-        if stale.exists() {
-            fs::remove_file(stale)
-                .map_err(AppError::from)
-                .map_err(String::from)?;
-        }
+        remove_file_if_exists(stale)
+            .map_err(AppError::from)
+            .map_err(String::from)?;
     }
-    let path = root.join(preview_file_name(&data_url));
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
-        .map_err(AppError::from)?;
+    let path = root.join("preview.webp");
+    let bytes = decode_data_url(&data_url).map_err(AppError::from)?;
+    fs::write(
+        &path,
+        encode_webp_thumbnail_bytes(&bytes).map_err(AppError::from)?,
+    )
+    .map_err(AppError::from)?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -915,6 +1141,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             append_debug_log,
+            delete_library_entries,
+            delete_project_entries,
             export_image,
             export_image_to_downloads,
             save_project_preview,
@@ -932,6 +1160,7 @@ pub fn run() {
             open_managed_project,
             open_project,
             read_file_data_url,
+            repair_missing_thumbnails,
             rename_library_folder,
             rename_library_record,
             rename_managed_project,

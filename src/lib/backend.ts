@@ -74,6 +74,11 @@ export async function getLibrary(): Promise<LibraryIndex> {
   return invoke<LibraryIndex>('get_library')
 }
 
+export async function repairMissingThumbnails(): Promise<LibraryIndex> {
+  if (!isTauriRuntime()) return emptyLibrary()
+  return invoke<LibraryIndex>('repair_missing_thumbnails')
+}
+
 export async function importAsset(file: File, tags: string[], folder = ''): Promise<ImportResult> {
   if (!isTauriRuntime()) {
     throw new Error('Asset import requires the Tauri desktop runtime.')
@@ -153,6 +158,14 @@ export async function moveLibraryRecord(
   return invoke<LibraryIndex>('move_library_record', { kind, id, folder })
 }
 
+export async function deleteLibraryEntries(
+  kind: 'background' | 'asset' | 'font',
+  entries: { ids: string[]; folders: string[] },
+): Promise<LibraryIndex> {
+  if (!isTauriRuntime()) return emptyLibrary()
+  return invoke<LibraryIndex>('delete_library_entries', { kind, entries })
+}
+
 export async function renameProjectFolder(oldFolder: string, newFolder: string): Promise<string[]> {
   if (!isTauriRuntime()) return []
   return invoke<string[]>('rename_project_folder', { oldFolder, newFolder })
@@ -225,6 +238,11 @@ export async function moveManagedProject(projectId: string, folder: string): Pro
     throw new Error('Moving projects requires the Tauri desktop runtime.')
   }
   return invoke<ProjectPayload>('move_managed_project', { projectId, folder })
+}
+
+export async function deleteProjectEntries(entries: { ids: string[]; folders: string[] }): Promise<string[]> {
+  if (!isTauriRuntime()) return []
+  return invoke<string[]>('delete_project_entries', { entries })
 }
 
 export async function saveManagedProject(

@@ -109,6 +109,7 @@ describe('export helpers', () => {
   })
 
   it('sizes previews by maximum edge', () => {
+    expect(previewPixelRatio({ width: 5000, height: 7000 })).toBeCloseTo(256 / 7000)
     expect(previewPixelRatio({ width: 5000, height: 7000 }, 320)).toBeCloseTo(320 / 7000)
     expect(previewPixelRatio({ width: 240, height: 160 }, 320)).toBe(1)
   })

@@ -38,7 +38,7 @@ import {
   type ProjectSummary,
 } from '@/lib/backend'
 import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
-import type { HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
+import type { HandoutDocument, HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
 import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
@@ -63,6 +63,7 @@ const blankHeight = ref(720)
 const exportScale = ref(1)
 const exportLog = ref('')
 const exportProgress = ref(0)
+const fitScale = ref(1)
 const canvasZoom = ref(1)
 const canvasPan = reactive({ x: 0, y: 0 })
 const panState = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
@@ -97,13 +98,13 @@ let exportProgressTimer: number | undefined
 
 const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
-const baseStageScale = computed(() => {
+function computeFitScale() {
   const maxWidth = Math.max(240, stageViewport.width - 64)
   const maxHeight = Math.max(180, stageViewport.height - 64)
   return Math.min(maxWidth / editor.document.canvas.width, maxHeight / editor.document.canvas.height, 1)
-})
+}
 
-const stageScale = computed(() => baseStageScale.value * canvasZoom.value)
+const stageScale = computed(() => fitScale.value * canvasZoom.value)
 
 const stageConfig = computed(() => ({
   width: stageViewport.width,
@@ -223,7 +224,7 @@ function logViewport(message: string, data?: Record<string, unknown>) {
     ...data,
     view: editor.view,
     viewport: { ...stageViewport },
-    baseStageScale: baseStageScale.value,
+    fitScale: fitScale.value,
     canvasZoom: canvasZoom.value,
     stageScale: stageScale.value,
     canvasPan: { ...canvasPan },
@@ -253,11 +254,12 @@ function clampZoom(value: number) {
   return Math.min(8, Math.max(0.1, Number(value) || 1))
 }
 
-function resetCanvasView() {
+function fitCanvasView(reason = 'fit') {
+  fitScale.value = computeFitScale()
   canvasZoom.value = 1
   canvasPan.x = Math.round((stageViewport.width - editor.document.canvas.width * stageScale.value) / 2)
   canvasPan.y = Math.round((stageViewport.height - editor.document.canvas.height * stageScale.value) / 2)
-  logViewport('reset-canvas-view')
+  logViewport('fit-canvas-view', { reason })
 }
 
 function zoomCanvas(nextZoom: number, anchor = { x: stageViewport.width / 2, y: stageViewport.height / 2 }) {
@@ -566,7 +568,8 @@ async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileLis
 
 function isSupportedUpload(kind: 'background' | 'asset' | 'font', file: File) {
   if (kind === 'background' || kind === 'asset') {
-    return ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)
+    return ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/avif'].includes(file.type)
+      || /\.(png|jpe?g|webp|gif|bmp|tiff?|tga|avif|qoi|ico)$/i.test(file.name)
   }
   return /\.(ttf|otf|woff2?)$/i.test(file.name)
 }
@@ -620,7 +623,7 @@ function beginExportProgress() {
 function waitForNextPaint() {
   return new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => resolve())
+      window.requestAnimationFrame(() => globalThis.setTimeout(resolve, 0))
     })
   })
 }
@@ -637,6 +640,16 @@ function finishExportProgress(success: boolean) {
   if (exportProgressTimer) window.clearInterval(exportProgressTimer)
   exportProgressTimer = undefined
   exportProgress.value = success ? 100 : 0
+}
+
+async function ensureDocumentImages(document: HandoutDocument) {
+  const records = [
+    editor.resolveBackground(document.canvas.backgroundAssetId) || editor.resolveAsset(document.canvas.backgroundAssetId),
+    ...document.layers
+      .filter(isImageLayer)
+      .map((layer) => editor.resolveAsset(layer.assetId) || editor.resolveBackground(layer.assetId)),
+  ].filter(Boolean) as LibraryRecord[]
+  await Promise.allSettled(records.map((record) => loadImage(record)))
 }
 
 async function createProject() {
@@ -742,25 +755,35 @@ async function saveProject() {
 
 async function exportCurrentImage() {
   if (isExportingCurrent.value) return
-  const signature = JSON.stringify({ document: editor.document, scale: exportScale.value })
-  if (lastCurrentExport.value?.signature === signature) {
-    exportLog.value = `Unchanged image already exported to ${lastCurrentExport.value.path}`
-    return
-  }
+  const clickedAt = performance.now()
   isExportingCurrent.value = true
   await prepareExportProgress()
-  logExport('export current start', { title: editor.document.title, scale: exportScale.value })
+  exportLog.value = 'Preparing export...'
+  const clickToProgressMs = Math.round(performance.now() - clickedAt)
+  logExport('export current start', { title: editor.document.title, scale: exportScale.value, clickToProgressMs })
   try {
+    const signatureStartedAt = performance.now()
+    const signature = JSON.stringify({ document: editor.document, scale: exportScale.value })
+    const signatureMs = Math.round(performance.now() - signatureStartedAt)
+    if (lastCurrentExport.value?.signature === signature) {
+      exportLog.value = `Unchanged image already exported to ${lastCurrentExport.value.path}`
+      logExport('export current unchanged', { signatureMs, clickToProgressMs, path: lastCurrentExport.value.path })
+      finishExportProgress(false)
+      return
+    }
+    const imageLoadStartedAt = performance.now()
+    await ensureDocumentImages(editor.document)
+    const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
     const renderStartedAt = performance.now()
     const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
-    const renderDurationMs = Math.round(performance.now() - renderStartedAt)
-    logExport('export current render complete', { renderDurationMs, bytes: dataUrlByteSize(dataUrl) })
+    const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
+    logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
     const writeStartedAt = performance.now()
     const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
-    const writeDurationMs = Math.round(performance.now() - writeStartedAt)
+    const writeMs = Math.round(performance.now() - writeStartedAt)
     lastCurrentExport.value = { signature, path }
     exportLog.value = `Exported image to ${path}`
-    logExport('export current complete', { path, bytes: dataUrlByteSize(dataUrl), renderDurationMs, writeDurationMs })
+    logExport('export current complete', { path, bytes: dataUrlByteSize(dataUrl), clickToProgressMs, signatureMs, imageLoadMs, konvaRenderMs, writeMs })
     finishExportProgress(true)
   } catch (error) {
     exportLog.value = `Export failed: ${String(error)}`
@@ -773,29 +796,39 @@ async function exportCurrentImage() {
 
 async function exportHandoutProject(project: ProjectSummary) {
   if (exportingHandoutIds.has(project.id)) return
-  const signature = `${project.id}:${project.updatedAt}:1`
-  const lastExport = lastHandoutExports.get(project.id)
-  if (lastExport?.signature === signature) {
-    exportLog.value = `Unchanged image already exported to ${lastExport.path}`
-    return
-  }
+  const clickedAt = performance.now()
   exportingHandoutIds.add(project.id)
   await prepareExportProgress()
-  logExport('export handout start', { projectId: project.id, title: project.title })
+  exportLog.value = 'Preparing export...'
+  const clickToProgressMs = Math.round(performance.now() - clickedAt)
+  logExport('export handout start', { projectId: project.id, title: project.title, clickToProgressMs })
   try {
+    const signatureStartedAt = performance.now()
+    const signature = `${project.id}:${project.updatedAt}:1`
+    const lastExport = lastHandoutExports.get(project.id)
+    const signatureMs = Math.round(performance.now() - signatureStartedAt)
+    if (lastExport?.signature === signature) {
+      exportLog.value = `Unchanged image already exported to ${lastExport.path}`
+      logExport('export handout unchanged', { projectId: project.id, signatureMs, clickToProgressMs, path: lastExport.path })
+      finishExportProgress(false)
+      return
+    }
     const openStartedAt = performance.now()
     const payload = await openManagedProject(project.id)
     const openDurationMs = Math.round(performance.now() - openStartedAt)
+    const imageLoadStartedAt = performance.now()
+    await ensureDocumentImages(payload.document)
+    const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
     const renderStartedAt = performance.now()
     const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
-    const renderDurationMs = Math.round(performance.now() - renderStartedAt)
-    logExport('export handout render complete', { projectId: project.id, openDurationMs, renderDurationMs, bytes: dataUrlByteSize(dataUrl) })
+    const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
+    logExport('export handout render complete', { projectId: project.id, openDurationMs, signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
     const writeStartedAt = performance.now()
     const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
-    const writeDurationMs = Math.round(performance.now() - writeStartedAt)
+    const writeMs = Math.round(performance.now() - writeStartedAt)
     lastHandoutExports.set(project.id, { signature, path })
     exportLog.value = `Exported image to ${path}`
-    logExport('export handout complete', { projectId: project.id, path, bytes: dataUrlByteSize(dataUrl), openDurationMs, renderDurationMs, writeDurationMs })
+    logExport('export handout complete', { projectId: project.id, path, bytes: dataUrlByteSize(dataUrl), clickToProgressMs, openDurationMs, signatureMs, imageLoadMs, konvaRenderMs, writeMs })
     finishExportProgress(true)
   } catch (error) {
     exportLog.value = `Export failed: ${String(error)}`
@@ -837,7 +870,9 @@ async function ensureProjectPreviews() {
   let generated = 0
   try {
     for (const project of editor.projects) {
-      const shouldRegeneratePreview = !project.previewPath || Number(project.previewSizeBytes || 0) > PREVIEW_TARGET_BYTES
+      const shouldRegeneratePreview = !project.previewPath
+        || !project.previewPath.endsWith('preview.webp')
+        || Number(project.previewSizeBytes || 0) > PREVIEW_TARGET_BYTES
       if (!shouldRegeneratePreview) continue
       try {
         logHandoutPreview('generating preview', {
@@ -883,6 +918,12 @@ onMounted(async () => {
     window.addEventListener('resize', resizeStageViewport)
     isBooting.value = false
     await nextTick()
+    void editor.repairLibraryThumbnails()
+      .then(() => {
+        finderRevision.background += 1
+        finderRevision.asset += 1
+      })
+      .catch((error) => logUpload('thumbnail repair failed', { error }))
     void ensureProjectPreviews()
   } catch (error) {
     editor.status = String(error)
@@ -905,14 +946,14 @@ watch(
   () => [editor.document.canvas.width, editor.document.canvas.height],
   () => nextTick(() => {
     resizeStageViewport()
-    resetCanvasView()
+    fitCanvasView('canvas-size')
   }),
 )
 watch(
   () => editor.view,
   () => nextTick(() => {
     resizeStageViewport()
-    if (editor.view === 'editor') resetCanvasView()
+    if (editor.view === 'editor') fitCanvasView('enter-editor')
   }),
 )
 </script>
@@ -1253,7 +1294,7 @@ watch(
             <Button size="icon" variant="outline" @click="zoomOut">
               <Minus />
             </Button>
-            <Button size="sm" variant="outline" @click="resetCanvasView">Fit</Button>
+            <Button size="sm" variant="outline" @click="fitCanvasView('button')">Fit</Button>
             <Button size="icon" variant="outline" @click="zoomIn">
               <Plus />
             </Button>

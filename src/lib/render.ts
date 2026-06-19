@@ -9,7 +9,7 @@ type CanvasSize = { width: number; height: number }
 
 const PREVIEW_TARGET_BYTES = 512 * 1024
 const PREVIEW_MAX_BYTES = 1024 * 1024
-const PREVIEW_MAX_EDGE = 320
+const PREVIEW_MAX_EDGE = 256
 
 function resolveImageRecord(library: LibraryIndex, assetId?: string) {
   return library.backgrounds.find((record) => record.id === assetId)

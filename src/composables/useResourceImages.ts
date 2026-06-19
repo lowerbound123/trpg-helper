@@ -7,7 +7,7 @@ export function useResourceImages(fallbackWidth: Ref<number>, fallbackHeight: Re
   const previewUrls = reactive<Record<string, string>>({})
 
   function previewUrl(record: LibraryRecord) {
-    return previewUrls[record.id] || fileUrl(record.path)
+    return record.thumbnailPath ? fileUrl(record.thumbnailPath) : previewUrls[record.id] || fileUrl(record.path)
   }
 
   async function loadImage(record: LibraryRecord) {

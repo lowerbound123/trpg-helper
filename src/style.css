@@ -164,6 +164,7 @@ body,
 .manager-finder {
   height: 360px;
   min-height: 360px;
+  max-height: 360px;
   margin-bottom: 14px;
   overflow: hidden;
   background: hsl(0 0% 100%);
@@ -174,15 +175,33 @@ body,
 .manager-finder.compact-finder {
   height: 300px;
   min-height: 300px;
+  max-height: 300px;
 }
 
 .rail-finder {
   height: 220px;
   min-height: 220px;
+  max-height: 220px;
   overflow: hidden;
   background: hsl(0 0% 100%);
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
+}
+
+.manager-finder .vuefinder,
+.rail-finder .vuefinder,
+.manager-finder .vuefinder__main,
+.rail-finder .vuefinder__main,
+.manager-finder .vuefinder__explorer,
+.rail-finder .vuefinder__explorer {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.manager-finder .vuefinder__explorer,
+.rail-finder .vuefinder__explorer {
+  overflow: auto;
 }
 
 .create-panel {

@@ -95,7 +95,7 @@ const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>
 let previewMaintenanceRunning = false
 let exportProgressTimer: number | undefined
 
-const { imageElements, imageSize, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
+const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
 
 const baseStageScale = computed(() => {
   const maxWidth = Math.max(240, stageViewport.width - 64)
@@ -150,6 +150,7 @@ const {
   imageHandoutContextMenuItems,
   imageRecordFromFinderEntry,
   projectFromFinderEntry,
+  assetRecordFromDragPath,
 } = useFinderManagement(editor, {
   addAssetToCanvas,
   createHandoutFromImageRecord,
@@ -319,8 +320,18 @@ async function addAssetToCanvas(asset: LibraryRecord) {
 
 function handleCanvasAssetDrop(event: DragEvent) {
   event.preventDefault()
-  const assetId = event.dataTransfer?.getData('application/x-handout-asset') || draggedAssetId.value
-  const asset = editor.resolveAsset(assetId)
+  let asset = editor.resolveAsset(event.dataTransfer?.getData('application/x-handout-asset') || draggedAssetId.value)
+  if (!asset) {
+    const items = event.dataTransfer?.getData('items')
+    if (items) {
+      try {
+        const paths = JSON.parse(items) as string[]
+        asset = paths.map((path) => assetRecordFromDragPath(path)).find(Boolean)
+      } catch (error) {
+        logUpload('failed to parse vuefinder drag items', { error, items })
+      }
+    }
+  }
   if (!asset) return
   const { x, y } = canvasPointFromClient(event.clientX, event.clientY)
   void imageSize(asset).then((size) => {
@@ -538,7 +549,11 @@ async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileLis
     if (kind === 'asset') imported.push(await editor.importAssetFile(file, '', folder))
     if (kind === 'font') imported.push(await editor.importFontFile(file, '', folder))
   }
-  await syncImages(editor.library)
+  await Promise.allSettled(
+    imported
+      .filter((record) => record.mediaType.startsWith('image/'))
+      .map((record) => loadImage(record)),
+  )
   finderRevision[kind] += 1
   logUpload('uploaded files', {
     kind,
@@ -600,6 +615,22 @@ function beginExportProgress() {
     if (current < 70) exportProgress.value = Math.min(70, current + Math.max(1, Math.round((70 - current) * 0.16)))
     else if (current < 95) exportProgress.value = Math.min(95, current + 1)
   }, 90)
+}
+
+function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve())
+    })
+  })
+}
+
+async function prepareExportProgress() {
+  beginExportProgress()
+  await nextTick()
+  exportProgress.value = 1
+  await nextTick()
+  await waitForNextPaint()
 }
 
 function finishExportProgress(success: boolean) {
@@ -717,14 +748,19 @@ async function exportCurrentImage() {
     return
   }
   isExportingCurrent.value = true
-  beginExportProgress()
+  await prepareExportProgress()
   logExport('export current start', { title: editor.document.title, scale: exportScale.value })
   try {
+    const renderStartedAt = performance.now()
     const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements)
+    const renderDurationMs = Math.round(performance.now() - renderStartedAt)
+    logExport('export current render complete', { renderDurationMs, bytes: dataUrlByteSize(dataUrl) })
+    const writeStartedAt = performance.now()
     const path = await exportImageToDownloads(downloadFileName(editor.document.title), dataUrl)
+    const writeDurationMs = Math.round(performance.now() - writeStartedAt)
     lastCurrentExport.value = { signature, path }
     exportLog.value = `Exported image to ${path}`
-    logExport('export current complete', { path, bytes: dataUrlByteSize(dataUrl) })
+    logExport('export current complete', { path, bytes: dataUrlByteSize(dataUrl), renderDurationMs, writeDurationMs })
     finishExportProgress(true)
   } catch (error) {
     exportLog.value = `Export failed: ${String(error)}`
@@ -744,15 +780,22 @@ async function exportHandoutProject(project: ProjectSummary) {
     return
   }
   exportingHandoutIds.add(project.id)
-  beginExportProgress()
+  await prepareExportProgress()
   logExport('export handout start', { projectId: project.id, title: project.title })
   try {
+    const openStartedAt = performance.now()
     const payload = await openManagedProject(project.id)
+    const openDurationMs = Math.round(performance.now() - openStartedAt)
+    const renderStartedAt = performance.now()
     const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
+    const renderDurationMs = Math.round(performance.now() - renderStartedAt)
+    logExport('export handout render complete', { projectId: project.id, openDurationMs, renderDurationMs, bytes: dataUrlByteSize(dataUrl) })
+    const writeStartedAt = performance.now()
     const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
+    const writeDurationMs = Math.round(performance.now() - writeStartedAt)
     lastHandoutExports.set(project.id, { signature, path })
     exportLog.value = `Exported image to ${path}`
-    logExport('export handout complete', { projectId: project.id, path, bytes: dataUrlByteSize(dataUrl) })
+    logExport('export handout complete', { projectId: project.id, path, bytes: dataUrlByteSize(dataUrl), openDurationMs, renderDurationMs, writeDurationMs })
     finishExportProgress(true)
   } catch (error) {
     exportLog.value = `Export failed: ${String(error)}`
@@ -834,7 +877,7 @@ onMounted(async () => {
     resetKonvaDragButtons()
     void appendDebugLog('app', 'boot start')
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
-    await syncImages(editor.library)
+    void syncImages(editor.library)
     window.addEventListener('keydown', handleGlobalKeydown)
     resizeStageViewport()
     window.addEventListener('resize', resizeStageViewport)
@@ -854,8 +897,8 @@ onBeforeUnmount(() => {
   if (exportProgressTimer) window.clearInterval(exportProgressTimer)
 })
 
-watch(() => editor.library.backgrounds, () => syncImages(editor.library), { deep: true })
-watch(() => editor.library.assets, () => syncImages(editor.library), { deep: true })
+watch(() => editor.library.backgrounds, () => { void syncImages(editor.library) }, { deep: true })
+watch(() => editor.library.assets, () => { void syncImages(editor.library) }, { deep: true })
 watch(() => editor.selectedLayerId, updateTransformer)
 watch(() => editor.document.layers, updateTransformer, { deep: true })
 watch(

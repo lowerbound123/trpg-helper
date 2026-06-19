@@ -117,10 +117,7 @@ fn app_root(_app: &AppHandle) -> Result<PathBuf, AppError> {
 fn project_root() -> Result<PathBuf, AppError> {
     let cwd = std::env::current_dir().map_err(|_| AppError::DataDir)?;
     if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
-        return cwd
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or(AppError::DataDir);
+        return cwd.parent().map(Path::to_path_buf).ok_or(AppError::DataDir);
     }
     Ok(cwd)
 }
@@ -205,6 +202,18 @@ fn library_folders_mut<'a>(index: &'a mut LibraryIndex, kind: &str) -> Option<&'
         "background" | "backgrounds" => Some(&mut index.background_folders),
         "asset" | "assets" => Some(&mut index.asset_folders),
         "font" | "fonts" => Some(&mut index.font_folders),
+        _ => None,
+    }
+}
+
+fn library_records_mut<'a>(
+    index: &'a mut LibraryIndex,
+    kind: &str,
+) -> Option<&'a mut Vec<LibraryRecord>> {
+    match kind {
+        "background" | "backgrounds" => Some(&mut index.backgrounds),
+        "asset" | "assets" => Some(&mut index.assets),
+        "font" | "fonts" => Some(&mut index.fonts),
         _ => None,
     }
 }
@@ -461,6 +470,34 @@ fn rename_library_record(
         .ok_or_else(|| "record not found".to_string())?;
     record.name = name.trim().to_string();
     record.updated_at = Utc::now();
+    write_index(&app, &index).map_err(String::from)?;
+    Ok(index)
+}
+
+#[tauri::command]
+fn move_library_record(
+    app: AppHandle,
+    kind: String,
+    id: String,
+    folder: String,
+) -> CommandResult<LibraryIndex> {
+    let folder = normalize_folder(folder);
+    let mut index = read_index(&app).map_err(String::from)?;
+    {
+        let records = library_records_mut(&mut index, &kind)
+            .ok_or_else(|| "unknown library record kind".to_string())?;
+        let record = records
+            .iter_mut()
+            .find(|record| record.id == id)
+            .ok_or_else(|| "record not found".to_string())?;
+        record.folder = folder.clone();
+        record.updated_at = Utc::now();
+    }
+    {
+        let folders = library_folders_mut(&mut index, &kind)
+            .ok_or_else(|| "unknown library folder kind".to_string())?;
+        ensure_folder(folders, &folder);
+    }
     write_index(&app, &index).map_err(String::from)?;
     Ok(index)
 }
@@ -724,6 +761,36 @@ fn rename_managed_project(
 }
 
 #[tauri::command]
+fn move_managed_project(
+    app: AppHandle,
+    project_id: String,
+    folder: String,
+) -> CommandResult<ProjectPayload> {
+    let folder = normalize_folder(folder);
+    ensure_project_folder(&app, &folder).map_err(String::from)?;
+    let root = project_dir(&app, &project_id).map_err(String::from)?;
+    let payload = read_project_files(&root).map_err(String::from)?;
+    let mut metadata = payload.metadata;
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert("id".to_string(), Value::String(project_id));
+        object.insert("folder".to_string(), Value::String(folder));
+        object.insert(
+            "savedAt".to_string(),
+            Value::String(Utc::now().to_rfc3339()),
+        );
+        object.insert(
+            "app".to_string(),
+            Value::String("handout-generator".to_string()),
+        );
+    }
+    write_project_files(&root, &payload.document, &metadata).map_err(String::from)?;
+    Ok(ProjectPayload {
+        document: payload.document,
+        metadata,
+    })
+}
+
+#[tauri::command]
 fn save_managed_project(
     app: AppHandle,
     project_id: String,
@@ -762,14 +829,21 @@ fn export_image(file_path: String, data_url: String) -> CommandResult<String> {
 }
 
 #[tauri::command]
-fn export_image_to_downloads(app: AppHandle, file_name: String, data_url: String) -> CommandResult<String> {
+fn export_image_to_downloads(
+    app: AppHandle,
+    file_name: String,
+    data_url: String,
+) -> CommandResult<String> {
     let clean_name = clean_file_name(&file_name);
     let file_name = if clean_name.to_lowercase().ends_with(".png") {
         clean_name
     } else {
         format!("{clean_name}.png")
     };
-    let downloads = app.path().download_dir().map_err(|error| error.to_string())?;
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| error.to_string())?;
     fs::create_dir_all(&downloads)
         .map_err(AppError::from)
         .map_err(String::from)?;
@@ -780,7 +854,11 @@ fn export_image_to_downloads(app: AppHandle, file_name: String, data_url: String
 }
 
 #[tauri::command]
-fn save_project_preview(app: AppHandle, project_id: String, data_url: String) -> CommandResult<String> {
+fn save_project_preview(
+    app: AppHandle,
+    project_id: String,
+    data_url: String,
+) -> CommandResult<String> {
     let root = project_dir(&app, &project_id).map_err(String::from)?;
     fs::create_dir_all(&root)
         .map_err(AppError::from)
@@ -801,9 +879,7 @@ fn save_project_preview(app: AppHandle, project_id: String, data_url: String) ->
 
 #[tauri::command]
 fn append_debug_log(line: String) -> CommandResult<String> {
-    let path = project_root()
-        .map_err(String::from)?
-        .join("log.txt");
+    let path = project_root().map_err(String::from)?.join("log.txt");
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -851,6 +927,8 @@ pub fn run() {
             import_font,
             list_project_folders,
             list_projects,
+            move_library_record,
+            move_managed_project,
             open_managed_project,
             open_project,
             read_file_data_url,

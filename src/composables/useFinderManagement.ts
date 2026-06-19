@@ -15,7 +15,7 @@ export const finderFeatures = {
   fullscreen: false,
   history: false,
   language: false,
-  move: false,
+  move: true,
   newfile: false,
   newfolder: true,
   pinned: false,
@@ -244,6 +244,11 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     return entryBase(path).replace(`__${kind}-`, '')
   }
 
+  function kindFromFinderPath(path: string): FinderKind | undefined {
+    const storage = path.split('://')[0]
+    return (Object.entries(finderStorages).find(([, value]) => value === storage)?.[0] as FinderKind | undefined)
+  }
+
   function idFromFinderEntry(kind: FinderKind, entry: DirEntry) {
     return idFromFinderPath(kind, entry.path)
   }
@@ -252,6 +257,12 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     if (!entry || entry.type !== 'file') return undefined
     const id = idFromFinderEntry(kind, entry)
     return recordsForKindWithoutSearch(kind).find((record) => record.id === id)
+  }
+
+  function assetRecordFromDragPath(path: string) {
+    if (kindFromFinderPath(path) !== 'asset') return undefined
+    const id = idFromFinderPath('asset', path)
+    return editor.resolveAsset(id)
   }
 
   function imageRecordFromFinderEntry(kind: 'background' | 'asset', entry?: DirEntry | null) {
@@ -290,6 +301,25 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     if (kind === 'handout') await editor.renameProjectFolderPath(oldFolder, newFolder)
     else await editor.renameResourceFolder(kind, oldFolder, newFolder)
     if (selectedFolderForFinder(kind) === oldFolder) setSelectedFolderForFinder(kind, newFolder)
+  }
+
+  async function moveFromFinder(kind: FinderKind, params: { sources: string[]; destination: string }) {
+    const destination = normalizeFinderFolder(params.destination)
+    for (const source of params.sources) {
+      const basename = entryBase(source)
+      if (basename.startsWith(`__${kind}-`)) {
+        const id = idFromFinderPath(kind, source)
+        if (kind === 'handout') await editor.moveProjectToFolder(id, destination)
+        else await editor.moveResourceToFolder(kind, id, destination)
+        continue
+      }
+
+      const oldFolder = normalizeFinderFolder(source)
+      const nextFolder = [destination, entryBase(oldFolder)].filter(Boolean).join('/')
+      if (kind === 'handout') await editor.renameProjectFolderPath(oldFolder, nextFolder)
+      else await editor.renameResourceFolder(kind, oldFolder, nextFolder)
+      if (selectedFolderForFinder(kind) === oldFolder) setSelectedFolderForFinder(kind, nextFolder)
+    }
   }
 
   function createFinderDriver(kind: FinderKind): Driver {
@@ -332,8 +362,9 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
       async copy() {
         return unsupported()
       },
-      async move() {
-        return unsupported()
+      async move(params) {
+        await moveFromFinder(kind, params)
+        return finderResult(kind, params.destination || params.path)
       },
       async archive() {
         return unsupported()
@@ -437,6 +468,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
 
   return {
     finderDrivers,
+    assetRecordFromDragPath,
     foldersForKind,
     handleFinderFileDoubleClick,
     handleFinderPathChange,

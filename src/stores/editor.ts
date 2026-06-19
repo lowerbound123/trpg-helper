@@ -29,6 +29,8 @@ import {
   importFont,
   listProjectFolders,
   listProjects,
+  moveLibraryRecord,
+  moveManagedProject,
   openManagedProject,
   openProject,
   renameLibraryFolder,
@@ -228,6 +230,11 @@ export const useEditorStore = defineStore('editor', () => {
     status.value = `Renamed folder ${oldFolder} to ${newFolder.trim()}`
   }
 
+  async function moveResourceToFolder(kind: 'background' | 'asset' | 'font', id: string, folder: string) {
+    library.value = await moveLibraryRecord(kind, id, folder)
+    status.value = `Moved ${kind} to ${folder.trim() || 'root'}`
+  }
+
   async function renameProjectFolderPath(oldFolder: string, newFolder: string) {
     projectFolders.value = await renameProjectFolder(oldFolder, newFolder)
     await refreshProjects()
@@ -239,6 +246,13 @@ export const useEditorStore = defineStore('editor', () => {
     if (currentProjectId.value === projectId) replaceDocument(payload.document)
     await refreshProjects()
     status.value = `Renamed project to ${title.trim()}`
+  }
+
+  async function moveProjectToFolder(projectId: string, folder: string) {
+    const payload = await moveManagedProject(projectId, folder)
+    if (currentProjectId.value === projectId) replaceDocument(payload.document)
+    await refreshProjects()
+    status.value = `Moved project to ${folder.trim() || 'root'}`
   }
 
   async function loadFont(font: LibraryRecord) {
@@ -346,6 +360,8 @@ export const useEditorStore = defineStore('editor', () => {
     latestProjects,
     layers,
     library,
+    moveProjectToFolder,
+    moveResourceToFolder,
     moveSelectedLayer,
     moveLayerToIndex,
     openManagedHandout,

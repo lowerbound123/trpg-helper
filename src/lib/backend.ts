@@ -144,6 +144,15 @@ export async function renameLibraryFolder(
   return invoke<LibraryIndex>('rename_library_folder', { kind, oldFolder, newFolder })
 }
 
+export async function moveLibraryRecord(
+  kind: 'background' | 'asset' | 'font',
+  id: string,
+  folder: string,
+): Promise<LibraryIndex> {
+  if (!isTauriRuntime()) return emptyLibrary()
+  return invoke<LibraryIndex>('move_library_record', { kind, id, folder })
+}
+
 export async function renameProjectFolder(oldFolder: string, newFolder: string): Promise<string[]> {
   if (!isTauriRuntime()) return []
   return invoke<string[]>('rename_project_folder', { oldFolder, newFolder })
@@ -209,6 +218,13 @@ export async function renameManagedProject(projectId: string, title: string): Pr
     throw new Error('Renaming projects requires the Tauri desktop runtime.')
   }
   return invoke<ProjectPayload>('rename_managed_project', { projectId, title })
+}
+
+export async function moveManagedProject(projectId: string, folder: string): Promise<ProjectPayload> {
+  if (!isTauriRuntime()) {
+    throw new Error('Moving projects requires the Tauri desktop runtime.')
+  }
+  return invoke<ProjectPayload>('move_managed_project', { projectId, folder })
 }
 
 export async function saveManagedProject(

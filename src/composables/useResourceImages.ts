@@ -27,6 +27,16 @@ export function useResourceImages(fallbackWidth: Ref<number>, fallbackHeight: Re
     return image
   }
 
+  function waitForIdle() {
+    return new Promise<void>((resolve) => {
+      if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(() => resolve(), { timeout: 250 })
+        return
+      }
+      globalThis.setTimeout(resolve, 16)
+    })
+  }
+
   async function imageSize(record: LibraryRecord) {
     await loadImage(record)
     const image = imageElements[record.id]
@@ -36,13 +46,22 @@ export function useResourceImages(fallbackWidth: Ref<number>, fallbackHeight: Re
     }
   }
 
-  function syncImages(library: LibraryIndex) {
-    return Promise.allSettled([...library.backgrounds, ...library.assets].map((record) => loadImage(record)))
+  async function syncImages(library: LibraryIndex) {
+    const records = [...library.backgrounds, ...library.assets]
+    const results: PromiseSettledResult<HTMLImageElement>[] = []
+    for (const record of records) {
+      results.push(await loadImage(record)
+        .then((value) => ({ status: 'fulfilled' as const, value }))
+        .catch((reason) => ({ status: 'rejected' as const, reason })))
+      if (results.length % 3 === 0) await waitForIdle()
+    }
+    return results
   }
 
   return {
     imageElements,
     imageSize,
+    loadImage,
     previewUrl,
     syncImages,
   }

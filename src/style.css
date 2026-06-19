@@ -349,7 +349,9 @@ textarea {
   display: grid;
   grid-template-columns: 320px minmax(620px, 1fr) 340px;
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   color: hsl(var(--foreground));
   background:
     linear-gradient(180deg, hsl(216 18% 96%), hsl(216 16% 91%));
@@ -357,7 +359,8 @@ textarea {
 
 .left-rail,
 .right-rail {
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   background: hsl(0 0% 100%);
   border-color: hsl(var(--border));
 }
@@ -366,6 +369,7 @@ textarea {
   display: flex;
   flex-direction: column;
   border-right: 1px solid hsl(var(--border));
+  overflow: hidden;
 }
 
 .right-rail {
@@ -552,8 +556,10 @@ textarea {
 .workspace {
   display: flex;
   min-width: 0;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .topbar {

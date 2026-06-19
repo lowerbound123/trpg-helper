@@ -28,22 +28,24 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useFinderManagement, filterRecords, finderFeaturesForKind } from '@/composables/useFinderManagement'
+import { useCanvasViewport } from '@/composables/useCanvasViewport'
+import { useEditorDragPayloads } from '@/composables/useEditorDragPayloads'
+import { useHandoutExport } from '@/composables/useHandoutExport'
 import { useResourceImages } from '@/composables/useResourceImages'
 import {
   appendDebugLog,
-  exportImageToDownloads,
   fontRecordFamily,
   openManagedProject,
   saveProjectPreview,
   type LibraryRecord,
-  type ProjectSummary,
 } from '@/lib/backend'
+import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
 import { hasVisibleEffects } from '@/lib/effects'
-import { exportExtension, exportMimeType, exportQualityValue, type ExportFormat } from '@/lib/export-options'
-import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
+import { isEditableTarget } from '@/lib/dom'
+import type { HandoutLayer, ImageLayer, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
 import { appConfiguration } from '@/lib/configuration'
 import { layerKonvaConfig, layerPositionFromNode, textKonvaConfig } from '@/lib/layer-rendering'
-import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
+import { dataUrlByteSize, renderHandoutPreviewToDataUrl } from '@/lib/render'
 import { containsRect } from '@/lib/selection'
 import {
   arrowDotConfig,
@@ -57,6 +59,7 @@ import {
   shapePreviewPoints,
   showLineHandle,
 } from '@/lib/shape-rendering'
+import { shapeItems } from '@/lib/shape-items'
 import { calculateSnapGuides, SNAP_THRESHOLD_SCREEN_PX, type GuideLine, type SnapLayer } from '@/lib/snapping'
 import { partitionUploadFiles, type UploadKind } from '@/lib/upload-validation'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
@@ -79,16 +82,6 @@ const createMode = ref<'blank' | 'upload-background'>('blank')
 const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
-const exportScale = ref(appConfiguration.export.defaultScale)
-const exportFormat = ref<ExportFormat>('png')
-const exportQuality = ref(90)
-const exportLog = ref('')
-const exportProgress = ref(0)
-const fitScale = ref(1)
-const canvasZoom = ref(1)
-const canvasPan = reactive({ x: 0, y: 0 })
-const panState = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
-const stageViewport = reactive({ width: 920, height: 620 })
 const guideLines = ref<GuideLine[]>([])
 const selectionBox = reactive<SelectionBox>({ visible: false, startX: 0, startY: 0, x: 0, y: 0, width: 0, height: 0 })
 const multiDragState = reactive({
@@ -98,10 +91,6 @@ const multiDragState = reactive({
   originY: 0,
   positions: {} as Record<string, { x: number; y: number }>,
 })
-const isExportingCurrent = ref(false)
-const exportingHandoutIds = reactive(new Set<string>())
-const lastCurrentExport = ref<{ signature: string; path: string }>()
-const lastHandoutExports = reactive(new Map<string, { signature: string; path: string }>())
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
@@ -109,9 +98,6 @@ const selectedBackgroundFolder = ref('')
 const selectedAssetFolder = ref('')
 const selectedFontFolder = ref('')
 const isBooting = ref(true)
-const draggedAssetId = ref('')
-const draggedFontId = ref('')
-const draggedShapeKind = ref<ShapeKind>()
 const draggedLayerId = ref('')
 const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>({
   handout: [],
@@ -129,7 +115,6 @@ const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.find
 const backgroundFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.backgroundGridScale) }
 const EDITOR_EFFECT_CACHE_MAX_EDGE = 768
 let previewMaintenanceRunning = false
-let exportProgressTimer: number | undefined
 let effectCacheRaf: number | undefined
 let lastSnapLogSignature = ''
 let lastEllipseDragLogSignature = ''
@@ -137,26 +122,70 @@ let lastFontDragOverLogAt = 0
 let suppressNextStageClick = false
 let lastLayerListSelectionId = ''
 const pendingEffectCacheLayerIds = new Set<string>()
+const logHandoutPreview = createDebugLogger('handout-preview')
+const logText = createDebugLogger('text')
+const logUpload = createDebugLogger('upload')
+const logExport = createDebugLogger('export')
+const logSnap = createDebugLogger('snap')
+const logShape = createDebugLogger('shape')
+const {
+  draggedAssetId,
+  draggedFontId,
+  draggedShapeKind,
+  startAssetDrag,
+  clearAssetDrag,
+  startFontDrag,
+  prepareFontDrag,
+  clearFontDrag,
+  startShapeDrag,
+  clearShapeDrag,
+} = useEditorDragPayloads({
+  fontFamily,
+  logText,
+})
 
 const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
-const shapeItems: Array<{ kind: ShapeKind; label: string; detail: string }> = [
-  { kind: 'line', label: 'Line', detail: 'Stroke-only horizontal line' },
-  { kind: 'rect', label: 'Rectangle', detail: 'Filled rectangle with stroke' },
-  { kind: 'round-rect', label: 'Round rect', detail: 'Rectangle with configurable corners' },
-  { kind: 'ellipse', label: 'Ellipse', detail: 'Circle or oval shape' },
-  { kind: 'diamond', label: 'Diamond', detail: 'Centered rhombus shape' },
-  { kind: 'hexagon-h', label: 'Hexagon H', detail: 'Horizontal hexagon' },
-  { kind: 'hexagon-v', label: 'Hexagon V', detail: 'Vertical hexagon' },
-]
-
-function computeFitScale() {
-  const maxWidth = Math.max(240, stageViewport.width - 64)
-  const maxHeight = Math.max(180, stageViewport.height - 64)
-  return Math.min(maxWidth / editor.document.canvas.width, maxHeight / editor.document.canvas.height, 1)
-}
-
-const stageScale = computed(() => fitScale.value * canvasZoom.value)
-
+const {
+  exportProgress,
+  exportScale,
+  exportFormat,
+  exportQuality,
+  exportLog,
+  isExportingCurrent,
+  exportCurrentImage,
+  exportHandoutProject,
+  isHandoutExporting,
+  cleanupExportProgress,
+} = useHandoutExport({
+  editor,
+  imageElements,
+  loadImage,
+  logExport,
+})
+const {
+  fitScale,
+  canvasZoom,
+  canvasPan,
+  panState,
+  stageViewport,
+  stageScale,
+  stageConfig,
+  contentGroupConfig,
+  resizeStageViewport,
+  fitCanvasView,
+  zoomIn,
+  zoomOut,
+  canvasPointFromClient,
+  startCanvasPan,
+  moveCanvasPan,
+  stopCanvasPan,
+  handleCanvasWheel,
+} = useCanvasViewport({
+  document: editor.document,
+  stageRef,
+  stageFrameRef,
+  logViewport,
+})
 const canvasLayers = computed(() => [...editor.document.layers].sort((a, b) => a.zIndex - b.zIndex))
 
 const canvasSizeSignature = computed(() =>
@@ -234,18 +263,6 @@ const transformerConfig = computed(() => ({
   },
 }))
 
-const stageConfig = computed(() => ({
-  width: stageViewport.width,
-  height: stageViewport.height,
-}))
-
-const contentGroupConfig = computed(() => ({
-  x: canvasPan.x,
-  y: canvasPan.y,
-  scaleX: stageScale.value,
-  scaleY: stageScale.value,
-}))
-
 const documentFilterStyle = computed(() => {
   const effects = editor.document.canvas.effects
   if (!hasVisibleEffects(effects)) return ''
@@ -313,18 +330,6 @@ function resetKonvaDragButtons() {
   Konva.dragButtons = [0]
 }
 
-function resizeStageViewport() {
-  const element = stageFrameRef.value
-  if (!element) return
-  const rect = element.getBoundingClientRect()
-  const previous = { width: stageViewport.width, height: stageViewport.height }
-  stageViewport.width = Math.max(320, Math.round(rect.width))
-  stageViewport.height = Math.max(240, Math.round(rect.height))
-  if (previous.width !== stageViewport.width || previous.height !== stageViewport.height) {
-    logViewport('resize-stage-viewport', { previous })
-  }
-}
-
 function layerName(layer: HandoutLayer) {
   if (isTextLayer(layer)) return layer.text || layer.name
   return layer.name
@@ -339,80 +344,12 @@ function isShapeLayer(layer: HandoutLayer): layer is ShapeLayer {
   return layer.type === 'shape'
 }
 
-function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
-  draggedAssetId.value = asset.id
-  event.dataTransfer?.setData('application/x-handout-asset', asset.id)
-  event.dataTransfer?.setData('text/plain', asset.name)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
-}
-
-function clearAssetDrag() {
-  draggedAssetId.value = ''
-}
-
 function fontFamily(font: LibraryRecord) {
   return fontRecordFamily(font)
 }
 
-function startFontDrag(font: LibraryRecord, event: DragEvent) {
-  draggedFontId.value = font.id
-  event.dataTransfer?.setData('application/x-handout-font', font.id)
-  event.dataTransfer?.setData('application/x-handout-font-name', font.name)
-  event.dataTransfer?.setData('application/x-handout-font-family', fontFamily(font))
-  event.dataTransfer?.setData('text/plain', font.name)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
-  logText('font-drag-start', {
-    fontId: font.id,
-    name: font.name,
-    family: fontFamily(font),
-  })
-}
-
-function prepareFontDrag(font: LibraryRecord) {
-  draggedFontId.value = font.id
-  logText('font-drag-prepare', {
-    fontId: font.id,
-    name: font.name,
-    family: fontFamily(font),
-  })
-}
-
-function clearFontDrag() {
-  window.setTimeout(() => {
-    logText('font-drag-clear', { draggedFontId: draggedFontId.value })
-    draggedFontId.value = ''
-  }, 0)
-}
-
-function startShapeDrag(shape: ShapeKind, event: DragEvent) {
-  draggedShapeKind.value = shape
-  event.dataTransfer?.setData('application/x-handout-shape', shape)
-  event.dataTransfer?.setData('text/plain', shape)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
-}
-
-function clearShapeDrag() {
-  draggedShapeKind.value = undefined
-}
-
-function serializableLogData(data?: Record<string, unknown>) {
-  if (!data) return undefined
-  return Object.fromEntries(
-    Object.entries(data).map(([key, value]) => [
-      key,
-      value instanceof Error ? { name: value.name, message: value.message, stack: value.stack } : value,
-    ]),
-  )
-}
-
-function logHandoutPreview(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData(data)
-  console.debug(`[handout-preview] ${message}`, payload)
-  void appendDebugLog('handout-preview', message, payload)
-}
-
 function logViewport(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData({
+  writeDebugLog('viewport', message, {
     ...data,
     view: editor.view,
     viewport: { ...stageViewport },
@@ -426,14 +363,6 @@ function logViewport(message: string, data?: Record<string, unknown>) {
     },
     selectedLayerId: editor.selectedLayerId,
   })
-  console.debug(`[viewport] ${message}`, payload)
-  void appendDebugLog('viewport', message, payload)
-}
-
-function logText(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData(data)
-  console.debug(`[text] ${message}`, payload)
-  void appendDebugLog('text', message, payload)
 }
 
 function roundMetric(value: number) {
@@ -504,87 +433,11 @@ function backgroundRenderMetrics() {
 }
 
 function logBackgroundRender(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData({
+  writeDebugLog('background-render', message, {
     ...data,
     ...backgroundRenderMetrics(),
     selectedLayerId: editor.selectedLayerId,
   })
-  console.debug(`[background-render] ${message}`, payload)
-  void appendDebugLog('background-render', message, payload)
-}
-
-function logUpload(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData(data)
-  console.debug(`[upload] ${message}`, payload)
-  void appendDebugLog('upload', message, payload)
-}
-
-function logExport(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData(data)
-  console.debug(`[export] ${message}`, payload)
-  void appendDebugLog('export', message, payload)
-}
-
-function logSnap(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData(data)
-  console.debug(`[snap] ${message}`, payload)
-  void appendDebugLog('snap', message, payload)
-}
-
-function logShape(message: string, data?: Record<string, unknown>) {
-  const payload = serializableLogData(data)
-  console.debug(`[shape] ${message}`, payload)
-  void appendDebugLog('shape', message, payload)
-}
-
-function clampZoom(value: number) {
-  return Math.min(8, Math.max(0.1, Number(value) || 1))
-}
-
-function fitCanvasView(reason = 'fit') {
-  fitScale.value = computeFitScale()
-  canvasZoom.value = 1
-  canvasPan.x = Math.round((stageViewport.width - editor.document.canvas.width * stageScale.value) / 2)
-  canvasPan.y = Math.round((stageViewport.height - editor.document.canvas.height * stageScale.value) / 2)
-  logViewport('fit-canvas-view', { reason })
-}
-
-function zoomCanvas(nextZoom: number, anchor = { x: stageViewport.width / 2, y: stageViewport.height / 2 }) {
-  const previousScale = stageScale.value
-  const canvasPoint = {
-    x: (anchor.x - canvasPan.x) / previousScale,
-    y: (anchor.y - canvasPan.y) / previousScale,
-  }
-  canvasZoom.value = clampZoom(nextZoom)
-  const nextScale = stageScale.value
-  canvasPan.x = Math.round(anchor.x - canvasPoint.x * nextScale)
-  canvasPan.y = Math.round(anchor.y - canvasPoint.y * nextScale)
-  logViewport('zoom-canvas', { nextZoom: canvasZoom.value, anchor })
-}
-
-function zoomIn() {
-  zoomCanvas(canvasZoom.value * 1.2)
-}
-
-function zoomOut() {
-  zoomCanvas(canvasZoom.value / 1.2)
-}
-
-function stagePointFromClient(clientX: number, clientY: number) {
-  const rect = stageRef.value?.getNode().container().getBoundingClientRect()
-  if (!rect) return { x: 0, y: 0 }
-  return {
-    x: clientX - rect.left,
-    y: clientY - rect.top,
-  }
-}
-
-function canvasPointFromClient(clientX: number, clientY: number) {
-  const point = stagePointFromClient(clientX, clientY)
-  return {
-    x: (point.x - canvasPan.x) / stageScale.value,
-    y: (point.y - canvasPan.y) / stageScale.value,
-  }
 }
 
 function startLayerListDrag(layer: HandoutLayer, event: DragEvent) {
@@ -750,41 +603,6 @@ function handleDocumentFontDrop(event: DragEvent) {
   if (!font) return
   createFontTextOnCanvas(font, canvasPointFromClient(event.clientX, event.clientY))
   draggedFontId.value = ''
-}
-
-function startCanvasPan(event: PointerEvent) {
-  if (event.button !== 1) return
-  event.preventDefault()
-  panState.active = true
-  panState.startX = event.clientX
-  panState.startY = event.clientY
-  panState.originX = canvasPan.x
-  panState.originY = canvasPan.y
-}
-
-function moveCanvasPan(event: PointerEvent) {
-  if (!panState.active) return
-  event.preventDefault()
-  canvasPan.x = panState.originX + event.clientX - panState.startX
-  canvasPan.y = panState.originY + event.clientY - panState.startY
-}
-
-function stopCanvasPan() {
-  if (panState.active) logViewport('stop-canvas-pan')
-  panState.active = false
-}
-
-function handleCanvasWheel(event: WheelEvent) {
-  event.preventDefault()
-  const point = stagePointFromClient(event.clientX, event.clientY)
-  const factor = event.deltaY > 0 ? 1 / 1.12 : 1.12
-  zoomCanvas(canvasZoom.value * factor, point)
-}
-
-function isEditableTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null
-  if (!element) return false
-  return Boolean(element.closest('input, textarea, select, [contenteditable="true"]'))
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
@@ -1299,53 +1117,6 @@ function handleDirectFinderDragover(kind: UploadKind, event: DragEvent) {
   if (editor.status !== `Drop ${kind} files to upload`) editor.status = `Drop ${kind} files to upload`
 }
 
-function beginExportProgress() {
-  if (exportProgressTimer) window.clearInterval(exportProgressTimer)
-  exportProgress.value = 1
-  exportProgressTimer = window.setInterval(() => {
-    const current = exportProgress.value
-    if (current < 70) exportProgress.value = Math.min(70, current + Math.max(1, Math.round((70 - current) * 0.16)))
-    else if (current < 95) exportProgress.value = Math.min(95, current + 1)
-  }, 90)
-}
-
-function waitForNextPaint() {
-  return new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => globalThis.setTimeout(resolve, 0))
-    })
-  })
-}
-
-async function prepareExportProgress() {
-  beginExportProgress()
-  await nextTick()
-  await nextTick()
-  await waitForNextPaint()
-}
-
-async function setExportProgress(value: number) {
-  exportProgress.value = Math.max(exportProgress.value, value)
-  await nextTick()
-  await waitForNextPaint()
-}
-
-function finishExportProgress(success: boolean) {
-  if (exportProgressTimer) window.clearInterval(exportProgressTimer)
-  exportProgressTimer = undefined
-  exportProgress.value = success ? 100 : 0
-}
-
-async function ensureDocumentImages(document: HandoutDocument) {
-  const records = [
-    editor.resolveBackground(document.canvas.backgroundAssetId) || editor.resolveAsset(document.canvas.backgroundAssetId),
-    ...document.layers
-      .filter(isImageLayer)
-      .map((layer) => editor.resolveAsset(layer.assetId) || editor.resolveBackground(layer.assetId)),
-  ].filter(Boolean) as LibraryRecord[]
-  await Promise.allSettled(records.map((record) => loadImage(record)))
-}
-
 async function createProject() {
   if (createMode.value === 'blank') {
     await editor.createManagedHandout(newProjectTitle.value, {
@@ -1447,108 +1218,6 @@ async function saveProject() {
   }
 }
 
-async function exportCurrentImage() {
-  if (isExportingCurrent.value) return
-  const clickedAt = performance.now()
-  isExportingCurrent.value = true
-  exportProgress.value = 1
-  exportLog.value = 'Preparing export...'
-  await prepareExportProgress()
-  const clickToProgressMs = Math.round(performance.now() - clickedAt)
-  logExport('export current start', { title: editor.document.title, scale: exportScale.value, format: exportFormat.value, quality: exportQuality.value, clickToProgressMs })
-  try {
-    exportLog.value = 'Checking export changes...'
-    await setExportProgress(8)
-    const signatureStartedAt = performance.now()
-    const signature = JSON.stringify({ document: editor.document, scale: exportScale.value, format: exportFormat.value, quality: exportQuality.value })
-    const signatureMs = Math.round(performance.now() - signatureStartedAt)
-    if (lastCurrentExport.value?.signature === signature) {
-      exportLog.value = `Unchanged image already exported to ${lastCurrentExport.value.path}`
-      logExport('export current unchanged', { signatureMs, clickToProgressMs, path: lastCurrentExport.value.path })
-      finishExportProgress(true)
-      return
-    }
-    exportLog.value = 'Loading export images...'
-    await setExportProgress(18)
-    const imageLoadStartedAt = performance.now()
-    await ensureDocumentImages(editor.document)
-    const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
-    exportLog.value = 'Rendering export image...'
-    await setExportProgress(42)
-    const renderStartedAt = performance.now()
-    const dataUrl = await renderHandoutToDataUrl(
-      editor.document,
-      editor.library,
-      exportScale.value,
-      imageElements,
-      exportMimeType(exportFormat.value),
-      exportQualityValue(exportFormat.value, exportQuality.value),
-    )
-    const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
-    logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
-    exportLog.value = `Writing ${exportFormat.value.toUpperCase()} to Downloads...`
-    await setExportProgress(86)
-    const writeStartedAt = performance.now()
-    const path = await exportImageToDownloads(downloadFileName(editor.document.title, new Date(), exportExtension(exportFormat.value)), dataUrl)
-    const writeMs = Math.round(performance.now() - writeStartedAt)
-    lastCurrentExport.value = { signature, path }
-    exportLog.value = `Exported image to ${path}`
-    logExport('export current complete', { path, bytes: dataUrlByteSize(dataUrl), clickToProgressMs, signatureMs, imageLoadMs, konvaRenderMs, writeMs })
-    finishExportProgress(true)
-  } catch (error) {
-    exportLog.value = `Export failed: ${String(error)}`
-    logExport('export current failed', { error })
-    finishExportProgress(false)
-  } finally {
-    isExportingCurrent.value = false
-  }
-}
-
-async function exportHandoutProject(project: ProjectSummary) {
-  if (exportingHandoutIds.has(project.id)) return
-  const clickedAt = performance.now()
-  exportingHandoutIds.add(project.id)
-  await prepareExportProgress()
-  exportLog.value = 'Preparing export...'
-  const clickToProgressMs = Math.round(performance.now() - clickedAt)
-  logExport('export handout start', { projectId: project.id, title: project.title, clickToProgressMs })
-  try {
-    const signatureStartedAt = performance.now()
-    const signature = `${project.id}:${project.updatedAt}:1`
-    const lastExport = lastHandoutExports.get(project.id)
-    const signatureMs = Math.round(performance.now() - signatureStartedAt)
-    if (lastExport?.signature === signature) {
-      exportLog.value = `Unchanged image already exported to ${lastExport.path}`
-      logExport('export handout unchanged', { projectId: project.id, signatureMs, clickToProgressMs, path: lastExport.path })
-      finishExportProgress(false)
-      return
-    }
-    const openStartedAt = performance.now()
-    const payload = await openManagedProject(project.id)
-    const openDurationMs = Math.round(performance.now() - openStartedAt)
-    const imageLoadStartedAt = performance.now()
-    await ensureDocumentImages(payload.document)
-    const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
-    const renderStartedAt = performance.now()
-    const dataUrl = await renderHandoutToDataUrl(payload.document, editor.library, 1, imageElements)
-    const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
-    logExport('export handout render complete', { projectId: project.id, openDurationMs, signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
-    const writeStartedAt = performance.now()
-    const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
-    const writeMs = Math.round(performance.now() - writeStartedAt)
-    lastHandoutExports.set(project.id, { signature, path })
-    exportLog.value = `Exported image to ${path}`
-    logExport('export handout complete', { projectId: project.id, path, bytes: dataUrlByteSize(dataUrl), clickToProgressMs, openDurationMs, signatureMs, imageLoadMs, konvaRenderMs, writeMs })
-    finishExportProgress(true)
-  } catch (error) {
-    exportLog.value = `Export failed: ${String(error)}`
-    logExport('export handout failed', { projectId: project.id, error })
-    finishExportProgress(false)
-  } finally {
-    exportingHandoutIds.delete(project.id)
-  }
-}
-
 function selectedHandoutProject() {
   const selected = selectedFinderItems.handout
   if (selected.length !== 1) return undefined
@@ -1565,7 +1234,7 @@ function selectedHandoutStatus() {
 
 function isSelectedHandoutExporting() {
   const project = selectedHandoutProject()
-  return Boolean(project && exportingHandoutIds.has(project.id))
+  return isHandoutExporting(project?.id)
 }
 
 async function exportSelectedHandout() {
@@ -1649,7 +1318,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('dragover', handleDocumentFontDragOver)
   document.removeEventListener('drop', handleDocumentFontDrop)
   window.removeEventListener('resize', resizeStageViewport)
-  if (exportProgressTimer) window.clearInterval(exportProgressTimer)
+  cleanupExportProgress()
   if (effectCacheRaf) window.cancelAnimationFrame(effectCacheRaf)
 })
 

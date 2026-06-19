@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 
 import {
   addImageLayer,
+  addShapeLayer,
   addTextLayer,
   createDefaultHandout,
   moveLayer,
@@ -15,11 +16,14 @@ import {
   type ImageLayer,
   type LayerEffects,
   type LayerPatch,
+  type ShapeKind,
+  type ShapeLayer,
   type TextLayer,
 } from '@/lib/handout'
 import { createHistory } from '@/lib/history'
 import {
   emptyLibrary,
+  appendDebugLog,
   fileUrl,
   createLibraryFolder,
   createProject,
@@ -53,6 +57,15 @@ const tagList = (value: string) =>
     .split(',')
     .map((tag) => tag.trim())
     .filter(Boolean)
+
+function fontFamily(font?: LibraryRecord) {
+  return font?.name?.replace(/\.[^.]+$/, '') || 'Inter'
+}
+
+function logText(message: string, data?: Record<string, unknown>) {
+  console.debug(`[text] ${message}`, data)
+  void appendDebugLog('text', message, data)
+}
 
 export const useEditorStore = defineStore('editor', () => {
   const history = shallowRef(createHistory(createDefaultHandout('Untitled handout')))
@@ -145,19 +158,58 @@ export const useEditorStore = defineStore('editor', () => {
     selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
   }
 
-  function addText() {
-    const firstFont = library.value.fonts[0]
+  function addText(font?: LibraryRecord, position?: { x?: number; y?: number }) {
+    const firstFont = font ?? library.value.fonts[0]
     commit((doc) =>
       addTextLayer(doc, {
         text: 'New text',
         fontId: firstFont?.id,
-        fontFamily: firstFont?.name?.replace(/\.[^.]+$/, '') || 'Inter',
-        x: 180,
-        y: 160,
+        fontFamily: fontFamily(firstFont),
+        x: position?.x ?? 180,
+        y: position?.y ?? 160,
       }),
     )
     selectedLayerId.value = document.value.layers.at(-1)?.id
     selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
+    logText('add-text-layer', {
+      layerId: selectedLayerId.value,
+      fontId: firstFont?.id,
+      fontName: firstFont?.name,
+      fontFamily: fontFamily(firstFont),
+      position,
+    })
+  }
+
+  function addShape(shape: ShapeKind, position?: { x?: number; y?: number }) {
+    commit((doc) =>
+      addShapeLayer(doc, {
+        shape,
+        x: position?.x ?? 180,
+        y: position?.y ?? 160,
+      }),
+    )
+    selectedLayerId.value = document.value.layers.at(-1)?.id
+    selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
+  }
+
+  function applyOrCreateTextWithFont(font: LibraryRecord, position?: { x?: number; y?: number }) {
+    const textLayerIds = selectedLayers.value.filter((layer) => layer.type === 'text').map((layer) => layer.id)
+    if (textLayerIds.length) {
+      commit((doc) =>
+        textLayerIds.reduce((next, id) => updateLayer(next, id, {
+          fontId: font.id,
+          fontFamily: fontFamily(font),
+        }), doc),
+      )
+      logText('apply-font-to-selection', {
+        fontId: font.id,
+        fontName: font.name,
+        fontFamily: fontFamily(font),
+        layerIds: textLayerIds,
+      })
+      return
+    }
+    addText(font, position)
   }
 
   function patchSelectedLayer(patch: LayerPatch) {
@@ -373,11 +425,44 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   async function loadFont(font: LibraryRecord) {
-    if (!font.path || !('FontFace' in window)) return
-    const family = font.name.replace(/\.[^.]+$/, '')
-    const face = new FontFace(family, `url("${fileUrl(font.path)}")`)
-    await face.load()
-    globalThis.document.fonts.add(face)
+    if (!font.path || !('FontFace' in window)) {
+      logText('font-load-skipped', {
+        id: font.id,
+        name: font.name,
+        path: font.path,
+        hasFontFace: 'FontFace' in window,
+      })
+      return
+    }
+    const family = fontFamily(font)
+    const source = fileUrl(font.path)
+    logText('font-load-start', {
+      id: font.id,
+      name: font.name,
+      family,
+      mediaType: font.mediaType,
+      source,
+    })
+    try {
+      const face = new FontFace(family, `url("${source}")`)
+      await face.load()
+      globalThis.document.fonts.add(face)
+      logText('font-load-success', {
+        id: font.id,
+        name: font.name,
+        family,
+        status: face.status,
+        check: globalThis.document.fonts.check(`16px "${family}"`),
+      })
+    } catch (error) {
+      logText('font-load-failed', {
+        id: font.id,
+        name: font.name,
+        family,
+        error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
+      })
+      throw error
+    }
   }
 
   async function loadFonts() {
@@ -465,7 +550,9 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     addLayerFromAsset,
     addLayerFromAssetAt,
+    addShape,
     addText,
+    applyOrCreateTextWithFont,
     addProjectFolder,
     canRedo,
     canUndo,
@@ -535,4 +622,8 @@ export function isImageLayer(layer?: HandoutLayer): layer is ImageLayer {
 
 export function isTextLayer(layer?: HandoutLayer): layer is TextLayer {
   return layer?.type === 'text'
+}
+
+export function isShapeLayer(layer?: HandoutLayer): layer is ShapeLayer {
+  return layer?.type === 'shape'
 }

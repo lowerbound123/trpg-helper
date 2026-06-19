@@ -1,8 +1,8 @@
 import Konva from 'konva'
 
-import { readFileDataUrl, type LibraryIndex, type LibraryRecord } from './backend'
+import { appendDebugLog, readFileDataUrl, type LibraryIndex, type LibraryRecord } from './backend'
 import { hasVisibleEffects, konvaEffectConfig } from './effects'
-import type { HandoutDocument, HandoutLayer, ImageLayer, TextLayer } from './handout'
+import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeLayer, TextLayer } from './handout'
 
 type ImageCache = Record<string, HTMLImageElement>
 type CanvasSize = { width: number; height: number }
@@ -24,6 +24,10 @@ function isTextLayer(layer: HandoutLayer): layer is TextLayer {
   return layer.type === 'text'
 }
 
+function isShapeLayer(layer: HandoutLayer): layer is ShapeLayer {
+  return layer.type === 'shape'
+}
+
 function fontFamily(font: LibraryRecord) {
   return font.name.replace(/\.[^.]+$/, '') || font.name
 }
@@ -43,13 +47,58 @@ async function loadImage(record: LibraryRecord, cache: ImageCache) {
 }
 
 async function ensureFont(font: LibraryRecord) {
-  if (!font.path || !('FontFace' in window)) return
+  if (!font.path || !('FontFace' in window)) {
+    logText('render-font-load-skipped', {
+      id: font.id,
+      name: font.name,
+      path: font.path,
+      hasFontFace: 'FontFace' in window,
+    })
+    return
+  }
   const family = fontFamily(font)
-  if (Array.from(globalThis.document.fonts).some((face) => face.family === family)) return
+  if (Array.from(globalThis.document.fonts).some((face) => face.family === family)) {
+    logText('render-font-already-loaded', {
+      id: font.id,
+      name: font.name,
+      family,
+      check: globalThis.document.fonts.check(`16px "${family}"`),
+    })
+    return
+  }
   const source = await readFileDataUrl(font.path, font.mediaType)
-  const face = new FontFace(family, `url("${source}")`)
-  await face.load()
-  globalThis.document.fonts.add(face)
+  logText('render-font-load-start', {
+    id: font.id,
+    name: font.name,
+    family,
+    mediaType: font.mediaType,
+    sourceLength: source.length,
+  })
+  try {
+    const face = new FontFace(family, `url("${source}")`)
+    await face.load()
+    globalThis.document.fonts.add(face)
+    logText('render-font-load-success', {
+      id: font.id,
+      name: font.name,
+      family,
+      status: face.status,
+      check: globalThis.document.fonts.check(`16px "${family}"`),
+    })
+  } catch (error) {
+    logText('render-font-load-failed', {
+      id: font.id,
+      name: font.name,
+      family,
+      error: error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : String(error),
+    })
+    throw error
+  }
+}
+
+function logText(message: string, data?: Record<string, unknown>) {
+  console.debug(`[text] ${message}`, data)
+  void appendDebugLog('text', message, data)
 }
 
 function textDecoration(layer: TextLayer) {
@@ -80,6 +129,40 @@ function commonConfig(layer: HandoutLayer) {
     globalCompositeOperation: layer.blendMode,
     ...konvaEffectConfig(layer.effects),
   }
+}
+
+function shapeNode(layer: ShapeLayer) {
+  const { width: _width, height: _height, ...config } = {
+    ...commonConfig(layer),
+    fill: layer.fill,
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+  }
+
+  if (layer.shape === 'ellipse') {
+    return new Konva.Ellipse({
+      ...config,
+      x: config.x + layer.width / 2,
+      y: config.y + layer.height / 2,
+      radiusX: layer.width / 2,
+      radiusY: layer.height / 2,
+    })
+  }
+
+  if (layer.shape === 'line') {
+    return new Konva.Line({
+      ...config,
+      points: [0, layer.height / 2, layer.width, layer.height / 2],
+      lineCap: 'round',
+      lineJoin: 'round',
+    })
+  }
+
+  return new Konva.Rect({
+    ...config,
+    width: layer.width,
+    height: layer.height,
+  })
 }
 
 function prepareEffectNode<T extends Konva.Shape | Konva.Group>(node: T, effects?: HandoutLayer['effects']) {
@@ -179,7 +262,7 @@ async function renderHandoutStage(
     if (isTextLayer(item)) {
       const font = library.fonts.find((record) => record.id === item.fontId)
       if (font) await ensureFont(font)
-      content.add(prepareEffectNode(new Konva.Text({
+      const node = new Konva.Text({
         ...commonConfig(item),
         text: item.text,
         fontFamily: item.fontFamily,
@@ -190,7 +273,23 @@ async function renderHandoutStage(
         lineHeight: item.lineHeight,
         textDecoration: textDecoration(item),
         verticalAlign: 'top',
-      }), item.effects))
+      })
+      logText('render-text-node', {
+        layerId: item.id,
+        text: item.text,
+        fontId: item.fontId,
+        fontFamily: item.fontFamily,
+        fontSize: item.fontSize,
+        fontStyle: fontStyle(item),
+        measuredWidth: node.textWidth,
+        measuredHeight: node.textHeight,
+        clientRect: node.getClientRect({ skipTransform: true }),
+        fontCheck: globalThis.document.fonts?.check?.(`${item.fontSize}px "${item.fontFamily}"`),
+      })
+      content.add(prepareEffectNode(node, item.effects))
+    }
+    if (isShapeLayer(item)) {
+      content.add(prepareEffectNode(shapeNode(item), item.effects))
     }
   }
 

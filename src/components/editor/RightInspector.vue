@@ -10,7 +10,7 @@ import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { appConfiguration } from '@/lib/configuration'
-import { isTextLayer, useEditorStore } from '@/stores/editor'
+import { isShapeLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
 
@@ -30,7 +30,9 @@ const activeTextLayer = computed(() => isTextLayer(activeLayer.value) ? activeLa
 const selectedLayers = computed(() => editor.selectedLayers)
 const selectedCount = computed(() => selectedLayers.value.length)
 const selectedTextLayers = computed(() => selectedLayers.value.filter(isTextLayer))
+const selectedShapeLayers = computed(() => selectedLayers.value.filter(isShapeLayer))
 const allSelectedText = computed(() => selectedLayers.value.length > 0 && selectedTextLayers.value.length === selectedLayers.value.length)
+const allSelectedShapes = computed(() => selectedLayers.value.length > 0 && selectedShapeLayers.value.length === selectedLayers.value.length)
 const backgroundAsset = computed(() =>
   editor.resolveBackground(editor.document.canvas.backgroundAssetId)
     || editor.resolveAsset(editor.document.canvas.backgroundAssetId),
@@ -59,6 +61,9 @@ const commonBold = computed(() => commonTextValue((layer) => layer.fontWeight >=
 const commonItalic = computed(() => commonTextValue((layer) => layer.italic, undefined))
 const commonUnderline = computed(() => commonTextValue((layer) => layer.underline, undefined))
 const commonStrikethrough = computed(() => commonTextValue((layer) => layer.strikethrough, undefined))
+const commonShapeFill = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.fill), undefined))
+const commonShapeStroke = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.stroke), undefined))
+const commonShapeStrokeWidth = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.strokeWidth), undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
 const continuousEditTimers = new Map<string, number>()
@@ -355,6 +360,39 @@ function patchDocumentSaturation(value: number[] | undefined) {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </label>
+          </template>
+          <template v-if="allSelectedShapes">
+            <div class="two-col">
+              <label>
+                Fill
+                <Input
+                  :type="commonShapeFill ? 'color' : 'text'"
+                  :model-value="commonShapeFill ?? ''"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
+                />
+              </label>
+              <label>
+                Stroke
+                <Input
+                  :type="commonShapeStroke ? 'color' : 'text'"
+                  :model-value="commonShapeStroke ?? ''"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => editor.patchSelectedLayers({ stroke: String(value) })"
+                />
+              </label>
+            </div>
+            <label>
+              Stroke width
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                :model-value="commonShapeStrokeWidth ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: Math.max(0, Number(value) || 0) })"
+              />
             </label>
           </template>
           <Separator />

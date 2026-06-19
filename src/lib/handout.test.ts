@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   addImageLayer,
+  addShapeLayer,
   addTextLayer,
   createDefaultHandout,
   moveLayer,
@@ -65,6 +66,31 @@ describe('handout document model', () => {
       underline: false,
       strikethrough: false,
       flipX: false,
+    })
+  })
+
+  it('adds basic shape layers in z-order', () => {
+    const base = createDefaultHandout('Shape Test')
+    const withShape = addShapeLayer(base, {
+      shape: 'ellipse',
+      x: 40,
+      y: 50,
+      width: 180,
+      height: 120,
+    })
+
+    expect(withShape.layers).toHaveLength(1)
+    expect(withShape.layers[0]).toMatchObject({
+      type: 'shape',
+      shape: 'ellipse',
+      x: 40,
+      y: 50,
+      width: 180,
+      height: 120,
+      fill: 'rgba(14,165,233,0.12)',
+      stroke: '#0f766e',
+      strokeWidth: 3,
+      zIndex: 0,
     })
   })
 

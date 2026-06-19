@@ -463,7 +463,8 @@ textarea {
 
 .asset-row,
 .layer-row,
-.font-row {
+.font-row,
+.shape-row {
   display: flex;
   width: 100%;
   gap: 10px;
@@ -480,7 +481,9 @@ textarea {
   cursor: grab;
 }
 
-.asset-row:active {
+.asset-row:active,
+.font-row:active,
+.shape-row:active {
   cursor: grabbing;
 }
 
@@ -488,12 +491,19 @@ textarea {
   cursor: pointer;
 }
 
+.font-row,
+.shape-row {
+  cursor: grab;
+}
+
 .layer-row.dragging {
   opacity: 0.45;
 }
 
 .asset-row:hover,
-.layer-row:hover {
+.layer-row:hover,
+.font-row:hover,
+.shape-row:hover {
   background: hsl(var(--secondary));
 }
 
@@ -517,13 +527,15 @@ textarea {
 
 .asset-meta,
 .layer-row span,
-.font-row {
+.font-row,
+.shape-row span {
   min-width: 0;
 }
 
 .asset-meta strong,
 .layer-row strong,
-.font-row strong {
+.font-row strong,
+.shape-row strong {
   display: block;
   overflow: hidden;
   font-size: 13px;
@@ -535,7 +547,8 @@ textarea {
 
 .asset-meta span,
 .layer-row em,
-.font-row span {
+.font-row span,
+.shape-row em {
   display: block;
   margin-top: 2px;
   overflow: hidden;

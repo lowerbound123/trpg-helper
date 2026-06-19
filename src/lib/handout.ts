@@ -8,7 +8,8 @@ export type BlendMode =
   | 'darken'
   | 'lighten'
 
-export type LayerType = 'image' | 'text'
+export type LayerType = 'image' | 'text' | 'shape'
+export type ShapeKind = 'rect' | 'ellipse' | 'line'
 
 export interface CanvasSettings {
   width: number
@@ -63,7 +64,15 @@ export interface TextLayer extends BaseLayer {
   lineHeight: number
 }
 
-export type HandoutLayer = ImageLayer | TextLayer
+export interface ShapeLayer extends BaseLayer {
+  type: 'shape'
+  shape: ShapeKind
+  fill: string
+  stroke: string
+  strokeWidth: number
+}
+
+export type HandoutLayer = ImageLayer | TextLayer | ShapeLayer
 
 export interface HandoutDocument {
   schemaVersion: 1
@@ -93,8 +102,22 @@ export type NewTextLayerInput = {
   height?: number
 }
 
+export type NewShapeLayerInput = {
+  shape: ShapeKind
+  name?: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  fill?: string
+  stroke?: string
+  strokeWidth?: number
+}
+
 export type LayerPatch = Partial<
-  Omit<ImageLayer, 'id' | 'type' | 'zIndex'> & Omit<TextLayer, 'id' | 'type' | 'zIndex'>
+  Omit<ImageLayer, 'id' | 'type' | 'zIndex'>
+  & Omit<TextLayer, 'id' | 'type' | 'zIndex'>
+  & Omit<ShapeLayer, 'id' | 'type' | 'zIndex'>
 >
 
 export const defaultEffects = (): LayerEffects => ({
@@ -122,7 +145,17 @@ export function normalizeHandoutDocument(document: HandoutDocument): HandoutDocu
       ...layer,
       flipX: layer.flipX ?? false,
       effects: normalizeEffects(layer.effects),
+      ...shapeDefaults(layer),
     })) as HandoutLayer[],
+  }
+}
+
+function shapeDefaults(layer: HandoutLayer): Partial<ShapeLayer> {
+  if (layer.type !== 'shape') return {}
+  return {
+    fill: layer.fill ?? 'rgba(14,165,233,0.12)',
+    stroke: layer.stroke ?? '#0f766e',
+    strokeWidth: layer.strokeWidth ?? 3,
   }
 }
 
@@ -196,6 +229,35 @@ export function addTextLayer(document: HandoutDocument, input: NewTextLayerInput
     y: input.y ?? 160,
     width: input.width ?? 520,
     height: input.height ?? 120,
+    rotation: 0,
+    flipX: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    visible: true,
+    locked: false,
+    zIndex: document.layers.length,
+    effects: defaultEffects(),
+  }
+
+  return touch({
+    ...document,
+    layers: [...document.layers, layer],
+  })
+}
+
+export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInput): HandoutDocument {
+  const layer: ShapeLayer = {
+    id: uuidv4(),
+    type: 'shape',
+    name: input.name ?? `${input.shape[0].toUpperCase()}${input.shape.slice(1)}`,
+    shape: input.shape,
+    x: input.x ?? 180,
+    y: input.y ?? 160,
+    width: input.width ?? (input.shape === 'line' ? 320 : 220),
+    height: input.height ?? (input.shape === 'line' ? 24 : 160),
+    fill: input.fill ?? (input.shape === 'line' ? 'rgba(0,0,0,0)' : 'rgba(14,165,233,0.12)'),
+    stroke: input.stroke ?? '#0f766e',
+    strokeWidth: input.strokeWidth ?? 3,
     rotation: 0,
     flipX: false,
     opacity: 1,

@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Circle,
   Minus,
   Eye,
   EyeOff,
@@ -12,6 +13,8 @@ import {
   Plus,
   Redo2,
   Save,
+  Slash,
+  Square,
   Trash2,
   Type,
   Undo2,
@@ -38,7 +41,7 @@ import {
   type ProjectSummary,
 } from '@/lib/backend'
 import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
-import type { HandoutDocument, HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
+import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
 import { appConfiguration } from '@/lib/configuration'
 import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
 import { containsRect } from '@/lib/selection'
@@ -92,6 +95,8 @@ const selectedAssetFolder = ref('')
 const selectedFontFolder = ref('')
 const isBooting = ref(true)
 const draggedAssetId = ref('')
+const draggedFontId = ref('')
+const draggedShapeKind = ref<ShapeKind>()
 const draggedLayerId = ref('')
 const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>({
   handout: [],
@@ -114,6 +119,11 @@ let suppressNextStageClick = false
 let lastLayerListSelectionId = ''
 
 const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResourceImages(blankWidth, blankHeight)
+const shapeItems: Array<{ kind: ShapeKind; label: string; detail: string }> = [
+  { kind: 'line', label: 'Line', detail: 'Stroke-only horizontal line' },
+  { kind: 'rect', label: 'Rectangle', detail: 'Filled rectangle with stroke' },
+  { kind: 'ellipse', label: 'Ellipse', detail: 'Circle or oval shape' },
+]
 
 function computeFitScale() {
   const maxWidth = Math.max(240, stageViewport.width - 64)
@@ -132,6 +142,27 @@ const canvasSizeSignature = computed(() =>
 const layerEffectsSignature = computed(() =>
   editor.document.layers
     .map((layer) => `${layer.id}:${JSON.stringify(layer.effects || {})}`)
+    .join('|'),
+)
+
+const textLayerRenderSignature = computed(() =>
+  editor.document.layers
+    .filter(isTextLayer)
+    .map((layer) => [
+      layer.id,
+      layer.text,
+      layer.fontId,
+      layer.fontFamily,
+      layer.fontSize,
+      layer.fontWeight,
+      layer.italic,
+      layer.underline,
+      layer.strikethrough,
+      layer.width,
+      layer.height,
+      layer.lineHeight,
+      layer.align,
+    ].join(':'))
     .join('|'),
 )
 
@@ -250,6 +281,10 @@ function imageForLayer(layer: ImageLayer) {
   return asset ? imageElements[asset.id] : undefined
 }
 
+function isShapeLayer(layer: HandoutLayer): layer is ShapeLayer {
+  return layer.type === 'shape'
+}
+
 function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
   draggedAssetId.value = asset.id
   event.dataTransfer?.setData('application/x-handout-asset', asset.id)
@@ -259,6 +294,37 @@ function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
 
 function clearAssetDrag() {
   draggedAssetId.value = ''
+}
+
+function fontFamily(font: LibraryRecord) {
+  return font.name.replace(/\.[^.]+$/, '') || font.name
+}
+
+function startFontDrag(font: LibraryRecord, event: DragEvent) {
+  draggedFontId.value = font.id
+  event.dataTransfer?.setData('application/x-handout-font', font.id)
+  event.dataTransfer?.setData('text/plain', font.name)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+  logText('font-drag-start', {
+    fontId: font.id,
+    name: font.name,
+    family: fontFamily(font),
+  })
+}
+
+function clearFontDrag() {
+  draggedFontId.value = ''
+}
+
+function startShapeDrag(shape: ShapeKind, event: DragEvent) {
+  draggedShapeKind.value = shape
+  event.dataTransfer?.setData('application/x-handout-shape', shape)
+  event.dataTransfer?.setData('text/plain', shape)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+}
+
+function clearShapeDrag() {
+  draggedShapeKind.value = undefined
 }
 
 function serializableLogData(data?: Record<string, unknown>) {
@@ -294,6 +360,12 @@ function logViewport(message: string, data?: Record<string, unknown>) {
   })
   console.debug(`[viewport] ${message}`, payload)
   void appendDebugLog('viewport', message, payload)
+}
+
+function logText(message: string, data?: Record<string, unknown>) {
+  const payload = serializableLogData(data)
+  console.debug(`[text] ${message}`, payload)
+  void appendDebugLog('text', message, payload)
 }
 
 function roundMetric(value: number) {
@@ -486,8 +558,40 @@ async function addAssetToCanvas(asset: LibraryRecord) {
   void updateTransformer()
 }
 
-function handleCanvasAssetDrop(event: DragEvent) {
+function addFontTextToCanvas(font: LibraryRecord, position?: { x?: number; y?: number }) {
+  logText('font-create-text', {
+    fontId: font.id,
+    name: font.name,
+    family: fontFamily(font),
+    position,
+  })
+  editor.applyOrCreateTextWithFont(font, position)
+  void updateTransformer()
+}
+
+function addShapeToCanvas(shape: ShapeKind, position?: { x?: number; y?: number }) {
+  editor.addShape(shape, position)
+  void updateTransformer()
+}
+
+function handleCanvasDrop(event: DragEvent) {
   event.preventDefault()
+  const point = canvasPointFromClient(event.clientX, event.clientY)
+
+  const font = editor.resolveFont(event.dataTransfer?.getData('application/x-handout-font') || draggedFontId.value)
+  if (font) {
+    addFontTextToCanvas(font, point)
+    draggedFontId.value = ''
+    return
+  }
+
+  const shape = (event.dataTransfer?.getData('application/x-handout-shape') || draggedShapeKind.value) as ShapeKind | ''
+  if (shape && ['line', 'rect', 'ellipse'].includes(shape)) {
+    addShapeToCanvas(shape, point)
+    draggedShapeKind.value = undefined
+    return
+  }
+
   let asset = editor.resolveAsset(event.dataTransfer?.getData('application/x-handout-asset') || draggedAssetId.value)
   if (!asset) {
     const items = event.dataTransfer?.getData('items')
@@ -501,9 +605,8 @@ function handleCanvasAssetDrop(event: DragEvent) {
     }
   }
   if (!asset) return
-  const { x, y } = canvasPointFromClient(event.clientX, event.clientY)
   void imageSize(asset).then((size) => {
-    editor.addLayerFromAssetAt(asset, x, y, size)
+    editor.addLayerFromAssetAt(asset, point.x, point.y, size)
     void updateTransformer()
   })
   draggedAssetId.value = ''
@@ -571,6 +674,12 @@ function layerConfig(layer: HandoutLayer) {
 }
 
 function layerPositionFromNode(layer: HandoutLayer, node: Konva.Node) {
+  if (isShapeLayer(layer) && layer.shape === 'ellipse') {
+    return {
+      x: Math.round(node.x() - layer.width / 2),
+      y: Math.round(node.y() - layer.height / 2),
+    }
+  }
   return {
     x: Math.round(layer.flipX ? node.x() - node.width() / 2 : node.x()),
     y: Math.round(node.y()),
@@ -592,6 +701,67 @@ function textConfig(layer: TextLayer) {
     align: layer.align,
     lineHeight: layer.lineHeight,
     verticalAlign: 'top',
+  }
+}
+
+function shapeConfig(layer: ShapeLayer) {
+  const base = layerConfig(layer)
+  if (layer.shape === 'ellipse') {
+    return {
+      ...base,
+      x: layer.x + layer.width / 2,
+      y: layer.y + layer.height / 2,
+      radiusX: layer.width / 2,
+      radiusY: layer.height / 2,
+      fill: layer.fill,
+      stroke: layer.stroke,
+      strokeWidth: layer.strokeWidth,
+    }
+  }
+
+  if (layer.shape === 'line') {
+    return {
+      ...base,
+      points: [0, layer.height / 2, layer.width, layer.height / 2],
+      fill: undefined,
+      stroke: layer.stroke,
+      strokeWidth: layer.strokeWidth,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }
+  }
+
+  return {
+    ...base,
+    fill: layer.fill,
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+  }
+}
+
+async function logTextLayerMetrics(reason: string) {
+  await nextTick()
+  for (const layer of editor.document.layers.filter(isTextLayer)) {
+    const node = layerNodeRefs[layer.id]?.getNode() as Konva.Text | undefined
+    const font = editor.resolveFont(layer.fontId)
+    logText('text-layer-render', {
+      reason,
+      layerId: layer.id,
+      text: layer.text,
+      fontId: layer.fontId,
+      fontName: font?.name,
+      fontPath: font?.path,
+      fontFamily: layer.fontFamily,
+      fontSize: layer.fontSize,
+      fontStyle: `${layer.italic ? 'italic ' : ''}${layer.fontWeight || 400}`,
+      lineHeight: layer.lineHeight,
+      nodeExists: Boolean(node),
+      fontCheck: globalThis.document.fonts?.check?.(`${layer.fontSize}px "${layer.fontFamily}"`),
+      textWidth: node?.textWidth,
+      textHeight: node?.textHeight,
+      clientRect: node?.getClientRect({ skipTransform: true }),
+      absoluteScale: node?.getAbsoluteScale(),
+    })
   }
 }
 
@@ -689,9 +859,14 @@ function onTransformEnd(layer: HandoutLayer) {
   if (!node) return
   const scaleX = Math.abs(node.scaleX())
   const scaleY = node.scaleY()
-  const position = layerPositionFromNode(layer, node)
   const width = Math.max(12, Math.round(node.width() * scaleX))
   const height = Math.max(12, Math.round(node.height() * scaleY))
+  const position = isShapeLayer(layer) && layer.shape === 'ellipse'
+    ? {
+        x: Math.round(node.x() - width / 2),
+        y: Math.round(node.y() - height / 2),
+      }
+    : layerPositionFromNode(layer, node)
   node.clearCache()
   node.scaleX(layer.flipX ? -1 : 1)
   node.scaleY(1)
@@ -1254,6 +1429,9 @@ watch(selectedLayerTransformSignature, updateTransformer)
 watch(selectedLayerRenderSignature, () => {
   if (editor.selectedLayerId) void refreshLayerEffectCacheAfterUpdate(editor.selectedLayerId)
 })
+watch(textLayerRenderSignature, () => {
+  if (editor.view === 'editor') void logTextLayerMetrics('text-signature-change')
+}, { flush: 'post' })
 watch(layerEffectsSignature, () => { void refreshLayerEffectCaches() })
 watch(
   backgroundRenderSignature,
@@ -1466,9 +1644,10 @@ watch(
       </div>
 
       <Tabs default-value="assets" class="rail-tabs">
-        <TabsList class="grid grid-cols-3">
+        <TabsList class="grid grid-cols-4">
           <TabsTrigger value="assets">Assets</TabsTrigger>
           <TabsTrigger value="fonts">Fonts</TabsTrigger>
+          <TabsTrigger value="shapes">Shapes</TabsTrigger>
           <TabsTrigger value="layers">Layers</TabsTrigger>
         </TabsList>
 
@@ -1525,10 +1704,42 @@ watch(
           />
           <Input v-model="fontSearch" placeholder="Search fonts or tags" />
           <ScrollArea class="rail-scroll">
-            <div v-for="font in filteredFonts" :key="font.id" class="font-row">
+            <button
+              v-for="font in filteredFonts"
+              :key="font.id"
+              class="font-row"
+              type="button"
+              draggable="true"
+              @click="addFontTextToCanvas(font)"
+              @dragstart="startFontDrag(font, $event)"
+              @dragend="clearFontDrag"
+            >
               <strong>{{ font.name }}</strong>
-              <span>{{ font.tags.join(', ') || 'No tags' }}</span>
-            </div>
+              <span>Click to apply/create · drag for New Text · {{ font.tags.join(', ') || 'No tags' }}</span>
+            </button>
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="shapes" class="rail-tab-content">
+          <ScrollArea class="rail-scroll">
+            <button
+              v-for="shape in shapeItems"
+              :key="shape.kind"
+              class="shape-row"
+              type="button"
+              draggable="true"
+              @click="addShapeToCanvas(shape.kind)"
+              @dragstart="startShapeDrag(shape.kind, $event)"
+              @dragend="clearShapeDrag"
+            >
+              <Slash v-if="shape.kind === 'line'" class="layer-icon" />
+              <Square v-else-if="shape.kind === 'rect'" class="layer-icon" />
+              <Circle v-else class="layer-icon" />
+              <span>
+                <strong>{{ shape.label }}</strong>
+                <em>{{ shape.detail }}</em>
+              </span>
+            </button>
           </ScrollArea>
         </TabsContent>
 
@@ -1635,9 +1846,9 @@ watch(
         <div
           ref="stageFrameRef"
           class="stage-frame"
-          :class="{ 'stage-frame-dropping': draggedAssetId, 'stage-frame-panning': panState.active }"
+          :class="{ 'stage-frame-dropping': draggedAssetId || draggedFontId || draggedShapeKind, 'stage-frame-panning': panState.active }"
           @dragover.capture.prevent
-          @drop.capture="handleCanvasAssetDrop"
+          @drop.capture="handleCanvasDrop"
           @wheel.prevent="handleCanvasWheel"
           @pointerdown="startCanvasPan"
           @pointermove="moveCanvasPan"
@@ -1693,6 +1904,39 @@ watch(
                     v-else-if="isTextLayer(layer)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="textConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transformend="onTransformEnd(layer)"
+                  />
+                  <v-rect
+                    v-else-if="isShapeLayer(layer) && layer.shape === 'rect'"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="shapeConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transformend="onTransformEnd(layer)"
+                  />
+                  <v-ellipse
+                    v-else-if="isShapeLayer(layer) && layer.shape === 'ellipse'"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="shapeConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transformend="onTransformEnd(layer)"
+                  />
+                  <v-line
+                    v-else-if="isShapeLayer(layer) && layer.shape === 'line'"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="shapeConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
                     @tap="selectCanvasLayer(layer.id, $event)"
                     @dragstart="onLayerDragStart(layer, $event)"

@@ -38,9 +38,11 @@ import {
   type LibraryRecord,
   type ProjectSummary,
 } from '@/lib/backend'
-import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
+import { hasVisibleEffects } from '@/lib/effects'
+import { exportExtension, exportMimeType, exportQualityValue, type ExportFormat } from '@/lib/export-options'
 import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
 import { appConfiguration } from '@/lib/configuration'
+import { layerKonvaConfig, layerPositionFromNode, textKonvaConfig } from '@/lib/layer-rendering'
 import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
 import { containsRect } from '@/lib/selection'
 import {
@@ -56,6 +58,7 @@ import {
   showLineHandle,
 } from '@/lib/shape-rendering'
 import { calculateSnapGuides, SNAP_THRESHOLD_SCREEN_PX, type GuideLine, type SnapLayer } from '@/lib/snapping'
+import { partitionUploadFiles, type UploadKind } from '@/lib/upload-validation'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
@@ -77,7 +80,7 @@ const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const exportScale = ref(appConfiguration.export.defaultScale)
-const exportFormat = ref<'png' | 'jpeg' | 'webp'>('png')
+const exportFormat = ref<ExportFormat>('png')
 const exportQuality = ref(90)
 const exportLog = ref('')
 const exportProgress = ref(0)
@@ -793,54 +796,13 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 }
 
 function layerConfig(layer: HandoutLayer) {
-  return {
-    id: layer.id,
-    x: layer.flipX ? layer.x + layer.width / 2 : layer.x,
-    y: layer.y,
-    width: layer.width,
-    height: layer.height,
-    offsetX: layer.flipX ? layer.width / 2 : 0,
-    scaleX: layer.flipX ? -1 : 1,
-    rotation: layer.rotation,
-    opacity: layer.opacity,
-    visible: layer.visible,
-    draggable: !layer.locked,
-    globalCompositeOperation: layer.blendMode,
-    ...konvaEffectConfig(layer.effects),
-  }
-}
-
-function layerPositionFromNode(layer: HandoutLayer, node: Konva.Node) {
-  if (isShapeLayer(layer) && layer.shape === 'ellipse') {
-    return {
-      x: Math.round(node.x() - layer.width / 2),
-      y: Math.round(node.y() - layer.height / 2),
-    }
-  }
-  return {
-    x: Math.round(layer.flipX ? node.x() - node.width() / 2 : node.x()),
-    y: Math.round(node.y()),
-  }
+  return layerKonvaConfig(layer)
 }
 
 function textConfig(layer: TextLayer) {
   const resolvedFont = editor.resolveFont(layer.fontId)
   const family = resolvedFont ? fontFamily(resolvedFont) : layer.fontFamily
-  return {
-    ...layerConfig(layer),
-    text: layer.text,
-    fontFamily: family,
-    fontSize: layer.fontSize,
-    fontStyle: `${layer.italic ? 'italic ' : ''}${layer.fontWeight || 400}`,
-    textDecoration: [
-      layer.underline ? 'underline' : '',
-      layer.strikethrough ? 'line-through' : '',
-    ].filter(Boolean).join(' '),
-    fill: layer.fill,
-    align: layer.align,
-    lineHeight: layer.lineHeight,
-    verticalAlign: 'top',
-  }
+  return textKonvaConfig(layer, family)
 }
 
 function shapeConfig(layer: ShapeLayer) {
@@ -1278,7 +1240,7 @@ function changedEffectLayerIds(nextSignature: string, previousSignature?: string
     .filter((id): id is string => Boolean(id))
 }
 
-async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileList | File[], folder = '') {
+async function uploadFiles(kind: UploadKind, files: FileList | File[], folder = '') {
   const fileArray = validUploadFiles(kind, Array.from(files))
   if (!fileArray.length) return []
   const imported: LibraryRecord[] = []
@@ -1302,17 +1264,8 @@ async function uploadFiles(kind: 'background' | 'asset' | 'font', files: FileLis
   return imported
 }
 
-function isSupportedUpload(kind: 'background' | 'asset' | 'font', file: File) {
-  if (kind === 'background' || kind === 'asset') {
-    return ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/avif'].includes(file.type)
-      || /\.(png|jpe?g|webp|gif|bmp|tiff?|tga|avif|qoi|ico)$/i.test(file.name)
-  }
-  return /\.(ttf|otf|woff2?)$/i.test(file.name)
-}
-
-function validUploadFiles(kind: 'background' | 'asset' | 'font', files: File[]) {
-  const accepted = files.filter((file) => isSupportedUpload(kind, file))
-  const rejected = files.filter((file) => !isSupportedUpload(kind, file))
+function validUploadFiles(kind: UploadKind, files: File[]) {
+  const { accepted, rejected } = partitionUploadFiles(kind, files)
   if (rejected.length) {
     const names = rejected.map((file) => file.name).join(', ')
     editor.status = `Unsupported ${kind} file${rejected.length > 1 ? 's' : ''}: ${names}`
@@ -1324,7 +1277,7 @@ function validUploadFiles(kind: 'background' | 'asset' | 'font', files: File[]) 
   return accepted
 }
 
-async function handleDirectFinderDrop(kind: 'background' | 'asset' | 'font', event: DragEvent) {
+async function handleDirectFinderDrop(kind: UploadKind, event: DragEvent) {
   const files = Array.from(event.dataTransfer?.files || [])
   if (!files.length) return
   event.preventDefault()
@@ -1337,7 +1290,7 @@ async function handleDirectFinderDrop(kind: 'background' | 'asset' | 'font', eve
   await uploadFiles(kind, files, folder)
 }
 
-function handleDirectFinderDragover(kind: 'background' | 'asset' | 'font', event: DragEvent) {
+function handleDirectFinderDragover(kind: UploadKind, event: DragEvent) {
   if (!event.dataTransfer?.types.includes('Files')) return
   event.dataTransfer.dropEffect = 'copy'
   event.dataTransfer.effectAllowed = 'copy'
@@ -1381,23 +1334,6 @@ function finishExportProgress(success: boolean) {
   if (exportProgressTimer) window.clearInterval(exportProgressTimer)
   exportProgressTimer = undefined
   exportProgress.value = success ? 100 : 0
-}
-
-function exportMimeType() {
-  if (exportFormat.value === 'jpeg') return 'image/jpeg'
-  if (exportFormat.value === 'webp') return 'image/webp'
-  return 'image/png'
-}
-
-function exportExtension() {
-  if (exportFormat.value === 'jpeg') return 'jpg'
-  return exportFormat.value
-}
-
-function exportQualityValue() {
-  return exportFormat.value === 'png'
-    ? undefined
-    : Math.min(1, Math.max(0.01, exportQuality.value / 100))
 }
 
 async function ensureDocumentImages(document: HandoutDocument) {
@@ -1540,13 +1476,20 @@ async function exportCurrentImage() {
     exportLog.value = 'Rendering export image...'
     await setExportProgress(42)
     const renderStartedAt = performance.now()
-    const dataUrl = await renderHandoutToDataUrl(editor.document, editor.library, exportScale.value, imageElements, exportMimeType(), exportQualityValue())
+    const dataUrl = await renderHandoutToDataUrl(
+      editor.document,
+      editor.library,
+      exportScale.value,
+      imageElements,
+      exportMimeType(exportFormat.value),
+      exportQualityValue(exportFormat.value, exportQuality.value),
+    )
     const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
     logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
     exportLog.value = `Writing ${exportFormat.value.toUpperCase()} to Downloads...`
     await setExportProgress(86)
     const writeStartedAt = performance.now()
-    const path = await exportImageToDownloads(downloadFileName(editor.document.title, new Date(), exportExtension()), dataUrl)
+    const path = await exportImageToDownloads(downloadFileName(editor.document.title, new Date(), exportExtension(exportFormat.value)), dataUrl)
     const writeMs = Math.round(performance.now() - writeStartedAt)
     lastCurrentExport.value = { signature, path }
     exportLog.value = `Exported image to ${path}`

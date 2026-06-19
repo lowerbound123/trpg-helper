@@ -113,6 +113,7 @@ const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>
 const finderUploadConfig = { maxFileSize: appConfiguration.uploads.maxFileSize }
 const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.handoutGridScale) }
 const backgroundFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.backgroundGridScale) }
+const EDITOR_EFFECT_CACHE_MAX_EDGE = 768
 let previewMaintenanceRunning = false
 let exportProgressTimer: number | undefined
 let effectCacheRaf: number | undefined
@@ -326,6 +327,8 @@ function fontFamily(font: LibraryRecord) {
 function startFontDrag(font: LibraryRecord, event: DragEvent) {
   draggedFontId.value = font.id
   event.dataTransfer?.setData('application/x-handout-font', font.id)
+  event.dataTransfer?.setData('application/x-handout-font-name', font.name)
+  event.dataTransfer?.setData('application/x-handout-font-family', fontFamily(font))
   event.dataTransfer?.setData('text/plain', font.name)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
   logText('font-drag-start', {
@@ -336,7 +339,9 @@ function startFontDrag(font: LibraryRecord, event: DragEvent) {
 }
 
 function clearFontDrag() {
-  draggedFontId.value = ''
+  window.setTimeout(() => {
+    draggedFontId.value = ''
+  }, 0)
 }
 
 function startShapeDrag(shape: ShapeKind, event: DragEvent) {
@@ -610,12 +615,22 @@ function addShapeToCanvas(shape: ShapeKind, position?: { x?: number; y?: number 
 
 function handleCanvasDrop(event: DragEvent) {
   event.preventDefault()
+  event.stopPropagation()
   const point = canvasPointFromClient(event.clientX, event.clientY)
 
   const fontId = event.dataTransfer?.getData('application/x-handout-font') || draggedFontId.value
-  const fontName = event.dataTransfer?.getData('text/plain') || ''
+  const fontName = event.dataTransfer?.getData('application/x-handout-font-name') || event.dataTransfer?.getData('text/plain') || ''
+  const fontFamilyName = event.dataTransfer?.getData('application/x-handout-font-family') || ''
+  logText('canvas-drop', {
+    fontId,
+    fontName,
+    fontFamilyName,
+    draggedFontId: draggedFontId.value,
+    types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
+    position: point,
+  })
   const font = editor.resolveFont(fontId)
-    || editor.library.fonts.find((item) => item.name === fontName || fontFamily(item) === fontName)
+    || editor.library.fonts.find((item) => item.name === fontName || fontFamily(item) === fontName || fontFamily(item) === fontFamilyName)
   if (font) {
     createFontTextOnCanvas(font, point)
     draggedFontId.value = ''
@@ -647,6 +662,11 @@ function handleCanvasDrop(event: DragEvent) {
     void updateTransformer()
   })
   draggedAssetId.value = ''
+}
+
+function handleCanvasDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
 }
 
 function startCanvasPan(event: PointerEvent) {
@@ -759,16 +779,7 @@ function shapeConfig(layer: ShapeLayer) {
   }
 
   if (layer.shape === 'line') {
-    return {
-      ...base,
-      points: [0, layer.height / 2, layer.width, layer.height / 2],
-      fill: undefined,
-      stroke: layer.stroke,
-      strokeWidth: layer.strokeWidth,
-      hitStrokeWidth: Math.max(16, layer.strokeWidth * 3),
-      lineCap: 'round',
-      lineJoin: 'round',
-    }
+    return base
   }
 
   return {
@@ -776,6 +787,28 @@ function shapeConfig(layer: ShapeLayer) {
     fill: layer.fill,
     stroke: layer.stroke,
     strokeWidth: layer.strokeWidth,
+  }
+}
+
+function lineHitConfig(layer: ShapeLayer) {
+  return {
+    x: 0,
+    y: 0,
+    width: layer.width,
+    height: layer.height,
+    fill: 'rgba(0,0,0,0.001)',
+    strokeEnabled: false,
+  }
+}
+
+function lineVisualConfig(layer: ShapeLayer) {
+  return {
+    points: [0, layer.height / 2, layer.width, layer.height / 2],
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+    lineCap: 'round',
+    lineJoin: 'round',
+    listening: false,
   }
 }
 
@@ -1055,8 +1088,16 @@ function refreshLayerEffectCache(layerId: string, options?: { recache?: boolean 
   if (!layer || !node) return
   if (hasVisibleEffects(layer.effects)) {
     if (options?.recache || !node.isCached()) {
+      const maxEdge = Math.max(1, layer.width, layer.height)
+      const pixelRatio = Math.max(0.1, Math.min(1, EDITOR_EFFECT_CACHE_MAX_EDGE / maxEdge))
       node.clearCache()
-      node.cache({ pixelRatio: 1 })
+      node.cache({ pixelRatio })
+      logViewport('effect-cache-recache', {
+        layerId,
+        layerType: layer.type,
+        size: { width: layer.width, height: layer.height },
+        pixelRatio,
+      })
     }
   } else if (node.isCached()) {
     node.clearCache()
@@ -1944,7 +1985,8 @@ watch(
           ref="stageFrameRef"
           class="stage-frame"
           :class="{ 'stage-frame-dropping': draggedAssetId || draggedFontId || draggedShapeKind, 'stage-frame-panning': panState.active }"
-          @dragover.capture.prevent
+          @dragenter.capture="handleCanvasDragOver"
+          @dragover.capture="handleCanvasDragOver"
           @drop.capture="handleCanvasDrop"
           @wheel.prevent="handleCanvasWheel"
           @pointerdown="startCanvasPan"
@@ -2030,7 +2072,7 @@ watch(
                     @dragend="onDragEnd(layer)"
                     @transformend="onTransformEnd(layer)"
                   />
-                  <v-line
+                  <v-group
                     v-else-if="isShapeLayer(layer) && layer.shape === 'line'"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="shapeConfig(layer)"
@@ -2040,7 +2082,10 @@ watch(
                     @dragmove="onDragMove(layer, $event)"
                     @dragend="onDragEnd(layer)"
                     @transformend="onTransformEnd(layer)"
-                  />
+                  >
+                    <v-rect :config="lineHitConfig(layer)" />
+                    <v-line :config="lineVisualConfig(layer)" />
+                  </v-group>
                 </template>
                 <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">
                   <v-line

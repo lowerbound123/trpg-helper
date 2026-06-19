@@ -25,18 +25,23 @@ export function konvaEffectConfig(effects?: Partial<LayerEffects>) {
       luminance: 0,
     }
   }
+  const blur = Math.max(0, Number(effects?.blur || 0))
+  const brightness = Number(effects?.brightness || 0)
+  const contrast = Number(effects?.contrast || 0)
+  const saturation = Number(effects?.saturation || 0)
+  const filters = [
+    blur ? Konva.Filters.Blur : undefined,
+    brightness ? Konva.Filters.Brighten : undefined,
+    contrast ? Konva.Filters.Contrast : undefined,
+    saturation ? Konva.Filters.HSL : undefined,
+  ].filter((filter): filter is typeof Konva.Filters.Blur => Boolean(filter))
 
   return {
-    filters: [
-      Konva.Filters.Blur,
-      Konva.Filters.Brighten,
-      Konva.Filters.Contrast,
-      Konva.Filters.HSL,
-    ],
-    blurRadius: Math.max(0, Number(effects?.blur || 0)),
-    brightness: Number(effects?.brightness || 0) / 100,
-    contrast: Number(effects?.contrast || 0),
-    saturation: Number(effects?.saturation || 0) / 100,
+    filters,
+    blurRadius: blur,
+    brightness: brightness / 100,
+    contrast,
+    saturation: saturation / 100,
     luminance: 0,
   }
 }

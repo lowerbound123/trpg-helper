@@ -3,6 +3,7 @@ import Konva from 'konva'
 import { appendDebugLog, fontRecordFamily, readFileDataUrl, type LibraryIndex, type LibraryRecord } from './backend'
 import { hasVisibleEffects, konvaEffectConfig } from './effects'
 import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeLayer, TextLayer } from './handout'
+import { lineDash, polygonPoints } from './shape-rendering'
 
 type ImageCache = Record<string, HTMLImageElement>
 type CanvasSize = { width: number; height: number }
@@ -210,44 +211,6 @@ function shapeNode(layer: ShapeLayer) {
     width: layer.width,
     height: layer.height,
   })
-}
-
-function polygonPoints(layer: ShapeLayer) {
-  if (layer.shape === 'diamond') {
-    return [layer.width / 2, 0, layer.width, layer.height / 2, layer.width / 2, layer.height, 0, layer.height / 2]
-  }
-  if (layer.shape === 'hexagon-v') {
-    return [
-      layer.width / 2, 0,
-      layer.width, layer.height * 0.25,
-      layer.width, layer.height * 0.75,
-      layer.width / 2, layer.height,
-      0, layer.height * 0.75,
-      0, layer.height * 0.25,
-    ]
-  }
-  return [
-    layer.width * 0.25, 0,
-    layer.width * 0.75, 0,
-    layer.width, layer.height / 2,
-    layer.width * 0.75, layer.height,
-    layer.width * 0.25, layer.height,
-    0, layer.height / 2,
-  ]
-}
-
-function lineDash(layer: ShapeLayer) {
-  if (layer.lineStyle === 'dashed') {
-    return [
-      Math.max(18, layer.strokeWidth * 2.8),
-      Math.max(12, layer.strokeWidth * 1.9),
-    ]
-  }
-  if (layer.lineStyle === 'dotted') {
-    const gap = Math.max(10, layer.strokeWidth * 2.4)
-    return [0.001, gap]
-  }
-  return []
 }
 
 function addArrow(group: Konva.Group, layer: ShapeLayer, side: 'start' | 'end') {

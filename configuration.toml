@@ -1,0 +1,29 @@
+# Handout Generator local configuration.
+# Values here are read by the Vue/Tauri app at build time unless noted otherwise.
+
+[paths]
+data_dir = "./data"
+log_file = "./log.txt"
+
+[uploads]
+max_file_size = "100mb"
+
+[previews]
+thumbnail_max_edge_px = 256
+thumbnail_quality = 80
+target_max_bytes = 524288
+
+[finder]
+manager_height_px = 360
+compact_height_px = 300
+handout_grid_scale = 2
+background_grid_scale = 2
+
+[editor]
+snap_threshold_screen_px = 5
+max_snap_candidates = 24
+continuous_edit_commit_delay_ms = 450
+
+[export]
+default_scale = 1
+min_scale = 0.1

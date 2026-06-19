@@ -65,6 +65,7 @@ export const useEditorStore = defineStore('editor', () => {
   const projectFolders = ref<string[]>([])
   const library = ref<LibraryIndex>(emptyLibrary())
   const status = ref('Ready')
+  const continuousEditKey = ref<string>()
 
   const document = computed(() => history.value.current)
   const layers = computed(() => [...document.value.layers].sort((a, b) => b.zIndex - a.zIndex))
@@ -80,8 +81,18 @@ export const useEditorStore = defineStore('editor', () => {
   const canUndo = computed(() => history.value.canUndo.value)
   const canRedo = computed(() => history.value.canRedo.value)
 
-  function commit(mutator: (document: HandoutDocument) => HandoutDocument) {
-    history.value.commit(mutator)
+  function commit(mutator: (document: HandoutDocument) => HandoutDocument, options?: { merge?: boolean }) {
+    history.value.commit(mutator, options)
+  }
+
+  function commitContinuous(key: string, mutator: (document: HandoutDocument) => HandoutDocument) {
+    const merge = continuousEditKey.value === key
+    commit(mutator, { merge })
+    continuousEditKey.value = key
+  }
+
+  function endContinuousEdit(key?: string) {
+    if (!key || continuousEditKey.value === key) continuousEditKey.value = undefined
   }
 
   function selectLayer(layerId?: string) {
@@ -161,10 +172,33 @@ export const useEditorStore = defineStore('editor', () => {
     commit((doc) => ids.reduce((next, id) => updateLayer(next, id, patch), doc))
   }
 
+  function patchSelectedLayersContinuous(key: string, patch: LayerPatch) {
+    const ids = selectedLayerIds.value
+    if (!ids.length) return
+    commitContinuous(key, (doc) => ids.reduce((next, id) => updateLayer(next, id, patch), doc))
+  }
+
   function patchSelectedLayerEffect(kind: keyof LayerEffects, value: number) {
     const ids = selectedLayerIds.value
     if (!ids.length) return
     commit((doc) =>
+      ids.reduce((next, id) => {
+        const layer = next.layers.find((item) => item.id === id)
+        if (!layer) return next
+        return updateLayer(next, id, {
+          effects: {
+            ...layer.effects,
+            [kind]: value,
+          },
+        })
+      }, doc),
+    )
+  }
+
+  function patchSelectedLayerEffectContinuous(key: string, kind: keyof LayerEffects, value: number) {
+    const ids = selectedLayerIds.value
+    if (!ids.length) return
+    commitContinuous(key, (doc) =>
       ids.reduce((next, id) => {
         const layer = next.layers.find((item) => item.id === id)
         if (!layer) return next
@@ -208,6 +242,17 @@ export const useEditorStore = defineStore('editor', () => {
     commit((doc) => updateCanvas(doc, canvas))
   }
 
+  function patchCanvasEffectContinuous(key: string, kind: keyof LayerEffects, value: number) {
+    commitContinuous(key, (doc) =>
+      updateCanvas(doc, {
+        effects: {
+          ...doc.canvas.effects,
+          [kind]: value,
+        },
+      }),
+    )
+  }
+
   function renameDocument(title: string) {
     commit((doc) => ({
       ...doc,
@@ -224,10 +269,12 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function undo() {
+    endContinuousEdit()
     history.value.undo()
   }
 
   function redo() {
+    endContinuousEdit()
     history.value.redo()
   }
 
@@ -320,7 +367,7 @@ export const useEditorStore = defineStore('editor', () => {
 
   async function deleteProjectEntriesFromLibrary(entries: { ids: string[]; folders: string[] }) {
     projectFolders.value = await deleteProjectEntries(entries)
-    if (currentProjectId.value && entries.ids.includes(currentProjectId.value)) closeEditor()
+    if (currentProjectId.value && entries.ids.includes(currentProjectId.value)) closeEditor({ save: false })
     await refreshProjects()
     status.value = `Deleted handout item${entries.ids.length + entries.folders.length === 1 ? '' : 's'}`
   }
@@ -394,7 +441,10 @@ export const useEditorStore = defineStore('editor', () => {
     status.value = `Opened project ${payload.document.title}`
   }
 
-  function closeEditor() {
+  async function closeEditor(options: { save?: boolean } = {}) {
+    if (options.save !== false && (currentProjectId.value || projectDir.value.trim())) {
+      await saveCurrentProject()
+    }
     selectedLayerId.value = undefined
     selectedLayerIds.value = []
     view.value = 'manager'
@@ -439,9 +489,12 @@ export const useEditorStore = defineStore('editor', () => {
     openProjectFromPath,
     patchLayer,
     patchCanvas,
+    patchCanvasEffectContinuous,
     patchSelectedLayerEffect,
+    patchSelectedLayerEffectContinuous,
     patchSelectedLayer,
     patchSelectedLayers,
+    patchSelectedLayersContinuous,
     projects,
     projectFolders,
     projectDir,
@@ -471,6 +524,7 @@ export const useEditorStore = defineStore('editor', () => {
     toggleLayerSelection,
     undo,
     view,
+    endContinuousEdit,
     saveCurrentProject,
   }
 })

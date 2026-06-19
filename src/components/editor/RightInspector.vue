@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Download, Eye, FlipHorizontal, Italic, Strikethrough, Trash2, Underline } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { appConfiguration } from '@/lib/configuration'
 import { isTextLayer, useEditorStore } from '@/stores/editor'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
@@ -60,6 +61,29 @@ const commonUnderline = computed(() => commonTextValue((layer) => layer.underlin
 const commonStrikethrough = computed(() => commonTextValue((layer) => layer.strikethrough, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
+const continuousEditTimers = new Map<string, number>()
+
+function scheduleContinuousEditEnd(key: string) {
+  const existing = continuousEditTimers.get(key)
+  if (existing) window.clearTimeout(existing)
+  continuousEditTimers.set(key, window.setTimeout(() => {
+    editor.endContinuousEdit(key)
+    continuousEditTimers.delete(key)
+  }, appConfiguration.editor.continuousEditCommitDelayMs))
+}
+
+function endContinuousEdit(key: string) {
+  const existing = continuousEditTimers.get(key)
+  if (existing) window.clearTimeout(existing)
+  continuousEditTimers.delete(key)
+  editor.endContinuousEdit(key)
+}
+
+onBeforeUnmount(() => {
+  for (const timer of continuousEditTimers.values()) window.clearTimeout(timer)
+  continuousEditTimers.clear()
+  editor.endContinuousEdit()
+})
 
 function setFont(fontId: string) {
   const font = editor.resolveFont(fontId)
@@ -82,11 +106,15 @@ function sliderValue(value: number[] | undefined, fallback = 0) {
 }
 
 function patchOpacity(value: number[] | undefined) {
-  editor.patchSelectedLayers({ opacity: sliderValue(value, 100) / 100 })
+  const key = 'layer-opacity'
+  editor.patchSelectedLayersContinuous(key, { opacity: sliderValue(value, 100) / 100 })
+  scheduleContinuousEditEnd(key)
 }
 
 function patchEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number[] | undefined) {
-  editor.patchSelectedLayerEffect(kind, sliderValue(value))
+  const key = `layer-effect-${kind}`
+  editor.patchSelectedLayerEffectContinuous(key, kind, sliderValue(value))
+  scheduleContinuousEditEnd(key)
 }
 
 function patchBlur(value: number[] | undefined) {
@@ -106,12 +134,9 @@ function patchSaturation(value: number[] | undefined) {
 }
 
 function patchDocumentEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number[] | undefined) {
-  editor.patchCanvas({
-    effects: {
-      ...editor.document.canvas.effects,
-      [kind]: sliderValue(value),
-    },
-  })
+  const key = `document-effect-${kind}`
+  editor.patchCanvasEffectContinuous(key, kind, sliderValue(value))
+  scheduleContinuousEditEnd(key)
 }
 
 function patchDocumentBlur(value: number[] | undefined) {
@@ -199,6 +224,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="100"
                 :step="1"
                 @update:model-value="patchOpacity"
+                @value-commit="endContinuousEdit('layer-opacity')"
               />
           </label>
           <label>
@@ -340,6 +366,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="40"
                 :step="1"
                 @update:model-value="patchBlur"
+                @value-commit="endContinuousEdit('layer-effect-blur')"
               />
             </label>
             <label>
@@ -350,6 +377,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="100"
                 :step="1"
                 @update:model-value="patchBrightness"
+                @value-commit="endContinuousEdit('layer-effect-brightness')"
               />
             </label>
             <label>
@@ -360,6 +388,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="100"
                 :step="1"
                 @update:model-value="patchContrast"
+                @value-commit="endContinuousEdit('layer-effect-contrast')"
               />
             </label>
             <label>
@@ -370,6 +399,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="100"
                 :step="1"
                 @update:model-value="patchSaturation"
+                @value-commit="endContinuousEdit('layer-effect-saturation')"
               />
             </label>
           </div>
@@ -428,6 +458,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="40"
                 :step="1"
                 @update:model-value="patchDocumentBlur"
+                @value-commit="endContinuousEdit('document-effect-blur')"
               />
             </label>
             <label>
@@ -438,6 +469,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="100"
                 :step="1"
                 @update:model-value="patchDocumentBrightness"
+                @value-commit="endContinuousEdit('document-effect-brightness')"
               />
             </label>
             <label>
@@ -448,6 +480,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="100"
                 :step="1"
                 @update:model-value="patchDocumentContrast"
+                @value-commit="endContinuousEdit('document-effect-contrast')"
               />
             </label>
             <label>
@@ -458,6 +491,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :max="100"
                 :step="1"
                 @update:model-value="patchDocumentSaturation"
+                @value-commit="endContinuousEdit('document-effect-saturation')"
               />
             </label>
           </div>

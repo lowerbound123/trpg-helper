@@ -1,12 +1,13 @@
 import { computed, ref, type ComputedRef } from 'vue'
 
 export type HistoryMutator<T> = (current: T) => T
+export type HistoryCommitOptions = { merge?: boolean }
 
 export interface CommandHistory<T> {
   readonly canRedo: ComputedRef<boolean>
   readonly canUndo: ComputedRef<boolean>
   readonly current: T
-  commit: (mutator: HistoryMutator<T>) => void
+  commit: (mutator: HistoryMutator<T>, options?: HistoryCommitOptions) => void
   replace: (next: T) => void
   redo: () => void
   undo: () => void
@@ -27,11 +28,11 @@ export function createHistory<T>(initial: T): CommandHistory<T> {
     get current() {
       return present.value
     },
-    commit(mutator) {
+    commit(mutator, options) {
       const next = mutator(present.value)
       if (Object.is(next, present.value)) return
 
-      past.value = [...past.value, present.value]
+      if (!options?.merge) past.value = [...past.value, present.value]
       present.value = next
       future.value = []
     },

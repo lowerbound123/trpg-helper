@@ -39,7 +39,9 @@ import {
 } from '@/lib/backend'
 import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
 import type { HandoutDocument, HandoutLayer, ImageLayer, TextLayer } from '@/lib/handout'
+import { appConfiguration } from '@/lib/configuration'
 import { dataUrlByteSize, downloadFileName, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl } from '@/lib/render'
+import { containsRect } from '@/lib/selection'
 import { calculateSnapGuides, SNAP_THRESHOLD_SCREEN_PX, type GuideLine, type SnapLayer } from '@/lib/snapping'
 import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
@@ -61,7 +63,7 @@ const createMode = ref<'blank' | 'upload-background'>('blank')
 const isCreateDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
-const exportScale = ref(1)
+const exportScale = ref(appConfiguration.export.defaultScale)
 const exportLog = ref('')
 const exportProgress = ref(0)
 const fitScale = ref(1)
@@ -102,6 +104,9 @@ const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>
   asset: 0,
   font: 0,
 })
+const finderUploadConfig = { maxFileSize: appConfiguration.uploads.maxFileSize }
+const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.handoutGridScale) }
+const backgroundFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.backgroundGridScale) }
 let previewMaintenanceRunning = false
 let exportProgressTimer: number | undefined
 let lastSnapLogSignature = ''
@@ -658,13 +663,8 @@ function moveSelectionBox(event: KonvaEvent) {
   updateSelectionBox({ x: selectionBox.startX, y: selectionBox.startY }, point)
 }
 
-function intersectsSelection(layer: HandoutLayer) {
-  return !(
-    layer.x + layer.width < selectionBox.x
-    || layer.x > selectionBox.x + selectionBox.width
-    || layer.y + layer.height < selectionBox.y
-    || layer.y > selectionBox.y + selectionBox.height
-  )
+function containsSelection(layer: HandoutLayer) {
+  return containsRect(selectionBox, layer)
 }
 
 function stopSelectionBox() {
@@ -673,7 +673,7 @@ function stopSelectionBox() {
   if (hasArea) {
     editor.setLayerSelection(
       editor.document.layers
-        .filter((layer) => layer.visible && intersectsSelection(layer))
+        .filter((layer) => layer.visible && containsSelection(layer))
         .map((layer) => layer.id),
     )
     void updateTransformer()
@@ -1319,10 +1319,11 @@ watch(
 
         <VueFinder
           id="handout-finder"
-          class="manager-finder"
+          class="manager-finder large-grid-finder"
+          :style="handoutFinderStyle"
           :driver="finderDrivers.handout"
           :features="finderFeaturesForKind('handout')"
-          :config="{ maxFileSize: '100mb' }"
+          :config="finderUploadConfig"
           :context-menu-items="handoutContextMenuItems"
           selection-mode="single"
           selection-filter-type="both"
@@ -1350,10 +1351,11 @@ watch(
         <VueFinder
           :key="`background-${finderRevision.background}`"
           id="background-finder"
-          class="manager-finder compact-finder"
+          class="manager-finder compact-finder large-grid-finder"
+          :style="backgroundFinderStyle"
           :driver="finderDrivers.background"
           :features="finderFeaturesForKind('background')"
-          :config="{ maxFileSize: '100mb' }"
+          :config="finderUploadConfig"
           :context-menu-items="imageHandoutContextMenuItems.background"
           selection-mode="single"
           selection-filter-type="both"
@@ -1386,7 +1388,7 @@ watch(
           class="manager-finder compact-finder"
           :driver="finderDrivers.asset"
           :features="finderFeaturesForKind('asset')"
-          :config="{ maxFileSize: '100mb' }"
+          :config="finderUploadConfig"
           :context-menu-items="imageHandoutContextMenuItems.asset"
           selection-mode="single"
           selection-filter-type="both"
@@ -1419,7 +1421,7 @@ watch(
           class="manager-finder compact-finder"
           :driver="finderDrivers.font"
           :features="finderFeaturesForKind('font')"
-          :config="{ maxFileSize: '100mb' }"
+          :config="finderUploadConfig"
           selection-mode="single"
           selection-filter-type="both"
           @select="(items) => handleFinderSelect('font', items)"
@@ -1477,7 +1479,7 @@ watch(
             class="rail-finder"
             :driver="finderDrivers.asset"
             :features="finderFeaturesForKind('asset')"
-            :config="{ maxFileSize: '100mb' }"
+            :config="finderUploadConfig"
             selection-mode="single"
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('asset', path)"
@@ -1513,7 +1515,7 @@ watch(
             class="rail-finder"
             :driver="finderDrivers.font"
             :features="finderFeaturesForKind('font')"
-            :config="{ maxFileSize: '100mb' }"
+            :config="finderUploadConfig"
             selection-mode="single"
             selection-filter-type="both"
             @path-change="(path) => handleFinderPathChange('font', path)"

@@ -178,6 +178,14 @@ body,
   max-height: 300px;
 }
 
+.manager-finder.large-grid-finder {
+  --finder-grid-scale: 2;
+  --vf-grid-item-width: calc(120px * var(--finder-grid-scale));
+  --vf-grid-item-height: calc(120px * var(--finder-grid-scale));
+  --vf-grid-icon-size: calc(72px * var(--finder-grid-scale));
+  --vf-grid-item-gap: calc(12px * var(--finder-grid-scale));
+}
+
 .rail-finder {
   height: 220px;
   min-height: 220px;

@@ -101,6 +101,20 @@ describe('command history', () => {
     expect(history.current.layers[0]).toMatchObject({ text: 'A', x: 24 })
     expect('history' in history.current).toBe(false)
   })
+
+  it('can merge continuous updates into one undo step', () => {
+    const history = createHistory(createDefaultHandout('Continuous Test'))
+    history.commit((doc) => addTextLayer(doc, { text: 'A', x: 10, y: 12 }))
+    const layerId = history.current.layers[0].id
+
+    history.commit((doc) => updateLayer(doc, layerId, { x: 20 }))
+    history.commit((doc) => updateLayer(doc, layerId, { x: 30 }), { merge: true })
+    history.commit((doc) => updateLayer(doc, layerId, { x: 40 }), { merge: true })
+
+    expect(history.current.layers[0].x).toBe(40)
+    history.undo()
+    expect(history.current.layers[0].x).toBe(10)
+  })
 })
 
 describe('export helpers', () => {

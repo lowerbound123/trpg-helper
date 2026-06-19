@@ -108,6 +108,10 @@ const stageScale = computed(() => fitScale.value * canvasZoom.value)
 
 const canvasLayers = computed(() => [...editor.document.layers].sort((a, b) => a.zIndex - b.zIndex))
 
+const canvasSizeSignature = computed(() =>
+  `${editor.document.canvas.width}:${editor.document.canvas.height}`,
+)
+
 const layerEffectsSignature = computed(() =>
   editor.document.layers
     .map((layer) => `${layer.id}:${JSON.stringify(layer.effects || {})}`)
@@ -1093,7 +1097,7 @@ watch(
   { flush: 'post' },
 )
 watch(
-  () => [editor.document.canvas.width, editor.document.canvas.height],
+  canvasSizeSignature,
   () => nextTick(() => {
     resizeStageViewport()
     fitCanvasView('canvas-size')

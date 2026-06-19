@@ -169,7 +169,19 @@ function shapeNode(layer: ShapeLayer) {
       addLine(-offset)
       addLine(offset)
     } else {
-      addLine()
+      group.add(new Konva.Arrow({
+        points: [0, layer.height / 2, layer.width, layer.height / 2],
+        stroke: layer.stroke,
+        strokeWidth: layer.strokeWidth,
+        dash: lineDash(layer),
+        dashEnabled: layer.lineStyle === 'dashed' || layer.lineStyle === 'dotted',
+        lineCap: 'round',
+        lineJoin: 'round',
+        pointerAtBeginning: layer.lineStartArrow === 'triangle',
+        pointerAtEnding: layer.lineEndArrow === 'triangle',
+        pointerLength: Math.max(8, 16 * Math.max(0.25, layer.lineArrowSize || 1)),
+        pointerWidth: Math.max(8, 14 * Math.max(0.25, layer.lineArrowSize || 1)),
+      }))
     }
     addArrow(group, layer, 'start')
     addArrow(group, layer, 'end')
@@ -226,15 +238,18 @@ function polygonPoints(layer: ShapeLayer) {
 
 function lineDash(layer: ShapeLayer) {
   if (layer.lineStyle === 'dashed') return [18, 12]
-  if (layer.lineStyle === 'dotted') return [1, 10]
+  if (layer.lineStyle === 'dotted') {
+    const gap = Math.max(8, layer.strokeWidth * 3)
+    return [0.001, gap]
+  }
   return []
 }
 
 function addArrow(group: Konva.Group, layer: ShapeLayer, side: 'start' | 'end') {
   const kind = side === 'start' ? layer.lineStartArrow : layer.lineEndArrow
-  if (kind === 'none') return
+  if (kind === 'none' || (kind === 'triangle' && layer.lineStyle !== 'double')) return
   const y = layer.height / 2
-  const size = Math.max(8, layer.strokeWidth * 4) * Math.max(0.25, layer.lineArrowSize || 1)
+  const size = Math.max(8, 16 * Math.max(0.25, layer.lineArrowSize || 1))
   const x = side === 'start' ? 0 : layer.width
   const direction = side === 'start' ? 1 : -1
   if (kind === 'dot') {

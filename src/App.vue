@@ -199,6 +199,10 @@ const selectedOnlyTextLayer = computed(() =>
 const transformerConfig = computed(() => ({
   rotateEnabled: true,
   ignoreStroke: true,
+  keepRatio: false,
+  shiftBehavior: 'none',
+  rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
+  rotationSnapTolerance: 6,
   enabledAnchors: selectedOnlyLineShape.value
     ? ['middle-left', 'middle-right']
     : selectedOnlyTextLayer.value
@@ -680,6 +684,27 @@ function handleCanvasDragOver(event: DragEvent) {
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
 }
 
+function pointInsideStageFrame(clientX: number, clientY: number) {
+  const rect = stageFrameRef.value?.getBoundingClientRect()
+  if (!rect) return false
+  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+}
+
+function handleDocumentFontDragOver(event: DragEvent) {
+  if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function handleDocumentFontDrop(event: DragEvent) {
+  if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) return
+  event.preventDefault()
+  const font = editor.resolveFont(draggedFontId.value)
+  if (!font) return
+  createFontTextOnCanvas(font, canvasPointFromClient(event.clientX, event.clientY))
+  draggedFontId.value = ''
+}
+
 function startCanvasPan(event: PointerEvent) {
   if (event.button !== 1) return
   event.preventDefault()
@@ -853,7 +878,10 @@ function polygonPoints(layer: ShapeLayer) {
 
 function lineDash(layer: ShapeLayer) {
   if (layer.lineStyle === 'dashed') return [18, 12]
-  if (layer.lineStyle === 'dotted') return [1, 10]
+  if (layer.lineStyle === 'dotted') {
+    const gap = Math.max(8, layer.strokeWidth * 3)
+    return [0.001, gap]
+  }
   return []
 }
 
@@ -870,6 +898,9 @@ function lineHitConfig(layer: ShapeLayer) {
 }
 
 function lineVisualConfig(layer: ShapeLayer, offsetY = 0) {
+  const arrowScale = Math.max(0.25, layer.lineArrowSize || 1)
+  const pointerLength = Math.max(8, 16 * arrowScale)
+  const pointerWidth = Math.max(8, 14 * arrowScale)
   return {
     points: [0, layer.height / 2 + offsetY, layer.width, layer.height / 2 + offsetY],
     stroke: layer.stroke,
@@ -878,6 +909,10 @@ function lineVisualConfig(layer: ShapeLayer, offsetY = 0) {
     dashEnabled: layer.lineStyle === 'dashed' || layer.lineStyle === 'dotted',
     lineCap: 'round',
     lineJoin: 'round',
+    pointerAtBeginning: layer.lineStartArrow === 'triangle',
+    pointerAtEnding: layer.lineEndArrow === 'triangle',
+    pointerLength,
+    pointerWidth,
     listening: false,
   }
 }
@@ -900,7 +935,7 @@ function lineHandleConfig(layer: ShapeLayer) {
 
 function arrowPoints(kind: LineArrowKind, side: 'start' | 'end', layer: ShapeLayer) {
   const y = layer.height / 2
-  const size = Math.max(8, layer.strokeWidth * 4) * Math.max(0.25, layer.lineArrowSize || 1)
+  const size = Math.max(8, 16 * Math.max(0.25, layer.lineArrowSize || 1))
   const x = side === 'start' ? 0 : layer.width
   const direction = side === 'start' ? 1 : -1
   if (kind === 'triangle') {
@@ -946,6 +981,14 @@ function arrowLineConfig(kind: LineArrowKind, side: 'start' | 'end', layer: Shap
     closed: kind === 'triangle' || kind === 'notched',
     listening: false,
   }
+}
+
+function customArrowVisible(kind: LineArrowKind) {
+  return kind !== 'none' && kind !== 'dot' && kind !== 'triangle'
+}
+
+function manualArrowVisible(kind: LineArrowKind, layer: ShapeLayer) {
+  return customArrowVisible(kind) || (layer.lineStyle === 'double' && kind === 'triangle')
 }
 
 function shapePreviewPoints(kind: ShapeKind) {
@@ -1180,12 +1223,13 @@ function snapLayerFromDocumentLayer(layer: HandoutLayer): SnapLayer {
 }
 
 function snapLayerFromNode(layer: HandoutLayer, node: Konva.Node): SnapLayer {
+  const position = layerPositionFromNode(layer, node)
   return {
     ...snapLayerFromDocumentLayer(layer),
-    x: layerPositionFromNode(layer, node).x,
-    y: node.y(),
-    width: node.width(),
-    height: node.height(),
+    x: position.x,
+    y: position.y,
+    width: layer.width,
+    height: layer.height,
   }
 }
 
@@ -1705,6 +1749,8 @@ onMounted(async () => {
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
     void syncImages(editor.library)
     window.addEventListener('keydown', handleGlobalKeydown)
+    document.addEventListener('dragover', handleDocumentFontDragOver)
+    document.addEventListener('drop', handleDocumentFontDrop)
     resizeStageViewport()
     window.addEventListener('resize', resizeStageViewport)
     isBooting.value = false
@@ -1725,6 +1771,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  document.removeEventListener('dragover', handleDocumentFontDragOver)
+  document.removeEventListener('drop', handleDocumentFontDrop)
   window.removeEventListener('resize', resizeStageViewport)
   if (exportProgressTimer) window.clearInterval(exportProgressTimer)
   if (effectCacheRaf) window.cancelAnimationFrame(effectCacheRaf)
@@ -2027,8 +2075,11 @@ watch(
               @dragstart="startFontDrag(font, $event)"
               @dragend="clearFontDrag"
             >
-              <strong>{{ font.name }}</strong>
-              <span>Click to apply/create · drag for New Text · {{ font.tags.join(', ') || 'No tags' }}</span>
+              <span class="font-preview" :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
+              <span class="font-meta">
+                <strong>{{ font.name }}</strong>
+                <span>Click to apply/create · drag for New Text · {{ font.tags.join(', ') || 'No tags' }}</span>
+              </span>
             </button>
           </ScrollArea>
         </TabsContent>
@@ -2312,9 +2363,9 @@ watch(
                       <v-line :config="lineVisualConfig(layer, -lineDoubleOffset(layer))" />
                       <v-line :config="lineVisualConfig(layer, lineDoubleOffset(layer))" />
                     </template>
-                    <v-line v-else :config="lineVisualConfig(layer)" />
+                    <v-arrow v-else :config="lineVisualConfig(layer)" />
                     <v-line
-                      v-if="layer.lineStartArrow !== 'none' && layer.lineStartArrow !== 'dot'"
+                      v-if="manualArrowVisible(layer.lineStartArrow, layer)"
                       :config="arrowLineConfig(layer.lineStartArrow, 'start', layer)"
                     />
                     <v-circle
@@ -2322,7 +2373,7 @@ watch(
                       :config="arrowDotConfig('start', layer)"
                     />
                     <v-line
-                      v-if="layer.lineEndArrow !== 'none' && layer.lineEndArrow !== 'dot'"
+                      v-if="manualArrowVisible(layer.lineEndArrow, layer)"
                       :config="arrowLineConfig(layer.lineEndArrow, 'end', layer)"
                     />
                     <v-circle

@@ -198,14 +198,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
               <Input type="number" :model-value="activeLayer.y" @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })" />
             </label>
             <label>
-              Width
-              <Input type="number" :model-value="activeLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
-            </label>
-            <label>
-              Height
-              <Input type="number" :model-value="activeLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
-            </label>
-            <label>
               Rotation
               <Input
                 type="number"
@@ -213,6 +205,14 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 placeholder="Mixed"
                 @update:model-value="(value) => editor.patchSelectedLayers({ rotation: Number(value) || 0 })"
               />
+            </label>
+            <label>
+              Width
+              <Input type="number" :model-value="activeLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
+            </label>
+            <label>
+              Height
+              <Input type="number" :model-value="activeLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
             </label>
             <label>
               Flip

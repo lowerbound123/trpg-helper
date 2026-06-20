@@ -8,10 +8,33 @@ export type BlendMode =
   | 'darken'
   | 'lighten'
 
-export type LayerType = 'image' | 'text' | 'shape'
-export type ShapeKind = 'rect' | 'round-rect' | 'ellipse' | 'diamond' | 'hexagon-h' | 'hexagon-v' | 'line'
+export type LayerType = 'image' | 'text' | 'shape' | 'paint'
+export type ShapeKind =
+  | 'rect'
+  | 'round-rect'
+  | 'ellipse'
+  | 'diamond'
+  | 'hexagon-h'
+  | 'hexagon-v'
+  | 'line'
+  | 'quadratic-curve'
+  | 'cubic-bezier'
 export type LineArrowKind = 'none' | 'triangle' | 'notched' | 'bar' | 'dot'
 export type LineStyleKind = 'solid' | 'dashed' | 'dotted' | 'double'
+export type PaintMode = 'brush' | 'eraser'
+
+export type CanvasPoint = {
+  x: number
+  y: number
+}
+
+export type CurvePoints = {
+  start: CanvasPoint
+  control?: CanvasPoint
+  control1?: CanvasPoint
+  control2?: CanvasPoint
+  end: CanvasPoint
+}
 
 export interface CanvasSettings {
   width: number
@@ -77,9 +100,27 @@ export interface ShapeLayer extends BaseLayer {
   lineEndArrow: LineArrowKind
   lineArrowSize: number
   lineStyle: LineStyleKind
+  curvePoints?: CurvePoints
 }
 
-export type HandoutLayer = ImageLayer | TextLayer | ShapeLayer
+export interface PaintStroke {
+  id: string
+  points: number[]
+  strokeWidth: number
+  color: string
+  tension: number
+  mode: PaintMode
+}
+
+export interface PaintLayer extends BaseLayer {
+  type: 'paint'
+  strokes: PaintStroke[]
+  brushColor: string
+  brushWidth: number
+  brushTension: number
+}
+
+export type HandoutLayer = ImageLayer | TextLayer | ShapeLayer | PaintLayer
 
 export interface HandoutDocument {
   schemaVersion: 1
@@ -124,12 +165,25 @@ export type NewShapeLayerInput = {
   lineEndArrow?: LineArrowKind
   lineArrowSize?: number
   lineStyle?: LineStyleKind
+  curvePoints?: CurvePoints
+}
+
+export type NewPaintLayerInput = {
+  name?: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  brushColor?: string
+  brushWidth?: number
+  brushTension?: number
 }
 
 export type LayerPatch = Partial<
   Omit<ImageLayer, 'id' | 'type' | 'zIndex'>
   & Omit<TextLayer, 'id' | 'type' | 'zIndex'>
   & Omit<ShapeLayer, 'id' | 'type' | 'zIndex'>
+  & Omit<PaintLayer, 'id' | 'type' | 'zIndex'>
 >
 
 export const defaultEffects = (): LayerEffects => ({
@@ -158,6 +212,7 @@ export function normalizeHandoutDocument(document: HandoutDocument): HandoutDocu
       flipX: layer.flipX ?? false,
       effects: normalizeEffects(layer.effects),
       ...shapeDefaults(layer),
+      ...paintDefaults(layer),
     })) as HandoutLayer[],
   }
 }
@@ -173,6 +228,17 @@ function shapeDefaults(layer: HandoutLayer): Partial<ShapeLayer> {
     lineEndArrow: layer.lineEndArrow ?? 'none',
     lineArrowSize: layer.lineArrowSize ?? 1,
     lineStyle: layer.lineStyle ?? 'solid',
+    curvePoints: isCurveShape(layer.shape) ? normalizeCurvePoints(layer) : layer.curvePoints,
+  }
+}
+
+function paintDefaults(layer: HandoutLayer): Partial<PaintLayer> {
+  if (layer.type !== 'paint') return {}
+  return {
+    strokes: layer.strokes ?? [],
+    brushColor: layer.brushColor ?? '#111827',
+    brushWidth: layer.brushWidth ?? 6,
+    brushTension: layer.brushTension ?? 0.35,
   }
 }
 
@@ -186,6 +252,51 @@ const normalizeZIndex = (layers: HandoutLayer[]): HandoutLayer[] =>
 
 function shapeNameBase(shape: ShapeKind) {
   return shape
+}
+
+export function isCurveShape(shape: ShapeKind) {
+  return shape === 'quadratic-curve' || shape === 'cubic-bezier'
+}
+
+function defaultShapeSize(shape: ShapeKind) {
+  if (shape === 'line') return { width: 320, height: 24 }
+  if (shape === 'quadratic-curve') return { width: 320, height: 180 }
+  if (shape === 'cubic-bezier') return { width: 360, height: 220 }
+  return { width: 220, height: 160 }
+}
+
+function defaultCurvePoints(shape: ShapeKind, width: number, height: number): CurvePoints | undefined {
+  if (shape === 'quadratic-curve') {
+    return {
+      start: { x: 0, y: height * 0.75 },
+      control: { x: width * 0.5, y: height * 0.08 },
+      end: { x: width, y: height * 0.75 },
+    }
+  }
+  if (shape === 'cubic-bezier') {
+    return {
+      start: { x: 0, y: height * 0.65 },
+      control1: { x: width * 0.3, y: height * 0.05 },
+      control2: { x: width * 0.72, y: height * 0.95 },
+      end: { x: width, y: height * 0.35 },
+    }
+  }
+  return undefined
+}
+
+function normalizeCurvePoints(layer: ShapeLayer): CurvePoints | undefined {
+  if (!isCurveShape(layer.shape)) return undefined
+  const width = layer.width || defaultShapeSize(layer.shape).width
+  const height = layer.height || defaultShapeSize(layer.shape).height
+  const fallback = defaultCurvePoints(layer.shape, width, height)
+  if (!fallback) return undefined
+  return {
+    start: layer.curvePoints?.start ?? fallback.start,
+    control: layer.shape === 'quadratic-curve' ? layer.curvePoints?.control ?? fallback.control : undefined,
+    control1: layer.shape === 'cubic-bezier' ? layer.curvePoints?.control1 ?? fallback.control1 : undefined,
+    control2: layer.shape === 'cubic-bezier' ? layer.curvePoints?.control2 ?? fallback.control2 : undefined,
+    end: layer.curvePoints?.end ?? fallback.end,
+  }
 }
 
 function nextLayerName(layers: HandoutLayer[], base: string) {
@@ -277,6 +388,9 @@ export function addTextLayer(document: HandoutDocument, input: NewTextLayerInput
 }
 
 export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInput): HandoutDocument {
+  const size = defaultShapeSize(input.shape)
+  const width = input.width ?? size.width
+  const height = input.height ?? size.height
   const layer: ShapeLayer = {
     id: uuidv4(),
     type: 'shape',
@@ -284,9 +398,9 @@ export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInp
     shape: input.shape,
     x: input.x ?? 180,
     y: input.y ?? 160,
-    width: input.width ?? (input.shape === 'line' ? 320 : 220),
-    height: input.height ?? (input.shape === 'line' ? 24 : 160),
-    fill: input.fill ?? (input.shape === 'line' ? 'rgba(0,0,0,0)' : 'rgba(14,165,233,0.12)'),
+    width,
+    height,
+    fill: input.fill ?? (input.shape === 'line' || isCurveShape(input.shape) ? 'rgba(0,0,0,0)' : 'rgba(14,165,233,0.12)'),
     stroke: input.stroke ?? '#0f766e',
     strokeWidth: input.strokeWidth ?? 3,
     cornerRadius: input.cornerRadius ?? 16,
@@ -294,6 +408,7 @@ export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInp
     lineEndArrow: input.lineEndArrow ?? 'none',
     lineArrowSize: input.lineArrowSize ?? 1,
     lineStyle: input.lineStyle ?? 'solid',
+    curvePoints: input.curvePoints ?? defaultCurvePoints(input.shape, width, height),
     rotation: 0,
     flipX: false,
     opacity: 1,
@@ -307,6 +422,52 @@ export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInp
   return touch({
     ...document,
     layers: [...document.layers, layer],
+  })
+}
+
+export function addPaintLayer(document: HandoutDocument, input: NewPaintLayerInput = {}): HandoutDocument {
+  const layer: PaintLayer = {
+    id: uuidv4(),
+    type: 'paint',
+    name: input.name ?? nextLayerName(document.layers, 'paint'),
+    x: input.x ?? 0,
+    y: input.y ?? 0,
+    width: input.width ?? document.canvas.width,
+    height: input.height ?? document.canvas.height,
+    rotation: 0,
+    flipX: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    visible: true,
+    locked: false,
+    zIndex: document.layers.length,
+    effects: defaultEffects(),
+    strokes: [],
+    brushColor: input.brushColor ?? '#111827',
+    brushWidth: input.brushWidth ?? 6,
+    brushTension: input.brushTension ?? 0.35,
+  }
+
+  return touch({
+    ...document,
+    layers: [...document.layers, layer],
+  })
+}
+
+export function appendPaintStroke(
+  document: HandoutDocument,
+  layerId: string,
+  stroke: PaintStroke,
+): HandoutDocument {
+  return touch({
+    ...document,
+    layers: document.layers.map((layer) => {
+      if (layer.id !== layerId || layer.type !== 'paint') return layer
+      return {
+        ...layer,
+        strokes: [...layer.strokes, stroke],
+      }
+    }),
   })
 }
 

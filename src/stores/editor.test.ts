@@ -54,4 +54,66 @@ describe('editor multi-selection state', () => {
     expect(editor.document.layers[0].effects).toEqual({ brightness: 42, contrast: 1, saturation: 2, blur: 3 })
     expect(editor.document.layers[1].effects).toEqual({ brightness: 42, contrast: 4, saturation: 5, blur: 6 })
   })
+
+  it('auto-creates a paint layer for the first stroke and undoes the stroke as one step', () => {
+    const editor = useEditorStore()
+
+    editor.appendStrokeToPaintLayer({
+      id: 'stroke-1',
+      points: [10, 12, 20, 24],
+      strokeWidth: 6,
+      color: '#111827',
+      tension: 0.35,
+      mode: 'brush',
+    })
+
+    expect(editor.document.layers).toHaveLength(1)
+    expect(editor.document.layers[0]).toMatchObject({
+      type: 'paint',
+      strokes: [{ id: 'stroke-1' }],
+    })
+    expect(editor.selectedLayerId).toBe(editor.document.layers[0].id)
+
+    editor.undo()
+    expect(editor.document.layers).toEqual([])
+  })
+
+  it('appends brush and eraser strokes to the selected paint layer', () => {
+    const editor = useEditorStore()
+    editor.addPaint()
+    const paintId = editor.selectedLayerId!
+
+    editor.appendStrokeToPaintLayer({
+      id: 'stroke-1',
+      points: [0, 0, 10, 10],
+      strokeWidth: 4,
+      color: '#000000',
+      tension: 0,
+      mode: 'brush',
+    })
+    editor.appendStrokeToPaintLayer({
+      id: 'stroke-2',
+      points: [5, 5, 8, 8],
+      strokeWidth: 10,
+      color: '#000000',
+      tension: 0,
+      mode: 'eraser',
+    })
+
+    expect(editor.document.layers).toHaveLength(1)
+    expect(editor.document.layers[0].id).toBe(paintId)
+    expect(editor.document.layers[0]).toMatchObject({
+      type: 'paint',
+      strokes: [
+        { id: 'stroke-1', mode: 'brush' },
+        { id: 'stroke-2', mode: 'eraser' },
+      ],
+    })
+
+    editor.undo()
+    expect(editor.document.layers[0]).toMatchObject({
+      type: 'paint',
+      strokes: [{ id: 'stroke-1' }],
+    })
+  })
 })

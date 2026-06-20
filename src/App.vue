@@ -5,13 +5,18 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Brush,
+  Eraser,
   Minus,
   Eye,
   EyeOff,
   Layers,
+  MousePointer2,
+  PenTool,
   Plus,
   Redo2,
   Save,
+  Spline,
   Trash2,
   Type,
   Undo2,
@@ -42,9 +47,11 @@ import {
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
 import { hasVisibleEffects } from '@/lib/effects'
 import { isEditableTarget } from '@/lib/dom'
-import type { HandoutLayer, ImageLayer, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
+import type { CanvasPoint, CurvePoints, HandoutLayer, ImageLayer, PaintLayer, PaintStroke, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
+import { isCurveShape } from '@/lib/handout'
 import { appConfiguration } from '@/lib/configuration'
 import { layerKonvaConfig, layerPositionFromNode, textKonvaConfig } from '@/lib/layer-rendering'
+import { paintKonvaConfig, paintStrokeLineConfig } from '@/lib/paint-rendering'
 import { dataUrlByteSize, renderHandoutPreviewToDataUrl } from '@/lib/render'
 import { containsRect } from '@/lib/selection'
 import {
@@ -62,11 +69,13 @@ import {
 import { shapeItems } from '@/lib/shape-items'
 import { calculateSnapGuides, SNAP_THRESHOLD_SCREEN_PX, type GuideLine, type SnapLayer } from '@/lib/snapping'
 import { partitionUploadFiles, type UploadKind } from '@/lib/upload-validation'
-import { isImageLayer, isTextLayer, useEditorStore } from '@/stores/editor'
+import { isImageLayer, isPaintLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 type SelectionBox = { visible: boolean; startX: number; startY: number; x: number; y: number; width: number; height: number }
+type EditorTool = 'select' | 'quadratic-curve' | 'cubic-bezier' | 'brush' | 'eraser'
+type CurvePointKey = 'start' | 'control' | 'control1' | 'control2' | 'end'
 
 Konva.dragButtons = [0]
 const PREVIEW_TARGET_BYTES = 512 * 1024
@@ -84,6 +93,8 @@ const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const guideLines = ref<GuideLine[]>([])
 const selectionBox = reactive<SelectionBox>({ visible: false, startX: 0, startY: 0, x: 0, y: 0, width: 0, height: 0 })
+const activeTool = ref<EditorTool>('select')
+const draftStroke = ref<PaintStroke>()
 const multiDragState = reactive({
   active: false,
   layerId: '',
@@ -187,6 +198,11 @@ const {
   logViewport,
 })
 const canvasLayers = computed(() => [...editor.document.layers].sort((a, b) => a.zIndex - b.zIndex))
+const selectedCurveLayers = computed(() =>
+  canvasLayers.value.filter((layer): layer is ShapeLayer =>
+    isShapeLayer(layer) && isCurveShape(layer.shape) && editor.selectedLayerIds.includes(layer.id),
+  ),
+)
 
 const canvasSizeSignature = computed(() =>
   `${editor.document.canvas.width}:${editor.document.canvas.height}`,
@@ -614,7 +630,10 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 }
 
 function layerConfig(layer: HandoutLayer) {
-  return layerKonvaConfig(layer)
+  return {
+    ...layerKonvaConfig(layer),
+    draggable: activeTool.value === 'select' && !layer.locked,
+  }
 }
 
 function textConfig(layer: TextLayer) {
@@ -625,6 +644,161 @@ function textConfig(layer: TextLayer) {
 
 function shapeConfig(layer: ShapeLayer) {
   return shapeKonvaConfig(layer, layerConfig(layer))
+}
+
+function paintConfig(layer: PaintLayer) {
+  return paintKonvaConfig(layer, layerConfig(layer))
+}
+
+function setActiveTool(tool: EditorTool) {
+  activeTool.value = tool
+  if (tool === 'quadratic-curve' || tool === 'cubic-bezier') {
+    editor.selectLayer(undefined)
+    void updateTransformer()
+  }
+}
+
+function activePaintDefaults() {
+  const layer = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
+  return {
+    color: layer?.brushColor ?? '#111827',
+    width: layer?.brushWidth ?? 6,
+    tension: layer?.brushTension ?? 0.35,
+  }
+}
+
+function localizeStrokePoints(points: number[], layer?: PaintLayer) {
+  if (!layer) return points
+  const next: number[] = []
+  for (let index = 0; index < points.length; index += 2) {
+    next.push(points[index] - layer.x, points[index + 1] - layer.y)
+  }
+  return next
+}
+
+function startPaintStroke(event: KonvaEvent) {
+  if (event.evt?.button !== 0) return false
+  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
+  const defaults = activePaintDefaults()
+  draftStroke.value = {
+    id: crypto.randomUUID(),
+    points: [point.x, point.y],
+    strokeWidth: defaults.width,
+    color: defaults.color,
+    tension: defaults.tension,
+    mode: activeTool.value === 'eraser' ? 'eraser' : 'brush',
+  }
+  event.cancelBubble = true
+  return true
+}
+
+function movePaintStroke(event: KonvaEvent) {
+  if (!draftStroke.value || !event.evt) return false
+  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
+  const points = draftStroke.value.points
+  const lastX = points.at(-2)
+  const lastY = points.at(-1)
+  if (lastX !== undefined && lastY !== undefined && Math.hypot(point.x - lastX, point.y - lastY) < 0.5) return true
+  draftStroke.value = {
+    ...draftStroke.value,
+    points: [...points, point.x, point.y],
+  }
+  event.cancelBubble = true
+  return true
+}
+
+function stopPaintStroke() {
+  if (!draftStroke.value) return false
+  const selectedPaint = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
+  const stroke = {
+    ...draftStroke.value,
+    points: localizeStrokePoints(draftStroke.value.points, selectedPaint),
+  }
+  if (stroke.points.length === 2) stroke.points = [...stroke.points, stroke.points[0] + 0.1, stroke.points[1] + 0.1]
+  editor.appendStrokeToPaintLayer(stroke)
+  draftStroke.value = undefined
+  void updateTransformer()
+  return true
+}
+
+function createCurveAt(tool: Extract<EditorTool, 'quadratic-curve' | 'cubic-bezier'>, point: CanvasPoint) {
+  editor.addShape(tool, {
+    x: Math.max(0, Math.round(point.x - (tool === 'quadratic-curve' ? 160 : 180))),
+    y: Math.max(0, Math.round(point.y - (tool === 'quadratic-curve' ? 90 : 110))),
+  })
+  activeTool.value = 'select'
+  void updateTransformer()
+}
+
+function curvePointKeys(layer: ShapeLayer): CurvePointKey[] {
+  if (layer.shape === 'quadratic-curve') return ['start', 'control', 'end']
+  if (layer.shape === 'cubic-bezier') return ['start', 'control1', 'control2', 'end']
+  return []
+}
+
+function curvePoint(layer: ShapeLayer, key: CurvePointKey) {
+  return layer.curvePoints?.[key]
+}
+
+function curveHandleConfig(layer: ShapeLayer, key: CurvePointKey) {
+  const point = curvePoint(layer, key)
+  return {
+    x: layer.x + (point?.x ?? 0),
+    y: layer.y + (point?.y ?? 0),
+    radius: 5 / stageScale.value,
+    fill: key === 'start' || key === 'end' ? '#14b8a6' : '#f59e0b',
+    stroke: '#ffffff',
+    strokeWidth: 1.5 / stageScale.value,
+    draggable: true,
+  }
+}
+
+function curveGuideConfig(layer: ShapeLayer) {
+  const points = layer.curvePoints
+  if (!points) return []
+  if (layer.shape === 'quadratic-curve' && points.control) {
+    return [
+      [points.start, points.control],
+      [points.control, points.end],
+    ]
+  }
+  if (layer.shape === 'cubic-bezier' && points.control1 && points.control2) {
+    return [
+      [points.start, points.control1],
+      [points.control2, points.end],
+    ]
+  }
+  return []
+}
+
+function curveGuideLineConfig(layer: ShapeLayer, guide: CanvasPoint[]) {
+  return {
+    points: guide.flatMap((point) => [layer.x + point.x, layer.y + point.y]),
+    stroke: '#94a3b8',
+    strokeWidth: 1 / stageScale.value,
+    dash: [4 / stageScale.value, 4 / stageScale.value],
+    listening: false,
+  }
+}
+
+function moveCurvePoint(layer: ShapeLayer, key: CurvePointKey, event: KonvaEvent) {
+  const node = event.target
+  const point = {
+    x: Math.round(node.x() - layer.x),
+    y: Math.round(node.y() - layer.y),
+  }
+  const curvePoints: CurvePoints = {
+    ...(layer.curvePoints ?? {
+      start: { x: 0, y: 0 },
+      end: { x: layer.width, y: layer.height },
+    }),
+    [key]: point,
+  }
+  editor.patchLayerContinuous(layer.id, `curve-point-${layer.id}-${key}`, { curvePoints })
+}
+
+function endCurvePointMove(layer: ShapeLayer, key: CurvePointKey) {
+  editor.endContinuousEdit(`curve-point-${layer.id}-${key}`)
 }
 
 async function logTextLayerMetrics(reason: string) {
@@ -668,6 +842,10 @@ async function autoResizeTextLayerHeights() {
 }
 
 function selectCanvasLayer(layerId: string, event?: KonvaEvent) {
+  if (activeTool.value !== 'select') {
+    if (event) event.cancelBubble = true
+    return
+  }
   if (event) event.cancelBubble = true
   if (event?.evt?.metaKey || event?.evt?.shiftKey) editor.toggleLayerSelection(layerId)
   else editor.selectLayer(layerId)
@@ -701,6 +879,12 @@ function onLayerDragStart(layer: HandoutLayer, event: KonvaEvent) {
 }
 
 function handleStagePointer(event: KonvaEvent) {
+  if (activeTool.value === 'quadratic-curve' || activeTool.value === 'cubic-bezier') {
+    if (!event.evt) return
+    createCurveAt(activeTool.value, canvasPointFromClient(event.evt.clientX, event.evt.clientY))
+    return
+  }
+  if (activeTool.value !== 'select') return
   if (suppressNextStageClick) {
     suppressNextStageClick = false
     return
@@ -721,6 +905,11 @@ function updateSelectionBox(from: { x: number; y: number }, to: { x: number; y: 
 }
 
 function startSelectionBox(event: KonvaEvent) {
+  if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
+    startPaintStroke(event)
+    return
+  }
+  if (activeTool.value !== 'select') return
   if (event.evt?.button !== 0 || event.target.name() !== 'canvas-background') return
   const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
   selectionBox.visible = true
@@ -730,6 +919,10 @@ function startSelectionBox(event: KonvaEvent) {
 }
 
 function moveSelectionBox(event: KonvaEvent) {
+  if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
+    movePaintStroke(event)
+    return
+  }
   if (!selectionBox.visible || !event.evt) return
   const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
   updateSelectionBox({ x: selectionBox.startX, y: selectionBox.startY }, point)
@@ -740,6 +933,10 @@ function containsSelection(layer: HandoutLayer) {
 }
 
 function stopSelectionBox() {
+  if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
+    stopPaintStroke()
+    return
+  }
   if (!selectionBox.visible) return
   const hasArea = selectionBox.width > 3 / stageScale.value || selectionBox.height > 3 / stageScale.value
   if (hasArea) {
@@ -1756,6 +1953,29 @@ watch(
           </Button>
         </div>
         <Separator orientation="vertical" />
+        <div class="topbar-actions tool-actions">
+          <Button size="sm" variant="outline" :data-active="activeTool === 'select'" @click="setActiveTool('select')">
+            <MousePointer2 data-icon="inline-start" />
+            Select
+          </Button>
+          <Button size="sm" variant="outline" :data-active="activeTool === 'quadratic-curve'" @click="setActiveTool('quadratic-curve')">
+            <Spline data-icon="inline-start" />
+            Quadratic
+          </Button>
+          <Button size="sm" variant="outline" :data-active="activeTool === 'cubic-bezier'" @click="setActiveTool('cubic-bezier')">
+            <PenTool data-icon="inline-start" />
+            Cubic
+          </Button>
+          <Button size="sm" variant="outline" :data-active="activeTool === 'brush'" @click="setActiveTool('brush')">
+            <Brush data-icon="inline-start" />
+            Brush
+          </Button>
+          <Button size="sm" variant="outline" :data-active="activeTool === 'eraser'" @click="setActiveTool('eraser')">
+            <Eraser data-icon="inline-start" />
+            Eraser
+          </Button>
+        </div>
+        <Separator orientation="vertical" />
         <div class="topbar-actions">
           <Button variant="outline" :disabled="!editor.canUndo" @click="editor.undo()">
             <Undo2 data-icon="inline-start" />
@@ -1786,7 +2006,12 @@ watch(
         <div
           ref="stageFrameRef"
           class="stage-frame"
-          :class="{ 'stage-frame-dropping': draggedAssetId || draggedFontId || draggedShapeKind, 'stage-frame-panning': panState.active }"
+          :class="{
+            'stage-frame-dropping': draggedAssetId || draggedFontId || draggedShapeKind,
+            'stage-frame-panning': panState.active,
+            'stage-frame-drawing': activeTool === 'brush' || activeTool === 'eraser',
+            'stage-frame-placing': activeTool === 'quadratic-curve' || activeTool === 'cubic-bezier',
+          }"
           @dragenter.capture="handleCanvasDragOver"
           @dragover.capture="handleCanvasDragOver"
           @drop.capture="handleCanvasDrop"
@@ -1890,6 +2115,18 @@ watch(
                     @transform="onTransform(layer, $event)"
                     @transformend="onTransformEnd(layer)"
                   />
+                  <v-shape
+                    v-else-if="isShapeLayer(layer) && isCurveShape(layer.shape)"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="shapeConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
+                    @transformend="onTransformEnd(layer)"
+                  />
                   <v-group
                     v-else-if="isShapeLayer(layer) && layer.shape === 'line'"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
@@ -1926,7 +2163,40 @@ watch(
                     />
                     <v-circle v-if="showLineHandle(layer, editor.selectedLayerIds)" :config="lineHandleConfig(layer)" />
                   </v-group>
+                  <v-shape
+                    v-else-if="isPaintLayer(layer)"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="paintConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
+                    @transformend="onTransformEnd(layer)"
+                  />
                 </template>
+                <template
+                  v-for="layer in selectedCurveLayers"
+                  :key="`curve-controls-${layer.id}`"
+                >
+                  <v-line
+                    v-for="(guide, index) in curveGuideConfig(layer)"
+                    :key="`curve-guide-${layer.id}-${index}`"
+                    :config="curveGuideLineConfig(layer, guide)"
+                  />
+                  <v-circle
+                    v-for="key in curvePointKeys(layer)"
+                    :key="`curve-handle-${layer.id}-${key}`"
+                    :config="curveHandleConfig(layer, key)"
+                    @dragmove="moveCurvePoint(layer, key, $event)"
+                    @dragend="endCurvePointMove(layer, key)"
+                  />
+                </template>
+                <v-line
+                  v-if="draftStroke"
+                  :config="paintStrokeLineConfig(draftStroke)"
+                />
                 <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">
                   <v-line
                     v-if="guide.orientation === 'vertical'"

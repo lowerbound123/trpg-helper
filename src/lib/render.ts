@@ -2,8 +2,10 @@ import Konva from 'konva'
 
 import { appendDebugLog, fontRecordFamily, readFileDataUrl, type LibraryIndex, type LibraryRecord } from './backend'
 import { hasVisibleEffects, konvaEffectConfig } from './effects'
-import type { HandoutDocument, HandoutLayer, ImageLayer, ShapeLayer, TextLayer } from './handout'
-import { lineDash, polygonPoints } from './shape-rendering'
+import type { HandoutDocument, HandoutLayer, ImageLayer, PaintLayer, ShapeLayer, TextLayer } from './handout'
+import { isCurveShape } from './handout'
+import { paintSceneFunc } from './paint-rendering'
+import { curveSceneFunc, lineDash, polygonPoints } from './shape-rendering'
 
 type ImageCache = Record<string, HTMLImageElement>
 type CanvasSize = { width: number; height: number }
@@ -27,6 +29,10 @@ function isTextLayer(layer: HandoutLayer): layer is TextLayer {
 
 function isShapeLayer(layer: HandoutLayer): layer is ShapeLayer {
   return layer.type === 'shape'
+}
+
+function isPaintLayer(layer: HandoutLayer): layer is PaintLayer {
+  return layer.type === 'paint'
 }
 
 function fontFamily(font: LibraryRecord) {
@@ -142,6 +148,15 @@ function shapeNode(layer: ShapeLayer) {
     strokeWidth: layer.strokeWidth,
   }
 
+  if (isCurveShape(layer.shape)) {
+    return new Konva.Shape({
+      ...config,
+      width: layer.width,
+      height: layer.height,
+      sceneFunc: curveSceneFunc(layer),
+    })
+  }
+
   if (layer.shape === 'ellipse') {
     return new Konva.Ellipse({
       ...config,
@@ -210,6 +225,13 @@ function shapeNode(layer: ShapeLayer) {
     ...config,
     width: layer.width,
     height: layer.height,
+  })
+}
+
+function paintNode(layer: PaintLayer) {
+  return new Konva.Shape({
+    ...commonConfig(layer),
+    sceneFunc: paintSceneFunc(layer),
   })
 }
 
@@ -373,6 +395,9 @@ async function renderHandoutStage(
     }
     if (isShapeLayer(item)) {
       content.add(prepareEffectNode(shapeNode(item), item.effects))
+    }
+    if (isPaintLayer(item)) {
+      content.add(prepareEffectNode(paintNode(item), item.effects))
     }
   }
 

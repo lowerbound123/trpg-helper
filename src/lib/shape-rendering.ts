@@ -1,8 +1,19 @@
 import type { LineArrowKind, ShapeKind, ShapeLayer } from './handout'
+import { isCurveShape } from './handout'
 
 type ShapeBaseConfig = Record<string, unknown>
 
 export function shapeKonvaConfig(layer: ShapeLayer, base: ShapeBaseConfig) {
+  if (isCurveShape(layer.shape)) {
+    return {
+      ...base,
+      fill: layer.fill,
+      stroke: layer.stroke,
+      strokeWidth: layer.strokeWidth,
+      sceneFunc: curveSceneFunc(layer),
+    }
+  }
+
   if (layer.shape === 'ellipse') {
     return {
       ...base,
@@ -46,6 +57,28 @@ export function shapeKonvaConfig(layer: ShapeLayer, base: ShapeBaseConfig) {
     fill: layer.fill,
     stroke: layer.stroke,
     strokeWidth: layer.strokeWidth,
+  }
+}
+
+export function curveSceneFunc(layer: ShapeLayer) {
+  return (context: any, shape: unknown) => {
+    const points = layer.curvePoints
+    if (!points) return
+    context.beginPath()
+    context.moveTo(points.start.x, points.start.y)
+    if (layer.shape === 'quadratic-curve' && points.control) {
+      context.quadraticCurveTo(points.control.x, points.control.y, points.end.x, points.end.y)
+    } else if (layer.shape === 'cubic-bezier' && points.control1 && points.control2) {
+      context.bezierCurveTo(
+        points.control1.x,
+        points.control1.y,
+        points.control2.x,
+        points.control2.y,
+        points.end.x,
+        points.end.y,
+      )
+    }
+    context.fillStrokeShape?.(shape)
   }
 }
 

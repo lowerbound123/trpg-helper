@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   addImageLayer,
+  addPaintLayer,
   addShapeLayer,
   addTextLayer,
+  appendPaintStroke,
   createDefaultHandout,
   moveLayer,
+  normalizeHandoutDocument,
   updateLayer,
 } from './handout'
 import { createHistory } from './history'
@@ -91,6 +94,124 @@ describe('handout document model', () => {
       stroke: '#0f766e',
       strokeWidth: 3,
       zIndex: 0,
+    })
+  })
+
+  it('adds editable curve shape layers with default control points and incremented names', () => {
+    const base = createDefaultHandout('Curve Test')
+    const withQuadratic = addShapeLayer(base, { shape: 'quadratic-curve' })
+    const withCubic = addShapeLayer(withQuadratic, { shape: 'cubic-bezier' })
+    const withSecondQuadratic = addShapeLayer(withCubic, { shape: 'quadratic-curve' })
+
+    expect(withSecondQuadratic.layers.map((layer) => layer.name)).toEqual([
+      'quadratic-curve-1',
+      'cubic-bezier-1',
+      'quadratic-curve-2',
+    ])
+    expect(withSecondQuadratic.layers[0]).toMatchObject({
+      type: 'shape',
+      shape: 'quadratic-curve',
+      fill: 'rgba(0,0,0,0)',
+      curvePoints: {
+        start: { x: 0, y: 135 },
+        control: { x: 160, y: 14.4 },
+        end: { x: 320, y: 135 },
+      },
+    })
+    expect(withSecondQuadratic.layers[1]).toMatchObject({
+      type: 'shape',
+      shape: 'cubic-bezier',
+      curvePoints: {
+        control1: { x: 108, y: 11 },
+        control2: { x: 259.2, y: 209 },
+      },
+    })
+  })
+
+  it('creates paint layers and appends strokes immutably', () => {
+    const base = createDefaultHandout('Paint Test')
+    const withPaint = addPaintLayer(base)
+    const paintId = withPaint.layers[0].id
+    const withStroke = appendPaintStroke(withPaint, paintId, {
+      id: 'stroke-1',
+      points: [0, 0, 20, 20],
+      strokeWidth: 8,
+      color: '#ff0000',
+      tension: 0.2,
+      mode: 'brush',
+    })
+
+    expect(withPaint.layers[0]).toMatchObject({
+      type: 'paint',
+      name: 'paint-1',
+      strokes: [],
+      brushColor: '#111827',
+      brushWidth: 6,
+      brushTension: 0.35,
+    })
+    expect(withStroke.layers[0]).toMatchObject({
+      type: 'paint',
+      strokes: [{ id: 'stroke-1', mode: 'brush' }],
+    })
+    expect(withPaint.layers[0]).not.toBe(withStroke.layers[0])
+  })
+
+  it('normalizes legacy paint and curve fields', () => {
+    const legacy = {
+      ...createDefaultHandout('Legacy'),
+      layers: [
+        {
+          id: 'paint-legacy',
+          type: 'paint',
+          name: 'Paint',
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 100,
+          rotation: 0,
+          flipX: false,
+          opacity: 1,
+          blendMode: 'source-over',
+          visible: true,
+          locked: false,
+          zIndex: 0,
+          effects: undefined,
+        },
+        {
+          id: 'curve-legacy',
+          type: 'shape',
+          name: 'Curve',
+          shape: 'quadratic-curve',
+          x: 0,
+          y: 0,
+          width: 320,
+          height: 180,
+          rotation: 0,
+          flipX: false,
+          opacity: 1,
+          blendMode: 'source-over',
+          visible: true,
+          locked: false,
+          zIndex: 1,
+          effects: undefined,
+        },
+      ],
+    } as any
+
+    const normalized = normalizeHandoutDocument(legacy)
+    expect(normalized.layers[0]).toMatchObject({
+      type: 'paint',
+      strokes: [],
+      brushWidth: 6,
+      effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
+    })
+    expect(normalized.layers[1]).toMatchObject({
+      type: 'shape',
+      curvePoints: {
+        start: { x: 0, y: 135 },
+        control: { x: 160, y: 14.4 },
+        end: { x: 320, y: 135 },
+      },
     })
   })
 

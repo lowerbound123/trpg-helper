@@ -3,8 +3,10 @@ import { defineStore } from 'pinia'
 
 import {
   addImageLayer,
+  addPaintLayer,
   addShapeLayer,
   addTextLayer,
+  appendPaintStroke,
   createDefaultHandout,
   moveLayer,
   normalizeHandoutDocument,
@@ -16,6 +18,8 @@ import {
   type ImageLayer,
   type LayerEffects,
   type LayerPatch,
+  type PaintLayer,
+  type PaintStroke,
   type ShapeKind,
   type ShapeLayer,
   type TextLayer,
@@ -193,6 +197,35 @@ export const useEditorStore = defineStore('editor', () => {
     selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
   }
 
+  function addPaint(position?: { x?: number; y?: number }) {
+    commit((doc) =>
+      addPaintLayer(doc, {
+        x: position?.x ?? 0,
+        y: position?.y ?? 0,
+        width: doc.canvas.width,
+        height: doc.canvas.height,
+      }),
+    )
+    selectedLayerId.value = document.value.layers.at(-1)?.id
+    selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
+  }
+
+  function appendStrokeToPaintLayer(stroke: PaintStroke) {
+    let targetId = isPaintLayer(selectedLayer.value) ? selectedLayer.value.id : ''
+    commit((doc) => {
+      let next = doc
+      if (!targetId) {
+        next = addPaintLayer(next, {
+          width: next.canvas.width,
+          height: next.canvas.height,
+        })
+        targetId = next.layers.at(-1)?.id ?? ''
+      }
+      return targetId ? appendPaintStroke(next, targetId, stroke) : next
+    })
+    if (targetId) selectLayer(targetId)
+  }
+
   function applyOrCreateTextWithFont(font: LibraryRecord, position?: { x?: number; y?: number }) {
     const textLayerIds = selectedLayers.value.filter((layer) => layer.type === 'text').map((layer) => layer.id)
     if (textLayerIds.length) {
@@ -267,6 +300,10 @@ export const useEditorStore = defineStore('editor', () => {
 
   function patchLayer(layerId: string, patch: LayerPatch) {
     commit((doc) => updateLayer(doc, layerId, patch))
+  }
+
+  function patchLayerContinuous(layerId: string, key: string, patch: LayerPatch) {
+    commitContinuous(key, (doc) => updateLayer(doc, layerId, patch))
   }
 
   function deleteSelectedLayer() {
@@ -551,6 +588,7 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   return {
+    addPaint,
     addLayerFromAsset,
     addLayerFromAssetAt,
     addShape,
@@ -577,7 +615,9 @@ export const useEditorStore = defineStore('editor', () => {
     moveLayerToIndex,
     openManagedHandout,
     openProjectFromPath,
+    appendStrokeToPaintLayer,
     patchLayer,
+    patchLayerContinuous,
     patchCanvas,
     patchCanvasEffectContinuous,
     patchSelectedLayerEffect,
@@ -629,4 +669,8 @@ export function isTextLayer(layer?: HandoutLayer): layer is TextLayer {
 
 export function isShapeLayer(layer?: HandoutLayer): layer is ShapeLayer {
   return layer?.type === 'shape'
+}
+
+export function isPaintLayer(layer?: HandoutLayer): layer is PaintLayer {
+  return layer?.type === 'paint'
 }

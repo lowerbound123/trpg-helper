@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { appConfiguration } from '@/lib/configuration'
 import { fontRecordFamily } from '@/lib/backend'
-import { isShapeLayer, isTextLayer, useEditorStore } from '@/stores/editor'
+import { isPaintLayer, isShapeLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
 const exportFormat = defineModel<'png' | 'jpeg' | 'webp'>('exportFormat', { required: true })
@@ -35,8 +35,10 @@ const selectedLayers = computed(() => editor.selectedLayers)
 const selectedCount = computed(() => selectedLayers.value.length)
 const selectedTextLayers = computed(() => selectedLayers.value.filter(isTextLayer))
 const selectedShapeLayers = computed(() => selectedLayers.value.filter(isShapeLayer))
+const selectedPaintLayers = computed(() => selectedLayers.value.filter(isPaintLayer))
 const allSelectedText = computed(() => selectedLayers.value.length > 0 && selectedTextLayers.value.length === selectedLayers.value.length)
 const allSelectedShapes = computed(() => selectedLayers.value.length > 0 && selectedShapeLayers.value.length === selectedLayers.value.length)
+const allSelectedPaint = computed(() => selectedLayers.value.length > 0 && selectedPaintLayers.value.length === selectedLayers.value.length)
 const allSelectedLines = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'line'))
 const allSelectedRoundRects = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'round-rect'))
 const backgroundAsset = computed(() =>
@@ -75,6 +77,9 @@ const commonLineStartArrow = computed(() => commonValue(selectedShapeLayers.valu
 const commonLineEndArrow = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineEndArrow), undefined))
 const commonLineArrowSize = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineArrowSize), undefined))
 const commonLineStyle = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineStyle), undefined))
+const commonBrushColor = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushColor), undefined))
+const commonBrushWidth = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushWidth), undefined))
+const commonBrushTension = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushTension), undefined))
 const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
@@ -271,6 +276,15 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :model-value="commonShapeStroke ?? ''"
                 placeholder="Mixed"
                 @update:model-value="(value) => editor.patchSelectedLayers({ stroke: String(value) })"
+              />
+            </label>
+            <label v-if="allSelectedPaint" class="compact-color-control">
+              Brush
+              <Input
+                :type="commonBrushColor ? 'color' : 'text'"
+                :model-value="commonBrushColor ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => editor.patchSelectedLayers({ brushColor: String(value) })"
               />
             </label>
           </div>
@@ -479,6 +493,37 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 </label>
               </div>
             </template>
+          </template>
+          <template v-if="allSelectedPaint">
+            <div class="two-col">
+              <label>
+                Brush width
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  :model-value="commonBrushWidth ?? ''"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => editor.patchSelectedLayers({ brushWidth: Math.max(1, Number(value) || 1) })"
+                />
+              </label>
+              <label>
+                Tension
+                <Input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  :model-value="commonBrushTension ?? ''"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => editor.patchSelectedLayers({ brushTension: Math.max(0, Math.min(1, Number(value) || 0)) })"
+                />
+              </label>
+            </div>
+            <div class="document-summary">
+              <span>Strokes</span>
+              <strong>{{ selectedPaintLayers.reduce((sum, layer) => sum + layer.strokes.length, 0) }}</strong>
+            </div>
           </template>
           <Separator />
           <div class="effect-grid">

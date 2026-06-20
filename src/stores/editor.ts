@@ -558,6 +558,36 @@ export const useEditorStore = defineStore('editor', () => {
     status.value = `Created project ${payload.document.title}`
   }
 
+  function nextProjectCloneTitle(title: string, folder: string) {
+    const base = (title.trim() || 'Untitled handout').replace(/-\d+$/, '')
+    const used = new Set(
+      projects.value
+        .filter((project) => (project.folder || '') === (folder || ''))
+        .map((project) => project.title),
+    )
+    for (let index = 2; index < 10000; index += 1) {
+      const candidate = `${base}-${index}`
+      if (!used.has(candidate)) return candidate
+    }
+    return `${base}-${Date.now()}`
+  }
+
+  async function cloneManagedHandout(projectId: string) {
+    const project = projects.value.find((item) => item.id === projectId)
+    if (!project) return
+    const payload = await openManagedProject(projectId)
+    const title = nextProjectCloneTitle(project.title, project.folder)
+    const document = {
+      ...payload.document,
+      id: crypto.randomUUID(),
+      title,
+      updatedAt: new Date().toISOString(),
+    }
+    await createProject(title, document, project.folder)
+    await refreshProjects()
+    status.value = `Cloned project ${title}`
+  }
+
   async function openManagedHandout(projectId: string) {
     const payload = await openManagedProject(projectId)
     replaceDocument(payload.document)
@@ -600,6 +630,7 @@ export const useEditorStore = defineStore('editor', () => {
     deleteSelectedLayer,
     document,
     closeEditor,
+    cloneManagedHandout,
     createManagedHandout,
     createResourceFolder,
     currentProjectId,

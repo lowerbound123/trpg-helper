@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button'
 import RightInspector from '@/components/editor/RightInspector.vue'
 import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
 import { Input } from '@/components/ui/input'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -41,6 +42,7 @@ import {
   openManagedProject,
   saveProjectPreview,
   type LibraryRecord,
+  type ProjectSummary,
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
 import { hasVisibleEffects } from '@/lib/effects'
@@ -337,6 +339,7 @@ const {
 } = useFinderManagement(editor, {
   addAssetToCanvas,
   createHandoutFromImageRecord,
+  cloneHandoutProject,
   exportHandoutProject,
   previewUrl,
   uploadFiles,
@@ -790,15 +793,17 @@ function curveGuideLineConfig(layer: ShapeLayer, guide: CanvasPoint[]) {
   }
 }
 
-function normalizeCurveLayerPatch(layer: ShapeLayer, curvePoints: CurvePoints) {
+function normalizeCurveLayerPatch(layer: ShapeLayer, curvePoints: CurvePoints, node?: Konva.Node) {
   const points = curvePointKeys(layer)
     .map((key) => curvePoints[key])
     .filter((point): point is CanvasPoint => Boolean(point))
-  const minX = Math.min(...points.map((point) => point.x), 0)
-  const minY = Math.min(...points.map((point) => point.y), 0)
-  const maxX = Math.max(...points.map((point) => point.x), layer.width)
-  const maxY = Math.max(...points.map((point) => point.y), layer.height)
-  if (minX >= 0 && minY >= 0 && maxX <= layer.width && maxY <= layer.height) return { curvePoints }
+  const padding = Math.max(0, layer.strokeWidth / 2)
+  const minX = Math.floor(Math.min(...points.map((point) => point.x)) - padding)
+  const minY = Math.floor(Math.min(...points.map((point) => point.y)) - padding)
+  const maxX = Math.ceil(Math.max(...points.map((point) => point.x)) + padding)
+  const maxY = Math.ceil(Math.max(...points.map((point) => point.y)) + padding)
+  if (minX === 0 && minY === 0 && maxX === layer.width && maxY === layer.height) return { curvePoints }
+  if (layer.rotation && layer.flipX) return { curvePoints }
   const normalized: CurvePoints = {
     start: { x: curvePoints.start.x - minX, y: curvePoints.start.y - minY },
     control: curvePoints.control ? { x: curvePoints.control.x - minX, y: curvePoints.control.y - minY } : undefined,
@@ -806,9 +811,15 @@ function normalizeCurveLayerPatch(layer: ShapeLayer, curvePoints: CurvePoints) {
     control2: curvePoints.control2 ? { x: curvePoints.control2.x - minX, y: curvePoints.control2.y - minY } : undefined,
     end: { x: curvePoints.end.x - minX, y: curvePoints.end.y - minY },
   }
+  const origin = layer.rotation && node
+    ? node.getTransform().point({ x: minX, y: minY })
+    : {
+        x: layer.flipX ? layer.x + layer.width - maxX : layer.x + minX,
+        y: layer.y + minY,
+      }
   return {
-    x: Math.round(layer.x + minX),
-    y: Math.round(layer.y + minY),
+    x: Math.round(origin.x),
+    y: Math.round(origin.y),
     width: Math.max(12, Math.ceil(maxX - minX)),
     height: Math.max(12, Math.ceil(maxY - minY)),
     curvePoints: normalized,
@@ -827,7 +838,7 @@ function moveCurvePoint(layer: ShapeLayer, key: CurvePointKey, event: KonvaEvent
     }),
     [key]: point,
   }
-  editor.patchLayerContinuous(layer.id, `curve-point-${layer.id}-${key}`, normalizeCurveLayerPatch(layer, curvePoints))
+  editor.patchLayerContinuous(layer.id, `curve-point-${layer.id}-${key}`, normalizeCurveLayerPatch(layer, curvePoints, curveNode(layer)))
   curveControlRevision.value += 1
 }
 
@@ -1471,6 +1482,10 @@ async function exportSelectedHandout() {
   await exportHandoutProject(project)
 }
 
+async function cloneHandoutProject(project: ProjectSummary) {
+  await editor.cloneManagedHandout(project.id)
+}
+
 async function ensureProjectPreviews() {
   if (previewMaintenanceRunning) return
   previewMaintenanceRunning = true
@@ -1644,14 +1659,25 @@ watch(
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
               <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-              <Button
-                size="sm"
-                :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
-                @click="exportSelectedHandout"
-              >
-                <Save data-icon="inline-start" />
-                Export PNG
-              </Button>
+              <div class="finder-status-actions">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  :disabled="!selectedHandoutProject()"
+                  @click="selectedHandoutProject() && cloneHandoutProject(selectedHandoutProject()!)"
+                >
+                  <Plus data-icon="inline-start" />
+                  Clone
+                </Button>
+                <Button
+                  size="sm"
+                  :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
+                  @click="exportSelectedHandout"
+                >
+                  <Save data-icon="inline-start" />
+                  Export PNG
+                </Button>
+              </div>
             </div>
           </template>
         </VueFinder>
@@ -1743,6 +1769,7 @@ watch(
         <Input v-model="fontSearch" placeholder="Search fonts or tags" />
         <div class="font-grid">
           <div v-for="font in filteredFonts" :key="font.id" class="font-card">
+            <span class="font-card-preview" :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
             <strong>{{ font.name }}</strong>
             <span>{{ font.tags.join(', ') || 'No tags' }}</span>
           </div>
@@ -1762,7 +1789,8 @@ watch(
     />
   </div>
 
-  <div v-else class="app-shell">
+  <ResizablePanelGroup v-else direction="horizontal" class="app-shell">
+    <ResizablePanel :default-size="23" :min-size="16" :max-size="36" class="shell-panel">
     <aside class="left-rail">
       <div class="brand-strip">
         <Button variant="outline" size="sm" @click="editor.closeEditor()">
@@ -1925,6 +1953,10 @@ watch(
               <Type data-icon="inline-start" />
               Text
             </Button>
+            <Button size="sm" variant="outline" @click="editor.addPaint()">
+              <Brush data-icon="inline-start" />
+              Paint
+            </Button>
             <Button size="sm" variant="outline" @click="editor.moveSelectedLayer(1)">
               <ArrowUp data-icon="inline-start" />
               Up
@@ -1982,7 +2014,11 @@ watch(
         </TabsContent>
       </Tabs>
     </aside>
+    </ResizablePanel>
 
+    <ResizableHandle with-handle />
+
+    <ResizablePanel :default-size="57" :min-size="38" class="shell-panel">
     <main class="workspace">
       <header class="topbar">
         <div class="topbar-actions">
@@ -2274,7 +2310,11 @@ watch(
         </div>
       </section>
     </main>
+    </ResizablePanel>
 
+    <ResizableHandle with-handle />
+
+    <ResizablePanel :default-size="20" :min-size="16" :max-size="34" class="shell-panel">
     <RightInspector
       v-model:export-scale="exportScale"
       v-model:export-format="exportFormat"
@@ -2284,5 +2324,6 @@ watch(
       :export-progress="exportProgress"
       @export-image="exportCurrentImage"
     />
-  </div>
+    </ResizablePanel>
+  </ResizablePanelGroup>
 </template>

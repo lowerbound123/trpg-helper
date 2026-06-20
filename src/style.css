@@ -336,6 +336,19 @@ body,
   border-radius: 8px;
 }
 
+.font-card-preview {
+  display: grid;
+  width: 100%;
+  min-height: 76px;
+  place-items: center;
+  font-size: 34px !important;
+  line-height: 1;
+  color: hsl(var(--foreground)) !important;
+  background: hsl(214 18% 96%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
 .font-card strong {
   overflow: hidden;
   max-width: 100%;
@@ -366,6 +379,13 @@ body,
   white-space: nowrap;
 }
 
+.finder-status-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
 button,
 input,
 textarea {
@@ -373,8 +393,6 @@ textarea {
 }
 
 .app-shell {
-  display: grid;
-  grid-template-columns: 380px minmax(620px, 1fr) 340px;
   width: 100%;
   height: 100vh;
   min-height: 0;
@@ -384,8 +402,15 @@ textarea {
     linear-gradient(180deg, hsl(216 18% 96%), hsl(216 16% 91%));
 }
 
+.shell-panel {
+  min-width: 0;
+  height: 100vh;
+  min-height: 0;
+}
+
 .left-rail,
 .right-rail {
+  width: 100%;
   height: 100vh;
   min-height: 0;
   background: hsl(0 0% 100%);

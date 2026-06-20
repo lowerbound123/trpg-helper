@@ -37,6 +37,7 @@ export function finderFeaturesForKind(kind: FinderKind) {
 type UseFinderOptions = {
   addAssetToCanvas: (asset: LibraryRecord) => void | Promise<void>
   createHandoutFromImageRecord: (kind: 'background' | 'asset', record: LibraryRecord) => void | Promise<void>
+  cloneHandoutProject: (project: ProjectSummary) => void | Promise<void>
   exportHandoutProject: (project: ProjectSummary) => void | Promise<void>
   uploadFiles: (kind: 'background' | 'asset' | 'font', files: File[], folder: string) => unknown | Promise<unknown>
   previewUrl: (record: LibraryRecord) => string
@@ -473,7 +474,20 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
         if (project) void options.exportHandoutProject(project)
       },
     }
-    return [...defaultContextMenuItems, exportItem]
+    const cloneItem: Item = {
+      id: 'clone_handout',
+      title: () => 'Clone handout',
+      order: 45,
+      show(_app, context) {
+        contextTarget = context.target
+        return Boolean(projectFromFinderEntry(contextTarget))
+      },
+      action(_app, selectedItems) {
+        const project = projectFromFinderEntry(selectedItems.find((item) => item.type === 'file')) || projectFromFinderEntry(contextTarget)
+        if (project) void options.cloneHandoutProject(project)
+      },
+    }
+    return [...defaultContextMenuItems, cloneItem, exportItem]
   }
 
   const handoutContextMenuItems = computed(() => createHandoutContextMenu())

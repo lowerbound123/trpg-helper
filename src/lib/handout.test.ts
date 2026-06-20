@@ -147,6 +147,7 @@ describe('handout document model', () => {
       strokes: [],
       brushColor: '#111827',
       brushWidth: 6,
+      eraserWidth: 12,
       brushTension: 0.35,
     })
     expect(withStroke.layers[0]).toMatchObject({
@@ -203,6 +204,7 @@ describe('handout document model', () => {
       type: 'paint',
       strokes: [],
       brushWidth: 6,
+      eraserWidth: 12,
       effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
     })
     expect(normalized.layers[1]).toMatchObject({

@@ -117,6 +117,7 @@ export interface PaintLayer extends BaseLayer {
   strokes: PaintStroke[]
   brushColor: string
   brushWidth: number
+  eraserWidth: number
   brushTension: number
 }
 
@@ -176,6 +177,7 @@ export type NewPaintLayerInput = {
   height?: number
   brushColor?: string
   brushWidth?: number
+  eraserWidth?: number
   brushTension?: number
 }
 
@@ -238,6 +240,7 @@ function paintDefaults(layer: HandoutLayer): Partial<PaintLayer> {
     strokes: layer.strokes ?? [],
     brushColor: layer.brushColor ?? '#111827',
     brushWidth: layer.brushWidth ?? 6,
+    eraserWidth: layer.eraserWidth ?? layer.brushWidth ?? 12,
     brushTension: layer.brushTension ?? 0.35,
   }
 }
@@ -445,6 +448,7 @@ export function addPaintLayer(document: HandoutDocument, input: NewPaintLayerInp
     strokes: [],
     brushColor: input.brushColor ?? '#111827',
     brushWidth: input.brushWidth ?? 6,
+    eraserWidth: input.eraserWidth ?? 12,
     brushTension: input.brushTension ?? 0.35,
   }
 

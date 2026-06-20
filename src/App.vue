@@ -12,11 +12,9 @@ import {
   EyeOff,
   Layers,
   MousePointer2,
-  PenTool,
   Plus,
   Redo2,
   Save,
-  Spline,
   Trash2,
   Type,
   Undo2,
@@ -74,7 +72,7 @@ import { isImageLayer, isPaintLayer, isTextLayer, useEditorStore } from '@/store
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 type SelectionBox = { visible: boolean; startX: number; startY: number; x: number; y: number; width: number; height: number }
-type EditorTool = 'select' | 'quadratic-curve' | 'cubic-bezier' | 'brush' | 'eraser'
+type EditorTool = 'select' | 'brush' | 'eraser'
 type CurvePointKey = 'start' | 'control' | 'control1' | 'control2' | 'end'
 
 Konva.dragButtons = [0]
@@ -95,6 +93,7 @@ const guideLines = ref<GuideLine[]>([])
 const selectionBox = reactive<SelectionBox>({ visible: false, startX: 0, startY: 0, x: 0, y: 0, width: 0, height: 0 })
 const activeTool = ref<EditorTool>('select')
 const draftStroke = ref<PaintStroke>()
+const curveControlRevision = ref(0)
 const multiDragState = reactive({
   active: false,
   layerId: '',
@@ -256,6 +255,11 @@ const selectedOnlyLineShape = computed(() =>
   && isShapeLayer(editor.selectedLayers[0])
   && editor.selectedLayers[0].shape === 'line',
 )
+const selectedOnlyCurveShape = computed(() =>
+  editor.selectedLayers.length === 1
+  && isShapeLayer(editor.selectedLayers[0])
+  && isCurveShape(editor.selectedLayers[0].shape),
+)
 const selectedOnlyTextLayer = computed(() =>
   editor.selectedLayers.length === 1 && isTextLayer(editor.selectedLayers[0]),
 )
@@ -267,7 +271,9 @@ const transformerConfig = computed(() => ({
   shiftBehavior: 'none',
   rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
   rotationSnapTolerance: 6,
-  enabledAnchors: selectedOnlyLineShape.value
+  enabledAnchors: selectedOnlyCurveShape.value
+    ? []
+    : selectedOnlyLineShape.value
     ? ['middle-left', 'middle-right']
     : selectedOnlyTextLayer.value
       ? ['middle-left', 'middle-right']
@@ -553,7 +559,7 @@ function handleCanvasDrop(event: DragEvent) {
   }
 
   const shape = (event.dataTransfer?.getData('application/x-handout-shape') || draggedShapeKind.value) as ShapeKind | ''
-  if (shape && ['line', 'rect', 'round-rect', 'ellipse', 'diamond', 'hexagon-h', 'hexagon-v'].includes(shape)) {
+  if (shape && shapeItems.some((item) => item.kind === shape)) {
     addShapeToCanvas(shape, point)
     draggedShapeKind.value = undefined
     return
@@ -652,17 +658,14 @@ function paintConfig(layer: PaintLayer) {
 
 function setActiveTool(tool: EditorTool) {
   activeTool.value = tool
-  if (tool === 'quadratic-curve' || tool === 'cubic-bezier') {
-    editor.selectLayer(undefined)
-    void updateTransformer()
-  }
 }
 
 function activePaintDefaults() {
   const layer = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
+  const mode = activeTool.value === 'eraser' ? 'eraser' : 'brush'
   return {
     color: layer?.brushColor ?? '#111827',
-    width: layer?.brushWidth ?? 6,
+    width: mode === 'eraser' ? layer?.eraserWidth ?? 12 : layer?.brushWidth ?? 6,
     tension: layer?.brushTension ?? 0.35,
   }
 }
@@ -721,15 +724,6 @@ function stopPaintStroke() {
   return true
 }
 
-function createCurveAt(tool: Extract<EditorTool, 'quadratic-curve' | 'cubic-bezier'>, point: CanvasPoint) {
-  editor.addShape(tool, {
-    x: Math.max(0, Math.round(point.x - (tool === 'quadratic-curve' ? 160 : 180))),
-    y: Math.max(0, Math.round(point.y - (tool === 'quadratic-curve' ? 90 : 110))),
-  })
-  activeTool.value = 'select'
-  void updateTransformer()
-}
-
 function curvePointKeys(layer: ShapeLayer): CurvePointKey[] {
   if (layer.shape === 'quadratic-curve') return ['start', 'control', 'end']
   if (layer.shape === 'cubic-bezier') return ['start', 'control1', 'control2', 'end']
@@ -740,11 +734,23 @@ function curvePoint(layer: ShapeLayer, key: CurvePointKey) {
   return layer.curvePoints?.[key]
 }
 
+function curveNode(layer: ShapeLayer) {
+  return layerNodeRefs[layer.id]?.getNode()
+}
+
+function transformedCurvePoint(layer: ShapeLayer, point?: CanvasPoint) {
+  void curveControlRevision.value
+  if (!point) return { x: layer.x, y: layer.y }
+  const node = curveNode(layer)
+  if (!node) return { x: layer.x + point.x, y: layer.y + point.y }
+  return node.getTransform().point(point)
+}
+
 function curveHandleConfig(layer: ShapeLayer, key: CurvePointKey) {
-  const point = curvePoint(layer, key)
+  const point = transformedCurvePoint(layer, curvePoint(layer, key))
   return {
-    x: layer.x + (point?.x ?? 0),
-    y: layer.y + (point?.y ?? 0),
+    x: point.x,
+    y: point.y,
     radius: 5 / stageScale.value,
     fill: key === 'start' || key === 'end' ? '#14b8a6' : '#f59e0b',
     stroke: '#ffffff',
@@ -773,7 +779,10 @@ function curveGuideConfig(layer: ShapeLayer) {
 
 function curveGuideLineConfig(layer: ShapeLayer, guide: CanvasPoint[]) {
   return {
-    points: guide.flatMap((point) => [layer.x + point.x, layer.y + point.y]),
+    points: guide.flatMap((point) => {
+      const transformed = transformedCurvePoint(layer, point)
+      return [transformed.x, transformed.y]
+    }),
     stroke: '#94a3b8',
     strokeWidth: 1 / stageScale.value,
     dash: [4 / stageScale.value, 4 / stageScale.value],
@@ -781,12 +790,36 @@ function curveGuideLineConfig(layer: ShapeLayer, guide: CanvasPoint[]) {
   }
 }
 
+function normalizeCurveLayerPatch(layer: ShapeLayer, curvePoints: CurvePoints) {
+  const points = curvePointKeys(layer)
+    .map((key) => curvePoints[key])
+    .filter((point): point is CanvasPoint => Boolean(point))
+  const minX = Math.min(...points.map((point) => point.x), 0)
+  const minY = Math.min(...points.map((point) => point.y), 0)
+  const maxX = Math.max(...points.map((point) => point.x), layer.width)
+  const maxY = Math.max(...points.map((point) => point.y), layer.height)
+  if (minX >= 0 && minY >= 0 && maxX <= layer.width && maxY <= layer.height) return { curvePoints }
+  const normalized: CurvePoints = {
+    start: { x: curvePoints.start.x - minX, y: curvePoints.start.y - minY },
+    control: curvePoints.control ? { x: curvePoints.control.x - minX, y: curvePoints.control.y - minY } : undefined,
+    control1: curvePoints.control1 ? { x: curvePoints.control1.x - minX, y: curvePoints.control1.y - minY } : undefined,
+    control2: curvePoints.control2 ? { x: curvePoints.control2.x - minX, y: curvePoints.control2.y - minY } : undefined,
+    end: { x: curvePoints.end.x - minX, y: curvePoints.end.y - minY },
+  }
+  return {
+    x: Math.round(layer.x + minX),
+    y: Math.round(layer.y + minY),
+    width: Math.max(12, Math.ceil(maxX - minX)),
+    height: Math.max(12, Math.ceil(maxY - minY)),
+    curvePoints: normalized,
+  }
+}
+
 function moveCurvePoint(layer: ShapeLayer, key: CurvePointKey, event: KonvaEvent) {
   const node = event.target
-  const point = {
-    x: Math.round(node.x() - layer.x),
-    y: Math.round(node.y() - layer.y),
-  }
+  const curveTransform = curveNode(layer)?.getTransform().copy().invert()
+  const local = curveTransform?.point({ x: node.x(), y: node.y() }) ?? { x: node.x() - layer.x, y: node.y() - layer.y }
+  const point = { x: Math.round(local.x), y: Math.round(local.y) }
   const curvePoints: CurvePoints = {
     ...(layer.curvePoints ?? {
       start: { x: 0, y: 0 },
@@ -794,7 +827,8 @@ function moveCurvePoint(layer: ShapeLayer, key: CurvePointKey, event: KonvaEvent
     }),
     [key]: point,
   }
-  editor.patchLayerContinuous(layer.id, `curve-point-${layer.id}-${key}`, { curvePoints })
+  editor.patchLayerContinuous(layer.id, `curve-point-${layer.id}-${key}`, normalizeCurveLayerPatch(layer, curvePoints))
+  curveControlRevision.value += 1
 }
 
 function endCurvePointMove(layer: ShapeLayer, key: CurvePointKey) {
@@ -879,11 +913,6 @@ function onLayerDragStart(layer: HandoutLayer, event: KonvaEvent) {
 }
 
 function handleStagePointer(event: KonvaEvent) {
-  if (activeTool.value === 'quadratic-curve' || activeTool.value === 'cubic-bezier') {
-    if (!event.evt) return
-    createCurveAt(activeTool.value, canvasPointFromClient(event.evt.clientX, event.evt.clientY))
-    return
-  }
   if (activeTool.value !== 'select') return
   if (suppressNextStageClick) {
     suppressNextStageClick = false
@@ -997,6 +1026,7 @@ function onTransformEnd(layer: HandoutLayer) {
 }
 
 function onTransform(layer: HandoutLayer, event: KonvaEvent) {
+  if (isShapeLayer(layer) && isCurveShape(layer.shape)) curveControlRevision.value += 1
   if (!event.evt?.shiftKey) return
   const node = layerNodeRefs[layer.id]?.getNode()
   if (!node) return
@@ -1140,6 +1170,7 @@ function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
     return
   }
 
+  if (isShapeLayer(layer) && isCurveShape(layer.shape)) curveControlRevision.value += 1
   logEllipseDrag('ellipse-drag-move-before-snap', layer, node)
   const snap = calculateSnapGuides({
     movingLayer: snapLayerFromNode(layer, node),
@@ -1845,6 +1876,14 @@ watch(
                   x2="31"
                   y2="18"
                 />
+                <path
+                  v-else-if="shape.kind === 'quadratic-curve'"
+                  d="M5 26 Q18 5 31 24"
+                />
+                <path
+                  v-else-if="shape.kind === 'cubic-bezier'"
+                  d="M4 25 C11 5 25 32 32 10"
+                />
                 <rect
                   v-else-if="shape.kind === 'rect'"
                   x="7"
@@ -1958,14 +1997,6 @@ watch(
             <MousePointer2 data-icon="inline-start" />
             Select
           </Button>
-          <Button size="sm" variant="outline" :data-active="activeTool === 'quadratic-curve'" @click="setActiveTool('quadratic-curve')">
-            <Spline data-icon="inline-start" />
-            Quadratic
-          </Button>
-          <Button size="sm" variant="outline" :data-active="activeTool === 'cubic-bezier'" @click="setActiveTool('cubic-bezier')">
-            <PenTool data-icon="inline-start" />
-            Cubic
-          </Button>
           <Button size="sm" variant="outline" :data-active="activeTool === 'brush'" @click="setActiveTool('brush')">
             <Brush data-icon="inline-start" />
             Brush
@@ -2010,7 +2041,6 @@ watch(
             'stage-frame-dropping': draggedAssetId || draggedFontId || draggedShapeKind,
             'stage-frame-panning': panState.active,
             'stage-frame-drawing': activeTool === 'brush' || activeTool === 'eraser',
-            'stage-frame-placing': activeTool === 'quadratic-curve' || activeTool === 'cubic-bezier',
           }"
           @dragenter.capture="handleCanvasDragOver"
           @dragover.capture="handleCanvasDragOver"

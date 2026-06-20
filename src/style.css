@@ -554,14 +554,14 @@ textarea {
   color: hsl(173 80% 32%);
 }
 
-.shape-preview :is(line, rect, ellipse, polygon) {
+.shape-preview :is(line, rect, ellipse, polygon, path) {
   fill: hsl(173 55% 90%);
   stroke: currentColor;
   stroke-width: 2.5;
   vector-effect: non-scaling-stroke;
 }
 
-.shape-preview line {
+.shape-preview :is(line, path) {
   fill: none;
   stroke-linecap: round;
 }
@@ -734,10 +734,6 @@ textarea {
 
 .stage-frame-drawing {
   cursor: crosshair;
-}
-
-.stage-frame-placing {
-  cursor: copy;
 }
 
 .stage-surface {

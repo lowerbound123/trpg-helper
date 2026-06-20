@@ -79,6 +79,7 @@ const commonLineArrowSize = computed(() => commonValue(selectedShapeLayers.value
 const commonLineStyle = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineStyle), undefined))
 const commonBrushColor = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushColor), undefined))
 const commonBrushWidth = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushWidth), undefined))
+const commonEraserWidth = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.eraserWidth), undefined))
 const commonBrushTension = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushTension), undefined))
 const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
@@ -507,6 +508,19 @@ function patchDocumentSaturation(value: number[] | undefined) {
                   @update:model-value="(value) => editor.patchSelectedLayers({ brushWidth: Math.max(1, Number(value) || 1) })"
                 />
               </label>
+              <label>
+                Eraser width
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  :model-value="commonEraserWidth ?? ''"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => editor.patchSelectedLayers({ eraserWidth: Math.max(1, Number(value) || 1) })"
+                />
+              </label>
+            </div>
+            <div class="two-col">
               <label>
                 Tension
                 <Input

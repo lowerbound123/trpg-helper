@@ -496,7 +496,7 @@ fn import_record(
     })
 }
 
-fn decode_data_url(data_url: &str) -> Result<Vec<u8>, AppError> {
+pub(crate) fn decode_data_url(data_url: &str) -> Result<Vec<u8>, AppError> {
     let (_, data) = data_url.split_once(',').ok_or(AppError::InvalidDataUrl)?;
     Ok(general_purpose::STANDARD.decode(data)?)
 }
@@ -562,7 +562,7 @@ fn delete_record_files(record: &LibraryRecord) -> Result<(), AppError> {
     Ok(())
 }
 
-fn remove_file_if_exists(path: impl AsRef<Path>) -> Result<(), AppError> {
+pub(crate) fn remove_file_if_exists(path: impl AsRef<Path>) -> Result<(), AppError> {
     let path = path.as_ref();
     if path.exists() {
         fs::remove_file(path)?;
@@ -599,7 +599,7 @@ fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn encode_data_url(path: &Path, media_type: &str) -> Result<String, AppError> {
+pub(crate) fn encode_data_url(path: &Path, media_type: &str) -> Result<String, AppError> {
     let bytes = fs::read(path)?;
     Ok(format!(
         "data:{};base64,{}",
@@ -612,7 +612,7 @@ fn project_dir(app: &AppHandle, project_id: &str) -> Result<PathBuf, AppError> {
     Ok(projects_root(app)?.join(project_id))
 }
 
-fn resolve_project_root(
+pub(crate) fn resolve_project_root(
     app: &AppHandle,
     project_id: Option<String>,
     project_dir_value: Option<String>,
@@ -1340,28 +1340,6 @@ fn save_font_preview(
 }
 
 #[tauri::command]
-fn save_project_mask(
-    app: AppHandle,
-    project_id: Option<String>,
-    project_dir: Option<String>,
-    mask_id: String,
-    data_url: String,
-) -> CommandResult<String> {
-    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
-    let relative = PathBuf::from("masks").join(format!("{}.png", clean_file_name(&mask_id)));
-    let path = root.join(&relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(AppError::from)
-            .map_err(String::from)?;
-    }
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
-        .map_err(AppError::from)
-        .map_err(String::from)?;
-    Ok(relative.to_string_lossy().to_string())
-}
-
-#[tauri::command]
 fn save_project_asset(
     app: AppHandle,
     project_id: Option<String>,
@@ -1391,61 +1369,6 @@ fn save_project_asset(
 }
 
 #[tauri::command]
-fn save_project_mask_cache(
-    app: AppHandle,
-    project_id: Option<String>,
-    project_dir: Option<String>,
-    mask_id: String,
-    data_url: String,
-    max_edge: u32,
-) -> CommandResult<String> {
-    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
-    let bounded_edge = max_edge.max(1);
-    let relative = PathBuf::from(".cache").join("masks").join(format!(
-        "{}-preview-{}.png",
-        clean_file_name(&mask_id),
-        bounded_edge
-    ));
-    let path = root.join(&relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(AppError::from)
-            .map_err(String::from)?;
-    }
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
-        .map_err(AppError::from)
-        .map_err(String::from)?;
-    Ok(relative.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-fn read_project_file_data_url(
-    app: AppHandle,
-    project_id: Option<String>,
-    project_dir: Option<String>,
-    relative_path: String,
-    media_type: String,
-) -> CommandResult<String> {
-    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
-    let relative = safe_project_relative_path(&relative_path).map_err(String::from)?;
-    encode_data_url(&root.join(relative), &media_type).map_err(Into::into)
-}
-
-#[tauri::command]
-fn delete_project_mask(
-    app: AppHandle,
-    project_id: Option<String>,
-    project_dir: Option<String>,
-    relative_path: String,
-) -> CommandResult<()> {
-    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
-    let relative = safe_project_relative_path(&relative_path).map_err(String::from)?;
-    remove_file_if_exists(root.join(relative))
-        .map_err(AppError::from)
-        .map_err(String::from)
-}
-
-#[tauri::command]
 fn append_debug_log(line: String) -> CommandResult<String> {
     let path = project_root().map_err(String::from)?.join("log.txt");
     let mut file = OpenOptions::new()
@@ -1455,6 +1378,27 @@ fn append_debug_log(line: String) -> CommandResult<String> {
         .map_err(AppError::from)
         .map_err(String::from)?;
     writeln!(file, "{line}")
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn read_configuration() -> CommandResult<String> {
+    let path = project_root()
+        .map_err(String::from)?
+        .join("configuration.toml");
+    fs::read_to_string(path)
+        .map_err(AppError::from)
+        .map_err(String::from)
+}
+
+#[tauri::command]
+fn write_configuration(source: String) -> CommandResult<String> {
+    let path = project_root()
+        .map_err(String::from)?
+        .join("configuration.toml");
+    fs::write(&path, source)
         .map_err(AppError::from)
         .map_err(String::from)?;
     Ok(path.to_string_lossy().to_string())
@@ -1493,11 +1437,11 @@ pub fn run() {
             commands::export_commands::export_image_file_to_downloads,
             save_project_preview,
             save_font_preview,
-            save_project_mask,
+            commands::mask_commands::save_project_mask,
             save_project_asset,
-            save_project_mask_cache,
-            read_project_file_data_url,
-            delete_project_mask,
+            commands::mask_commands::save_project_mask_cache,
+            commands::mask_commands::read_project_file_data_url,
+            commands::mask_commands::delete_project_mask,
             copy_project_masks,
             create_project,
             create_library_folder,
@@ -1512,6 +1456,7 @@ pub fn run() {
             move_managed_project,
             open_managed_project,
             open_project,
+            read_configuration,
             read_file_data_url,
             repair_missing_thumbnails,
             rename_library_folder,
@@ -1519,7 +1464,8 @@ pub fn run() {
             rename_managed_project,
             rename_project_folder,
             save_managed_project,
-            save_project
+            save_project,
+            write_configuration
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

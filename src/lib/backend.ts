@@ -1,5 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { BaseDirectory, writeFile } from '@tauri-apps/plugin-fs'
 
+import { appConfiguration, runtimeConfigurationToml, storeRuntimeConfigurationOverride } from './configuration'
 import type { HandoutDocument } from './handout'
 
 export interface LibraryRecord {
@@ -36,6 +38,11 @@ export interface ProjectSummary {
   updatedAt: string
 }
 
+export type ProjectTarget = {
+  projectId?: string
+  projectDir?: string
+}
+
 export interface ProjectPayload {
   document: HandoutDocument
   metadata: Record<string, unknown>
@@ -63,15 +70,55 @@ function isTauriRuntime() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+const HIGH_FREQUENCY_LOG_PATTERN = /(drag|pointer|wheel|resize|mousemove|pan|zoom|snap)/i
+
+function shouldAppendDebugLog(scope: string, message: string) {
+  if (!appConfiguration.debug.fileLogEnabled) return false
+  if (HIGH_FREQUENCY_LOG_PATTERN.test(`${scope}:${message}`)) return false
+  if (/^(render|mask|export|thumbnail|background-render|text)$/.test(scope)) {
+    return appConfiguration.debug.renderPerfLogEnabled
+  }
+  return true
+}
+
 export function fileUrl(path?: string | null): string {
   if (!path) return ''
   if (!isTauriRuntime()) return path
   return convertFileSrc(path)
 }
 
+export async function readConfiguration(): Promise<string> {
+  if (!isTauriRuntime()) return runtimeConfigurationToml()
+  return invoke<string>('read_configuration')
+}
+
+export async function writeConfiguration(source: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    storeRuntimeConfigurationOverride(source)
+    return 'browser-local-configuration'
+  }
+  const path = await invoke<string>('write_configuration', { source })
+  storeRuntimeConfigurationOverride(source)
+  return path
+}
+
 export async function readFileDataUrl(path: string, mediaType: string): Promise<string> {
   if (!isTauriRuntime()) return path
   return invoke<string>('read_file_data_url', { path, mediaType })
+}
+
+export async function readProjectFileDataUrl(
+  target: { projectId?: string; projectDir?: string },
+  relativePath: string,
+  mediaType: string,
+): Promise<string> {
+  if (!isTauriRuntime()) return relativePath
+  return invoke<string>('read_project_file_data_url', {
+    projectId: target.projectId || null,
+    projectDir: target.projectDir || null,
+    relativePath,
+    mediaType,
+  })
 }
 
 export async function getLibrary(): Promise<LibraryIndex> {
@@ -82,6 +129,69 @@ export async function getLibrary(): Promise<LibraryIndex> {
 export async function repairMissingThumbnails(): Promise<LibraryIndex> {
   if (!isTauriRuntime()) return emptyLibrary()
   return invoke<LibraryIndex>('repair_missing_thumbnails')
+}
+
+export async function saveFontPreview(fontId: string, dataUrl: string): Promise<LibraryIndex> {
+  if (!isTauriRuntime()) return emptyLibrary()
+  return invoke<LibraryIndex>('save_font_preview', { fontId, dataUrl })
+}
+
+export async function saveProjectMask(
+  target: ProjectTarget,
+  maskId: string,
+  dataUrl: string,
+): Promise<string> {
+  if (!isTauriRuntime()) return `masks/${maskId}.png`
+  return invoke<string>('save_project_mask', {
+    projectId: target.projectId || null,
+    projectDir: target.projectDir || null,
+    maskId,
+    dataUrl,
+  })
+}
+
+export async function saveProjectAsset(
+  target: ProjectTarget,
+  assetId: string,
+  fileName: string,
+  dataUrl: string,
+): Promise<string> {
+  if (!isTauriRuntime()) return `assets/${assetId}.png`
+  return invoke<string>('save_project_asset', {
+    projectId: target.projectId ?? null,
+    projectDir: target.projectDir ?? null,
+    assetId,
+    fileName,
+    dataUrl,
+  })
+}
+
+export async function saveProjectMaskCache(
+  target: ProjectTarget,
+  maskId: string,
+  dataUrl: string,
+  maxEdge: number,
+): Promise<string> {
+  if (!isTauriRuntime()) return `.cache/masks/${maskId}-preview-${maxEdge}.png`
+  return invoke<string>('save_project_mask_cache', {
+    projectId: target.projectId || null,
+    projectDir: target.projectDir || null,
+    maskId,
+    dataUrl,
+    maxEdge,
+  })
+}
+
+export async function deleteProjectMask(
+  target: { projectId?: string; projectDir?: string },
+  relativePath: string,
+): Promise<void> {
+  if (!isTauriRuntime() || !relativePath) return
+  return invoke<void>('delete_project_mask', {
+    projectId: target.projectId || null,
+    projectDir: target.projectDir || null,
+    relativePath,
+  })
 }
 
 export async function importAsset(file: File, tags: string[], folder = ''): Promise<ImportResult> {
@@ -231,6 +341,11 @@ export async function openManagedProject(projectId: string): Promise<ProjectPayl
   return invoke<ProjectPayload>('open_managed_project', { projectId })
 }
 
+export async function copyProjectMasks(sourceProjectId: string, targetProjectId: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  return invoke<void>('copy_project_masks', { sourceProjectId, targetProjectId })
+}
+
 export async function renameManagedProject(projectId: string, title: string): Promise<ProjectPayload> {
   if (!isTauriRuntime()) {
     throw new Error('Renaming projects requires the Tauri desktop runtime.')
@@ -288,12 +403,34 @@ export async function exportImageToDownloads(fileName: string, dataUrl: string):
   return invoke<string>('export_image_to_downloads', { fileName, dataUrl })
 }
 
+export async function exportImageBlobToDownloads(
+  fileName: string,
+  blob: Blob,
+  format: 'png' | 'jpeg' | 'webp',
+  quality?: number,
+): Promise<string> {
+  if (!isTauriRuntime()) {
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = fileName || 'handout.png'
+    link.click()
+    URL.revokeObjectURL(link.href)
+    return fileName
+  }
+  const data = new Uint8Array(await blob.arrayBuffer())
+  const boundedQuality = quality === undefined ? null : Math.max(1, Math.min(100, Math.round(quality)))
+  const stagingPath = `staging-${crypto.randomUUID()}.png`
+  await writeFile(stagingPath, data, { baseDir: BaseDirectory.AppLocalData })
+  return invoke<string>('export_image_file_to_downloads', { fileName, stagingPath, format, quality: boundedQuality })
+}
+
 export async function saveProjectPreview(projectId: string, dataUrl: string): Promise<string> {
   if (!isTauriRuntime()) return dataUrl
   return invoke<string>('save_project_preview', { projectId, dataUrl })
 }
 
 export async function appendDebugLog(scope: string, message: string, data?: unknown): Promise<string> {
+  if (!shouldAppendDebugLog(scope, message)) return ''
   const line = JSON.stringify({
     timestamp: new Date().toISOString(),
     scope,

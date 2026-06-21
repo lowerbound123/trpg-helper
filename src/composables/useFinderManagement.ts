@@ -219,7 +219,15 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     return recordsForKindWithoutSearch(kind)
       .filter((record) => folderMatches(record.folder, currentFolder))
       .map((record) =>
-        makeFileEntry(kind, record.folder, record.id, record.name, record.mediaType, record.updatedAt, options.previewUrl(record)),
+        makeFileEntry(
+          kind,
+          record.folder,
+          record.id,
+          record.name,
+          kind === 'font' && record.thumbnailPath ? 'image/webp' : record.mediaType,
+          record.updatedAt,
+          options.previewUrl(record),
+        ),
       )
   }
 

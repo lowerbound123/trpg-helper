@@ -45,7 +45,7 @@ defineEmits<{
         </Select>
       </label>
       <label v-if="exportFormat !== 'png'">
-        Quality
+        Quality (%)
         <Input
           type="number"
           min="1"

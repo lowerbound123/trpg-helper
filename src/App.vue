@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowReactive, watch } from 'vue'
 import Konva from 'konva'
+import { confirm } from '@tauri-apps/plugin-dialog'
 import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
   Brush,
+  ChevronDown,
+  ChevronRight,
   Eraser,
   Minus,
   Eye,
@@ -15,6 +18,7 @@ import {
   Plus,
   Redo2,
   Save,
+  Settings,
   Trash2,
   Type,
   Undo2,
@@ -24,8 +28,10 @@ import 'vuefinder/dist/vuefinder.css'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ButtonGroup } from '@/components/ui/button-group'
 import RightInspector from '@/components/editor/RightInspector.vue'
 import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
+import ConfigurationDialog from '@/components/settings/ConfigurationDialog.vue'
 import { Input } from '@/components/ui/input'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -40,19 +46,23 @@ import {
   appendDebugLog,
   fontRecordFamily,
   openManagedProject,
+  readProjectFileDataUrl,
+  saveProjectAsset,
   saveProjectPreview,
   type LibraryRecord,
   type ProjectSummary,
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
 import { hasVisibleEffects } from '@/lib/effects'
-import { isEditableTarget } from '@/lib/dom'
-import type { CanvasPoint, CurvePoints, HandoutLayer, ImageLayer, PaintLayer, PaintStroke, ShapeKind, ShapeLayer, TextLayer } from '@/lib/handout'
-import { isCurveShape } from '@/lib/handout'
+import type { CanvasPoint, CurvePoints, FlattenedLayerBounds, HandoutDocument, HandoutLayer, ImageLayer, LayerGroup, LayerMask, PaintLayer, PaintStroke, ShapeKind, ShapeLayer, StrokePoint, TextLayer } from '@/lib/handout'
+import { isCurveShape, isLayerEffectivelyVisible, strokePointsToFlat } from '@/lib/handout'
+import { createAppShortcutHandler } from '@/app/AppShortcuts'
+import { saveProjectWithPreview } from '@/app/useAppPersistence'
 import { appConfiguration } from '@/lib/configuration'
 import { layerKonvaConfig, layerPositionFromNode, textKonvaConfig } from '@/lib/layer-rendering'
 import { paintKonvaConfig, paintStrokeLineConfig } from '@/lib/paint-rendering'
-import { dataUrlByteSize, renderHandoutPreviewToDataUrl } from '@/lib/render'
+import { dataUrlByteSize, renderHandoutPreviewToDataUrl, renderHandoutToDataUrl, renderMaskedLayerImage } from '@/lib/render'
+import { downsampleDataUrl, loadImageFromDataUrl } from '@/lib/mask'
 import { containsRect } from '@/lib/selection'
 import {
   arrowDotConfig,
@@ -76,6 +86,9 @@ type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean
 type SelectionBox = { visible: boolean; startX: number; startY: number; x: number; y: number; width: number; height: number }
 type EditorTool = 'select' | 'brush' | 'eraser'
 type CurvePointKey = 'start' | 'control' | 'control1' | 'control2' | 'end'
+type LayerListItem =
+  | { kind: 'layer'; layer: HandoutLayer }
+  | { kind: 'group'; group: LayerGroup; layers: HandoutLayer[] }
 
 Konva.dragButtons = [0]
 const PREVIEW_TARGET_BYTES = 512 * 1024
@@ -84,18 +97,43 @@ const editor = useEditorStore()
 const stageFrameRef = ref<HTMLElement>()
 const stageRef = ref<{ getNode: () => Konva.Stage }>()
 const transformerRef = ref<{ getNode: () => Konva.Transformer }>()
+const maskEditNodeRef = ref<NodeRef>()
 const layerNodeRefs = reactive<Record<string, NodeRef | undefined>>({})
+const maskedLayerImages = shallowReactive<Record<string, HTMLCanvasElement | undefined>>({})
+const maskedBackgroundImage = ref<HTMLImageElement>()
+const maskEditImage = ref<HTMLImageElement>()
+const maskPreviewUrls = shallowReactive<Record<string, string | undefined>>({})
+const maskPreviewCacheDataUrls = shallowReactive<Record<string, string | undefined>>({})
+const draggedMaskLayerId = ref('')
+const isDraggingMask = ref(false)
 
 const newProjectTitle = ref('Untitled handout')
 const createMode = ref<'blank' | 'upload-background'>('blank')
 const isCreateDialogOpen = ref(false)
+const isSettingsDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const guideLines = ref<GuideLine[]>([])
 const selectionBox = reactive<SelectionBox>({ visible: false, startX: 0, startY: 0, x: 0, y: 0, width: 0, height: 0 })
 const activeTool = ref<EditorTool>('select')
+const activeRailTab = ref<'assets' | 'fonts' | 'graph' | 'layers'>('assets')
+const handleGlobalKeydown = createAppShortcutHandler({
+  isEditorView: () => editor.view === 'editor',
+  hasSelectedLayer: () => Boolean(editor.selectedLayerId),
+  saveProject: () => { void saveProject() },
+  undo: () => editor.undo(),
+  redo: () => editor.redo(),
+  deleteLayer: () => deleteLayer(),
+  setTool: (tool) => setActiveTool(tool),
+  setRailTab: (tab) => { activeRailTab.value = tab },
+  addText: () => {
+    editor.addText()
+    void updateTransformer()
+  },
+})
 const draftStroke = ref<PaintStroke>()
 const curveControlRevision = ref(0)
+const isFlatteningLayers = ref(false)
 const multiDragState = reactive({
   active: false,
   layerId: '',
@@ -111,6 +149,8 @@ const selectedAssetFolder = ref('')
 const selectedFontFolder = ref('')
 const isBooting = ref(true)
 const draggedLayerId = ref('')
+const draggedGroupId = ref('')
+const collapsedGroupIds = ref<string[]>([])
 const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>({
   handout: [],
   background: [],
@@ -124,22 +164,31 @@ const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>
 })
 const finderUploadConfig = { maxFileSize: appConfiguration.uploads.maxFileSize }
 const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.handoutGridScale) }
-const backgroundFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.backgroundGridScale) }
 const EDITOR_EFFECT_CACHE_MAX_EDGE = 768
+const EDITOR_MASK_PREVIEW_MAX_EDGE = 1200
+const maskFeatureEnabled = appConfiguration.mask.enabled
 let previewMaintenanceRunning = false
 let effectCacheRaf: number | undefined
+let maskedLayerRefreshRunId = 0
+let maskedBackgroundRefreshRunId = 0
+let maskEditImageRefreshRunId = 0
+let maskCompositeRefreshTimer: number | undefined
+let maskPreviewCacheRunning = false
 let lastSnapLogSignature = ''
 let lastEllipseDragLogSignature = ''
 let lastFontDragOverLogAt = 0
 let suppressNextStageClick = false
 let lastLayerListSelectionId = ''
 const pendingEffectCacheLayerIds = new Set<string>()
+const pendingMaskPreviewCacheIds = new Set<string>()
+const maskPreviewCacheQueue: LayerMask[] = []
 const logHandoutPreview = createDebugLogger('handout-preview')
 const logText = createDebugLogger('text')
 const logUpload = createDebugLogger('upload')
 const logExport = createDebugLogger('export')
 const logSnap = createDebugLogger('snap')
 const logShape = createDebugLogger('shape')
+const logFlat = createDebugLogger('flat')
 const {
   draggedAssetId,
   draggedFontId,
@@ -193,17 +242,51 @@ const {
   stopCanvasPan,
   handleCanvasWheel,
 } = useCanvasViewport({
-  document: editor.document,
+  document: () => editor.document,
   stageRef,
   stageFrameRef,
   logViewport,
 })
 const canvasLayers = computed(() => [...editor.document.layers].sort((a, b) => a.zIndex - b.zIndex))
+const visibleCanvasLayers = computed(() =>
+  canvasLayers.value.filter((layer) => isLayerEffectivelyVisible(editor.document, layer)),
+)
+const maskEditLabel = computed(() => {
+  if (!maskFeatureEnabled) return ''
+  const target = editor.maskEditTarget
+  if (!target) return ''
+  if (target.kind === 'background') return 'Background mask'
+  const layer = editor.document.layers.find((item) => item.id === target.layerId)
+  return layer ? `${layerName(layer)} mask` : 'Layer mask'
+})
 const selectedCurveLayers = computed(() =>
   canvasLayers.value.filter((layer): layer is ShapeLayer =>
     isShapeLayer(layer) && isCurveShape(layer.shape) && editor.selectedLayerIds.includes(layer.id),
   ),
 )
+const layerListItems = computed<LayerListItem[]>(() => {
+  const items: LayerListItem[] = []
+  const renderedGroups = new Set<string>()
+  const layerById = new Map(editor.layers.map((layer) => [layer.id, layer]))
+  for (const layer of editor.layers) {
+    const group = groupForLayer(layer.id)
+    if (!group) {
+      items.push({ kind: 'layer', layer })
+      continue
+    }
+    if (renderedGroups.has(group.id)) continue
+    renderedGroups.add(group.id)
+    items.push({
+      kind: 'group',
+      group,
+      layers: group.layerIds
+        .map((id) => layerById.get(id))
+        .filter((item): item is HandoutLayer => Boolean(item))
+        .sort((a, b) => b.zIndex - a.zIndex),
+    })
+  }
+  return items
+})
 
 const canvasSizeSignature = computed(() =>
   `${editor.document.canvas.width}:${editor.document.canvas.height}`,
@@ -214,6 +297,48 @@ const layerEffectsSignature = computed(() =>
     .map((layer) => `${layer.id}:${JSON.stringify(layer.effects || {})}`)
     .join('|'),
 )
+
+const layerMaskRenderSignature = computed(() =>
+  editor.document.layers
+    .map((layer) => [
+      layer.id,
+      layer.mask?.enabled,
+      layer.mask?.id,
+      layer.mask?.path,
+      layer.mask?.updatedAt,
+      editor.maskDataUrls[layer.mask?.id || '']?.length || 0,
+      maskZoomBucket.value,
+      JSON.stringify(layer),
+    ].join(':'))
+    .join('|'),
+)
+
+const backgroundMaskRenderSignature = computed(() => [
+  editor.document.canvas.width,
+  editor.document.canvas.height,
+  editor.document.canvas.backgroundColor,
+  editor.document.canvas.backgroundVisible,
+  editor.document.canvas.backgroundAssetId,
+  editor.document.canvas.backgroundMask?.enabled,
+  editor.document.canvas.backgroundMask?.id,
+  editor.document.canvas.backgroundMask?.path,
+  editor.document.canvas.backgroundMask?.updatedAt,
+  editor.maskDataUrls[editor.document.canvas.backgroundMask?.id || '']?.length || 0,
+  maskZoomBucket.value,
+].join(':'))
+
+const maskZoomBucket = computed(() => {
+  if (stageScale.value >= 1) return 'full'
+  if (stageScale.value >= 0.5) return 'half'
+  if (stageScale.value >= 0.25) return 'quarter'
+  return 'tiny'
+})
+const activeMaskEditLayer = computed(() => {
+  if (!maskFeatureEnabled) return undefined
+  const target = editor.maskEditTarget
+  if (!target || target.kind !== 'layer') return undefined
+  return editor.document.layers.find((layer) => layer.id === target.layerId)
+})
 
 const textLayerRenderSignature = computed(() =>
   editor.document.layers
@@ -229,7 +354,6 @@ const textLayerRenderSignature = computed(() =>
       layer.underline,
       layer.strikethrough,
       layer.width,
-      layer.height,
       layer.lineHeight,
       layer.align,
     ].join(':'))
@@ -264,6 +388,11 @@ const selectedOnlyCurveShape = computed(() =>
 )
 const selectedOnlyTextLayer = computed(() =>
   editor.selectedLayers.length === 1 && isTextLayer(editor.selectedLayers[0]),
+)
+const selectedMaskControlLayers = computed(() => maskFeatureEnabled ? editor.selectedLayers : [])
+const selectedMaskControlDeletes = computed(() =>
+  selectedMaskControlLayers.value.length > 0
+  && selectedMaskControlLayers.value.every((layer) => Boolean(layer.mask)),
 )
 
 const transformerConfig = computed(() => ({
@@ -361,8 +490,301 @@ function layerName(layer: HandoutLayer) {
 }
 
 function imageForLayer(layer: ImageLayer) {
-  const asset = editor.resolveAsset(layer.assetId)
+  const asset = imageRecordForLayer(layer)
   return asset ? imageElements[asset.id] : undefined
+}
+
+function imageRecordForLayer(layer: ImageLayer) {
+  return editor.resolveAsset(layer.assetId) || editor.resolveBackground(layer.assetId)
+}
+
+function maskedImageForLayer(layer: HandoutLayer) {
+  if (!maskFeatureEnabled) return undefined
+  return layer.mask?.enabled ? maskedLayerImages[layer.id] : undefined
+}
+
+function layerMaskActive(layer: HandoutLayer) {
+  return Boolean(maskFeatureEnabled && layer.mask?.enabled)
+}
+
+function canvasLayerRenderInfo(layer: HandoutLayer) {
+  const masked = maskedImageForLayer(layer)
+  const imageRecord = isImageLayer(layer) ? imageRecordForLayer(layer) : undefined
+  const rawImage = isImageLayer(layer) ? imageForLayer(layer) : undefined
+  const activeMask = layerMaskActive(layer)
+  const branch = masked
+    ? 'masked-image'
+    : activeMask
+      ? 'masked-waiting'
+      : isImageLayer(layer) && rawImage
+        ? 'raw-image'
+        : isTextLayer(layer)
+          ? 'raw-text'
+          : isShapeLayer(layer)
+            ? `raw-shape:${layer.shape}`
+            : isPaintLayer(layer)
+              ? 'raw-paint'
+              : 'none'
+  return {
+    id: layer.id,
+    name: layer.name,
+    type: layer.type,
+    visible: layer.visible,
+    effectiveVisible: isLayerEffectivelyVisible(editor.document, layer),
+    locked: layer.locked,
+    zIndex: layer.zIndex,
+    position: { x: layer.x, y: layer.y, width: layer.width, height: layer.height, rotation: layer.rotation, flipX: layer.flipX },
+    assetId: isImageLayer(layer) ? layer.assetId : undefined,
+    assetResolved: isImageLayer(layer) ? Boolean(imageRecord) : undefined,
+    rawImageLoaded: isImageLayer(layer) ? Boolean(rawImage) : undefined,
+    branch,
+    mask: layer.mask
+      ? {
+          id: layer.mask.id,
+          enabled: layer.mask.enabled,
+          path: layer.mask.path,
+          highResPath: layer.mask.highResPath,
+          previewPath: layer.mask.previewPath,
+          sourceVersion: layer.mask.sourceVersion,
+          version: layer.mask.version,
+          updatedAt: layer.mask.updatedAt,
+          cachePath: layer.mask.cache?.preview1200Path,
+          cacheSourceVersion: layer.mask.cache?.sourceVersion,
+          transform: {
+            x: layer.mask.x,
+            y: layer.mask.y,
+            width: layer.mask.width,
+            height: layer.mask.height,
+            scaleX: layer.mask.scaleX,
+            scaleY: layer.mask.scaleY,
+            rotation: layer.mask.rotation,
+            flipX: layer.mask.flipX,
+          },
+          inMemoryDataUrlLength: editor.maskDataUrls[layer.mask.id]?.length || 0,
+          previewCacheDataUrlLength: maskPreviewCacheDataUrls[layer.mask.id]?.length || 0,
+          previewUrlLength: maskPreviewUrls[layer.mask.id]?.length || 0,
+        }
+      : null,
+    maskedImage: masked
+      ? { width: masked.width, height: masked.height }
+      : null,
+  }
+}
+
+function logCanvasLayerRenderState(message: string, data?: Record<string, unknown>) {
+  void appendDebugLog('mask', message, {
+    view: editor.view,
+    maskFeatureEnabled,
+    stageScale: stageScale.value,
+    canvas: {
+      width: editor.document.canvas.width,
+      height: editor.document.canvas.height,
+      backgroundVisible: editor.document.canvas.backgroundVisible,
+      backgroundMask: editor.document.canvas.backgroundMask
+        ? {
+            id: editor.document.canvas.backgroundMask.id,
+            enabled: editor.document.canvas.backgroundMask.enabled,
+            sourceVersion: editor.document.canvas.backgroundMask.sourceVersion,
+            inMemoryDataUrlLength: editor.maskDataUrls[editor.document.canvas.backgroundMask.id]?.length || 0,
+          }
+        : null,
+    },
+    visibleLayers: visibleCanvasLayers.value.map(canvasLayerRenderInfo),
+    ...data,
+  })
+}
+
+function layerPreviewStyle(layer: HandoutLayer) {
+  if (isImageLayer(layer)) {
+    const asset = editor.resolveAsset(layer.assetId) || editor.resolveBackground(layer.assetId)
+    if (!asset) return {}
+    const url = previewUrl(asset)
+    return url ? { backgroundImage: `url("${url}")` } : {}
+  }
+  if (isTextLayer(layer)) return { backgroundColor: layer.fill }
+  if (isShapeLayer(layer)) return { backgroundColor: layer.fill, borderColor: layer.stroke }
+  if (isPaintLayer(layer)) return { backgroundColor: layer.brushColor }
+  return {}
+}
+
+function layerPreviewText(layer: HandoutLayer) {
+  if (isTextLayer(layer)) return (layer.text || 'T').trim().slice(0, 1) || 'T'
+  if (isShapeLayer(layer)) return layer.shape === 'line' ? '-' : ''
+  if (isPaintLayer(layer)) return 'P'
+  return ''
+}
+
+function maskPreviewClass(layer: HandoutLayer) {
+  if (!maskFeatureEnabled) return { enabled: false, disabled: false, editing: false, empty: true }
+  return {
+    enabled: Boolean(layer.mask?.enabled),
+    disabled: Boolean(layer.mask && !layer.mask.enabled),
+    editing: editor.maskEditTarget?.kind === 'layer' && editor.maskEditTarget.layerId === layer.id,
+    empty: !layer.mask,
+  }
+}
+
+function maskProxyMaxEdge() {
+  const largest = Math.max(editor.document.canvas.width, editor.document.canvas.height)
+  const zoomAwareEdge = Math.max(256, Math.ceil(largest * Math.max(stageScale.value, 0.05) * 1.5))
+  return Math.min(largest, EDITOR_MASK_PREVIEW_MAX_EDGE, zoomAwareEdge)
+}
+
+function maskProjectTarget() {
+  return {
+    projectId: editor.currentProjectId,
+    projectDir: editor.projectDir || undefined,
+  }
+}
+
+function maskPreviewCacheIsValid(mask: LayerMask) {
+  return Boolean(
+    mask.cache?.preview1200Path
+    && mask.cache.sourceVersion === mask.sourceVersion
+    && mask.cache.previewVersion === 1
+    && mask.cache.maxEdge === EDITOR_MASK_PREVIEW_MAX_EDGE,
+  )
+}
+
+function currentMaskById(maskId: string) {
+  if (editor.document.canvas.backgroundMask?.id === maskId) return editor.document.canvas.backgroundMask
+  return editor.document.layers.find((layer) => layer.mask?.id === maskId)?.mask
+}
+
+function requestIdleTask(task: () => void) {
+  const win = window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number }
+  if (win.requestIdleCallback) {
+    win.requestIdleCallback(task, { timeout: 1500 })
+    return
+  }
+  window.setTimeout(task, 250)
+}
+
+function waitForIdleTask() {
+  return new Promise<void>((resolve) => requestIdleTask(resolve))
+}
+
+function scheduleMaskPreviewCache(mask: LayerMask) {
+  if (!maskFeatureEnabled) return
+  if (!editor.currentProjectId && !editor.projectDir) return
+  if (maskPreviewCacheIsValid(mask)) return
+  if (pendingMaskPreviewCacheIds.has(mask.id)) {
+    const queuedIndex = maskPreviewCacheQueue.findIndex((item) => item.id === mask.id)
+    if (queuedIndex >= 0) maskPreviewCacheQueue[queuedIndex] = { ...mask }
+    else maskPreviewCacheQueue.push({ ...mask })
+    void appendDebugLog('mask', 'mask-preview-cache-rescheduled', {
+      maskId: mask.id,
+      sourceVersion: mask.sourceVersion,
+      maxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+    })
+    return
+  }
+  pendingMaskPreviewCacheIds.add(mask.id)
+  maskPreviewCacheQueue.push({ ...mask })
+  void appendDebugLog('mask', 'mask-preview-cache-scheduled', {
+    maskId: mask.id,
+    sourceVersion: mask.sourceVersion,
+    maxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+  })
+  runNextMaskPreviewCacheTask()
+}
+
+function runNextMaskPreviewCacheTask() {
+  if (maskPreviewCacheRunning) return
+  const nextMask = maskPreviewCacheQueue.shift()
+  if (!nextMask) return
+  maskPreviewCacheRunning = true
+  requestIdleTask(() => {
+    void generateMaskPreviewCache(nextMask)
+      .finally(() => {
+        if (!maskPreviewCacheQueue.some((item) => item.id === nextMask.id)) {
+          pendingMaskPreviewCacheIds.delete(nextMask.id)
+        }
+        maskPreviewCacheRunning = false
+        runNextMaskPreviewCacheTask()
+      })
+  })
+}
+
+async function generateMaskPreviewCache(mask: LayerMask) {
+  const currentBefore = currentMaskById(mask.id)
+  if (!currentBefore || currentBefore.sourceVersion !== mask.sourceVersion) {
+    void appendDebugLog('mask', 'mask-preview-cache-skip-stale-before', {
+      maskId: mask.id,
+      queuedVersion: mask.sourceVersion,
+      currentVersion: currentBefore?.sourceVersion,
+    })
+    return
+  }
+  try {
+    const startedAt = performance.now()
+    const source = await editor.loadMaskDataUrl(mask)
+    const currentAfterLoad = currentMaskById(mask.id)
+    if (!currentAfterLoad || currentAfterLoad.sourceVersion !== mask.sourceVersion) {
+      void appendDebugLog('mask', 'mask-preview-cache-skip-stale-after-load', {
+        maskId: mask.id,
+        queuedVersion: mask.sourceVersion,
+        currentVersion: currentAfterLoad?.sourceVersion,
+      })
+      return
+    }
+    const preview = await downsampleDataUrl(source, EDITOR_MASK_PREVIEW_MAX_EDGE)
+    const currentAfterPreview = currentMaskById(mask.id)
+    if (!currentAfterPreview || currentAfterPreview.sourceVersion !== mask.sourceVersion) {
+      void appendDebugLog('mask', 'mask-preview-cache-skip-stale-after-preview', {
+        maskId: mask.id,
+        queuedVersion: mask.sourceVersion,
+        currentVersion: currentAfterPreview?.sourceVersion,
+      })
+      return
+    }
+    const cache = await editor.saveMaskCache(currentAfterPreview, preview, EDITOR_MASK_PREVIEW_MAX_EDGE)
+    if (!cache) return
+    maskPreviewCacheDataUrls[mask.id] = preview
+    await editor.saveProjectDocumentSnapshot()
+    void appendDebugLog('mask', 'mask-preview-cache-saved', {
+      maskId: mask.id,
+      path: cache.preview1200Path,
+      sourceVersion: cache.sourceVersion,
+      maxEdge: cache.maxEdge,
+      durationMs: Math.round(performance.now() - startedAt),
+    })
+    void refreshMaskPreviewUrls()
+    scheduleMaskCompositeRefresh('mask-preview-cache-saved')
+  } catch (error) {
+    void appendDebugLog('mask', 'mask-preview-cache-failed', {
+      maskId: mask.id,
+      sourceVersion: mask.sourceVersion,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    })
+  }
+}
+
+async function loadMaskPreviewCacheDataUrl(mask: LayerMask) {
+  if (!maskFeatureEnabled) return undefined
+  const existing = maskPreviewCacheDataUrls[mask.id]
+  if (existing && maskPreviewCacheIsValid(mask)) return existing
+  if (maskPreviewCacheIsValid(mask) && mask.cache?.preview1200Path) {
+    try {
+      const dataUrl = await readProjectFileDataUrl(maskProjectTarget(), mask.cache.preview1200Path, 'image/png')
+      maskPreviewCacheDataUrls[mask.id] = dataUrl
+      void appendDebugLog('mask', 'mask-preview-cache-hit', {
+        maskId: mask.id,
+        path: mask.cache.preview1200Path,
+        sourceVersion: mask.sourceVersion,
+      })
+      return dataUrl
+    } catch (error) {
+      void appendDebugLog('mask', 'mask-preview-cache-read-failed', {
+        maskId: mask.id,
+        path: mask.cache.preview1200Path,
+        error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+      })
+    }
+  }
+  delete maskPreviewCacheDataUrls[mask.id]
+  scheduleMaskPreviewCache(mask)
+  return undefined
 }
 
 function isShapeLayer(layer: HandoutLayer): layer is ShapeLayer {
@@ -467,16 +889,91 @@ function logBackgroundRender(message: string, data?: Record<string, unknown>) {
 
 function startLayerListDrag(layer: HandoutLayer, event: DragEvent) {
   draggedLayerId.value = layer.id
+  draggedGroupId.value = ''
   event.dataTransfer?.setData('application/x-handout-layer', layer.id)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
-function handleLayerListDrop(targetLayer: HandoutLayer, event: DragEvent) {
+function startGroupListDrag(group: LayerGroup, event: DragEvent) {
+  draggedGroupId.value = group.id
+  draggedLayerId.value = ''
+  event.dataTransfer?.setData('application/x-handout-group', group.id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+async function handleLayerListDrop(targetLayer: HandoutLayer, event: DragEvent) {
   event.preventDefault()
+  const maskLayerId = event.dataTransfer?.getData('application/x-handout-mask-layer') || draggedMaskLayerId.value
+  if (maskLayerId) {
+    await handleMaskDrop(targetLayer, event)
+    return
+  }
+  const groupId = event.dataTransfer?.getData('application/x-handout-group') || draggedGroupId.value
+  if (groupId) {
+    editor.moveGroupToIndex(groupId, targetLayer.zIndex)
+    draggedGroupId.value = ''
+    return
+  }
   const layerId = event.dataTransfer?.getData('application/x-handout-layer') || draggedLayerId.value
   if (!layerId || layerId === targetLayer.id) return
+  const targetGroup = groupForLayer(targetLayer.id)
+  const sourceGroup = groupForLayer(layerId)
+  if (targetGroup) {
+    editor.addLayerToGroupAt(layerId, targetGroup.id, targetLayer.id)
+    draggedLayerId.value = ''
+    return
+  }
+  if (sourceGroup) {
+    editor.moveLayerOutOfGroupToIndex(layerId, targetLayer.zIndex)
+    draggedLayerId.value = ''
+    return
+  }
   editor.moveLayerToIndex(layerId, targetLayer.zIndex)
   draggedLayerId.value = ''
+}
+
+function handleGroupDrop(group: LayerGroup, event: DragEvent) {
+  event.preventDefault()
+  const groupId = event.dataTransfer?.getData('application/x-handout-group') || draggedGroupId.value
+  if (groupId) {
+    if (groupId !== group.id) {
+      const topLayer = layersForGroup(group).at(-1)
+      editor.moveGroupToIndex(groupId, topLayer?.zIndex ?? editor.document.layers.length)
+    }
+    draggedGroupId.value = ''
+    return
+  }
+  const layerId = event.dataTransfer?.getData('application/x-handout-layer') || draggedLayerId.value
+  if (!layerId || group.layerIds.includes(layerId)) return
+  editor.addLayerToGroupAt(layerId, group.id)
+  draggedLayerId.value = ''
+}
+
+function groupForLayer(layerId: string) {
+  return editor.groups.find((group) => group.layerIds.includes(layerId))
+}
+
+function layersForGroup(group: LayerGroup) {
+  const byId = new Map(editor.document.layers.map((layer) => [layer.id, layer]))
+  return group.layerIds
+    .map((id) => byId.get(id))
+    .filter((layer): layer is HandoutLayer => Boolean(layer))
+}
+
+function groupIsCollapsed(groupId: string) {
+  return collapsedGroupIds.value.includes(groupId)
+}
+
+function toggleGroupCollapsed(groupId: string) {
+  collapsedGroupIds.value = groupIsCollapsed(groupId)
+    ? collapsedGroupIds.value.filter((id) => id !== groupId)
+    : [...collapsedGroupIds.value, groupId]
+}
+
+function clearLayerDragState() {
+  draggedLayerId.value = ''
+  draggedGroupId.value = ''
+  draggedMaskLayerId.value = ''
 }
 
 function selectLayerFromList(layerId: string, event?: MouseEvent | KeyboardEvent) {
@@ -502,6 +999,85 @@ function selectLayerFromList(layerId: string, event?: MouseEvent | KeyboardEvent
 function toggleLayerVisibility(layer: HandoutLayer) {
   editor.patchLayer(layer.id, { visible: !layer.visible })
   void updateTransformer()
+}
+
+async function toggleSelectedLayerMask() {
+  if (!maskFeatureEnabled) return
+  const layers = selectedMaskControlLayers.value
+  if (!layers.length) return
+  if (!selectedMaskControlDeletes.value) {
+    for (const layer of layers) {
+      if (!layer.mask) editor.addMaskToLayer(layer.id)
+    }
+    void refreshMaskPreviewUrls()
+    return
+  }
+  const confirmed = await confirm(`Delete masks from ${layers.length} selected layer${layers.length === 1 ? '' : 's'}?`, {
+    title: 'Delete layer mask',
+    kind: 'warning',
+    okLabel: 'Delete',
+    cancelLabel: 'Cancel',
+  })
+  if (!confirmed) return
+  for (const layer of layers) {
+    if (!layer.mask) continue
+    editor.deleteLayerMaskById(layer.id)
+    delete maskPreviewUrls[layer.mask.id]
+    delete maskPreviewCacheDataUrls[layer.mask.id]
+  }
+}
+
+function toggleMaskEditFromLayerRow(layer: HandoutLayer, event: MouseEvent) {
+  if (!maskFeatureEnabled) return
+  event.stopPropagation()
+  if (!layer.mask) return
+  const isEditing = editor.maskEditTarget?.kind === 'layer' && editor.maskEditTarget.layerId === layer.id
+  if (isEditing) {
+    editor.exitMaskEdit()
+    return
+  }
+  editor.selectLayer(layer.id)
+  editor.editLayerMask(layer.id)
+}
+
+function toggleMaskEnabledFromLayerRow(layer: HandoutLayer, event: MouseEvent) {
+  if (!maskFeatureEnabled) return
+  event.stopPropagation()
+  if (!layer.mask) return
+  editor.patchLayer(layer.id, {
+    mask: {
+      ...layer.mask,
+      enabled: !layer.mask.enabled,
+      updatedAt: new Date().toISOString(),
+    },
+  } as Partial<HandoutLayer>)
+}
+
+function startMaskDrag(layer: HandoutLayer, event: DragEvent) {
+  if (!maskFeatureEnabled) return
+  if (!layer.mask || !event.dataTransfer) return
+  draggedMaskLayerId.value = layer.id
+  event.dataTransfer.effectAllowed = 'copyMove'
+  event.dataTransfer.setData('application/x-handout-mask-layer', layer.id)
+}
+
+async function handleMaskDrop(targetLayer: HandoutLayer, event: DragEvent) {
+  if (!maskFeatureEnabled) return
+  const sourceLayerId = event.dataTransfer?.getData('application/x-handout-mask-layer') || draggedMaskLayerId.value
+  if (!sourceLayerId || sourceLayerId === targetLayer.id) return
+  const copy = event.metaKey || event.ctrlKey
+  if (targetLayer.mask) {
+    const confirmed = await confirm(`Replace mask on ${layerName(targetLayer)}?`, {
+      title: 'Replace layer mask',
+      kind: 'warning',
+      okLabel: copy ? 'Copy and replace' : 'Move and replace',
+      cancelLabel: 'Cancel',
+    })
+    if (!confirmed) return
+  }
+  await editor.moveOrCopyLayerMask(sourceLayerId, targetLayer.id, copy)
+  draggedMaskLayerId.value = ''
+  void refreshMaskPreviewUrls()
 }
 
 async function addAssetToCanvas(asset: LibraryRecord) {
@@ -630,17 +1206,10 @@ function handleDocumentFontDrop(event: DragEvent) {
   draggedFontId.value = ''
 }
 
-function handleGlobalKeydown(event: KeyboardEvent) {
-  if (editor.view !== 'editor' || isEditableTarget(event.target)) return
-  if (event.key !== 'Delete' && event.key !== 'Backspace') return
-  if (!editor.selectedLayerId) return
-  event.preventDefault()
-  deleteLayer()
-}
-
 function layerConfig(layer: HandoutLayer) {
   return {
     ...layerKonvaConfig(layer),
+    visible: isLayerEffectivelyVisible(editor.document, layer),
     draggable: activeTool.value === 'select' && !layer.locked,
   }
 }
@@ -656,30 +1225,166 @@ function shapeConfig(layer: ShapeLayer) {
 }
 
 function paintConfig(layer: PaintLayer) {
-  return paintKonvaConfig(layer, layerConfig(layer))
+  const selected = editor.selectedLayerIds.includes(layer.id)
+  return paintKonvaConfig(layer, {
+    ...layerConfig(layer),
+    listening: selected,
+    draggable: selected && activeTool.value === 'select' && !layer.locked,
+  })
+}
+
+function maskedLayerConfig(layer: HandoutLayer) {
+  const selectedPaint = isPaintLayer(layer) && editor.selectedLayerIds.includes(layer.id)
+  return {
+    ...layerConfig(layer),
+    image: maskedImageForLayer(layer),
+    listening: !isPaintLayer(layer) || selectedPaint,
+    draggable: (!isPaintLayer(layer) || selectedPaint) && activeTool.value === 'select' && !layer.locked,
+  }
+}
+
+function setMaskEditNodeRef(node: unknown) {
+  maskEditNodeRef.value = node as NodeRef | undefined
+}
+
+function maskEditConfig(layer: HandoutLayer) {
+  if (!maskFeatureEnabled) return {}
+  const mask = layer.mask
+  const canDragMask = activeTool.value === 'select'
+  return {
+    image: maskEditImage.value,
+    x: mask?.flipX ? (mask.x + mask.width * mask.scaleX) : mask?.x,
+    y: mask?.y,
+    width: mask?.width,
+    height: mask?.height,
+    scaleX: mask?.flipX ? -mask.scaleX : mask?.scaleX,
+    scaleY: mask?.scaleY,
+    rotation: mask?.rotation,
+    opacity: isDraggingMask.value ? 0.42 : 0,
+    draggable: canDragMask,
+    listening: canDragMask,
+  }
+}
+
+function onMaskEditDragStart(layer: HandoutLayer) {
+  if (!maskFeatureEnabled) return
+  if (!layer.mask) return
+  isDraggingMask.value = true
+  void appendDebugLog('mask', 'mask-edit-drag-start', {
+    layerId: layer.id,
+    maskId: layer.mask.id,
+    previewMaxEdge: maskProxyMaxEdge(),
+  })
+}
+
+function onMaskEditDragEnd(layer: HandoutLayer, event: KonvaEvent) {
+  if (!maskFeatureEnabled) return
+  if (!layer.mask) return
+  const node = event.target
+  editor.patchLayerMask(layer.id, {
+    x: layer.mask.flipX ? node.x() - layer.mask.width * layer.mask.scaleX : node.x(),
+    y: node.y(),
+  })
+  isDraggingMask.value = false
+  void appendDebugLog('mask', 'mask-edit-drag-end', {
+    layerId: layer.id,
+    maskId: layer.mask.id,
+    x: node.x(),
+    y: node.y(),
+  })
+  scheduleMaskCompositeRefresh('mask-edit-drag-end')
+}
+
+function onMaskEditTransformEnd(layer: HandoutLayer, event: KonvaEvent) {
+  if (!maskFeatureEnabled) return
+  if (!layer.mask) return
+  const node = event.target
+  const scaleX = node.scaleX()
+  const scaleY = node.scaleY()
+  editor.patchLayerMask(layer.id, {
+    x: scaleX < 0 ? node.x() - layer.mask.width * Math.abs(scaleX) : node.x(),
+    y: node.y(),
+    scaleX: Math.abs(scaleX),
+    scaleY: Math.abs(scaleY),
+    rotation: node.rotation(),
+    flipX: scaleX < 0,
+  })
+  scheduleMaskCompositeRefresh('mask-edit-transform-end')
+  void updateTransformer()
 }
 
 function setActiveTool(tool: EditorTool) {
   activeTool.value = tool
 }
 
+async function fitEditorCanvas(reason = 'fit') {
+  await nextTick()
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  resizeStageViewport()
+  fitCanvasView(reason)
+}
+
 function activePaintDefaults() {
   const layer = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
   const mode = activeTool.value === 'eraser' ? 'eraser' : 'brush'
   return {
-    color: layer?.brushColor ?? '#111827',
-    width: mode === 'eraser' ? layer?.eraserWidth ?? 12 : layer?.brushWidth ?? 6,
-    tension: layer?.brushTension ?? 0.35,
+    color: layer?.brushColor ?? editor.toolSettings.brushColor,
+    brushKind: layer?.brushKind ?? editor.toolSettings.brushKind,
+    width: mode === 'eraser' ? layer?.eraserWidth ?? editor.toolSettings.eraserWidth : layer?.brushWidth ?? editor.toolSettings.brushWidth,
+    opacity: layer?.brushOpacity ?? editor.toolSettings.brushOpacity,
+    eraserOpacity: layer?.eraserOpacity ?? editor.toolSettings.eraserOpacity,
+    tension: layer?.brushTension ?? editor.toolSettings.brushTension,
   }
 }
 
-function localizeStrokePoints(points: number[], layer?: PaintLayer) {
+function localizeStrokePoints(points: StrokePoint[], layer?: PaintLayer) {
   if (!layer) return points
-  const next: number[] = []
-  for (let index = 0; index < points.length; index += 2) {
-    next.push(points[index] - layer.x, points[index + 1] - layer.y)
+  return points.map((point) => ({
+    ...point,
+    x: point.x - layer.x,
+    y: point.y - layer.y,
+  }))
+}
+
+function maskLocalPoint(mask: NonNullable<HandoutLayer['mask']>, point: StrokePoint): StrokePoint {
+  const radians = -((mask.rotation || 0) * Math.PI) / 180
+  const dx = point.x - mask.x
+  const dy = point.y - mask.y
+  const rotatedX = dx * Math.cos(radians) - dy * Math.sin(radians)
+  const rotatedY = dx * Math.sin(radians) + dy * Math.cos(radians)
+  const scaledX = rotatedX / (mask.scaleX || 1)
+  const scaledY = rotatedY / (mask.scaleY || 1)
+  return {
+    ...point,
+    x: mask.flipX ? mask.width - scaledX : scaledX,
+    y: scaledY,
   }
-  return next
+}
+
+function localizeMaskStroke(stroke: PaintStroke) {
+  if (!maskFeatureEnabled) return undefined
+  const target = editor.maskEditTarget
+  if (!target) return undefined
+  if (target.kind === 'background') {
+    const mask = editor.document.canvas.backgroundMask
+    return mask ? { mask, stroke } : undefined
+  }
+  const layer = editor.document.layers.find((item) => item.id === target.layerId)
+  if (!layer?.mask) return undefined
+  const rawPoints = (stroke.rawPoints ?? []).map((point) => maskLocalPoint(layer.mask!, point))
+  const points = strokePointsToFlat(rawPoints)
+  return {
+    mask: layer.mask,
+    stroke: {
+      ...stroke,
+      rawPoints,
+      points,
+    },
+  }
+}
+
+function eventPressure(_event?: MouseEvent) {
+  return 0.5
 }
 
 function startPaintStroke(event: KonvaEvent) {
@@ -689,10 +1394,14 @@ function startPaintStroke(event: KonvaEvent) {
   draftStroke.value = {
     id: crypto.randomUUID(),
     points: [point.x, point.y],
+    rawPoints: [{ x: point.x, y: point.y, pressure: eventPressure(event.evt) }],
     strokeWidth: defaults.width,
     color: defaults.color,
     tension: defaults.tension,
     mode: activeTool.value === 'eraser' ? 'eraser' : 'brush',
+    brushKind: defaults.brushKind,
+    opacity: defaults.brushKind === 'highlighter' ? Math.min(defaults.opacity, 0.38) : defaults.opacity,
+    eraserOpacity: defaults.eraserOpacity,
   }
   event.cancelBubble = true
   return true
@@ -705,9 +1414,26 @@ function movePaintStroke(event: KonvaEvent) {
   const lastX = points.at(-2)
   const lastY = points.at(-1)
   if (lastX !== undefined && lastY !== undefined && Math.hypot(point.x - lastX, point.y - lastY) < 0.5) return true
+  const nextPoints: StrokePoint[] = []
+  if (lastX !== undefined && lastY !== undefined) {
+    const distance = Math.hypot(point.x - lastX, point.y - lastY)
+    const spacing = Math.max(1.5, Math.min(6, draftStroke.value.strokeWidth / 3))
+    const steps = Math.max(1, Math.ceil(distance / spacing))
+    for (let step = 1; step <= steps; step += 1) {
+      const ratio = step / steps
+      nextPoints.push({
+        x: lastX + (point.x - lastX) * ratio,
+        y: lastY + (point.y - lastY) * ratio,
+        pressure: eventPressure(event.evt),
+      })
+    }
+  } else {
+    nextPoints.push({ x: point.x, y: point.y, pressure: eventPressure(event.evt) })
+  }
   draftStroke.value = {
     ...draftStroke.value,
-    points: [...points, point.x, point.y],
+    points: [...points, ...strokePointsToFlat(nextPoints)],
+    rawPoints: [...(draftStroke.value.rawPoints ?? []), ...nextPoints],
   }
   event.cancelBubble = true
   return true
@@ -715,12 +1441,24 @@ function movePaintStroke(event: KonvaEvent) {
 
 function stopPaintStroke() {
   if (!draftStroke.value) return false
+  if (editor.maskEditTarget) {
+    const maskStroke = localizeMaskStroke(draftStroke.value)
+    draftStroke.value = undefined
+    if (maskStroke) void editor.paintMask(maskStroke.mask, maskStroke.stroke)
+    return true
+  }
   const selectedPaint = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
   const stroke = {
     ...draftStroke.value,
-    points: localizeStrokePoints(draftStroke.value.points, selectedPaint),
+    rawPoints: localizeStrokePoints(draftStroke.value.rawPoints ?? [], selectedPaint),
   }
-  if (stroke.points.length === 2) stroke.points = [...stroke.points, stroke.points[0] + 0.1, stroke.points[1] + 0.1]
+  if (stroke.rawPoints.length === 1) {
+    stroke.rawPoints = [
+      ...stroke.rawPoints,
+      { ...stroke.rawPoints[0], x: stroke.rawPoints[0].x + 0.1, y: stroke.rawPoints[0].y + 0.1 },
+    ]
+  }
+  stroke.points = strokePointsToFlat(stroke.rawPoints)
   editor.appendStrokeToPaintLayer(stroke)
   draftStroke.value = undefined
   void updateTransformer()
@@ -880,13 +1618,29 @@ async function autoResizeTextLayerHeights() {
   for (const layer of editor.document.layers.filter(isTextLayer)) {
     const node = layerNodeRefs[layer.id]?.getNode() as Konva.Text | undefined
     if (!node) continue
-    const height = Math.max(12, Math.ceil(node.getClientRect({ skipTransform: true }).height))
+    const height = autoTextLayerHeight(layer, node)
     if (Math.abs(height - layer.height) > 1) patches.push({ id: layer.id, height })
   }
   for (const patch of patches) editor.patchLayer(patch.id, { height: patch.height })
 }
 
+function textLineCount(node: Konva.Text) {
+  const textNode = node as Konva.Text & { textArr?: unknown[] }
+  if (Array.isArray(textNode.textArr) && textNode.textArr.length) return textNode.textArr.length
+  const explicitLines = node.text().split('\n').length
+  return Math.max(1, explicitLines)
+}
+
+function autoTextLayerHeight(layer: TextLayer, node: Konva.Text) {
+  return Math.max(12, Math.ceil(textLineCount(node) * layer.fontSize * layer.lineHeight))
+}
+
 function selectCanvasLayer(layerId: string, event?: KonvaEvent) {
+  if (editor.maskEditTarget) {
+    if (event) event.cancelBubble = true
+    event?.evt?.preventDefault()
+    return
+  }
   if (activeTool.value !== 'select') {
     if (event) event.cancelBubble = true
     return
@@ -901,6 +1655,208 @@ function deleteLayer(layerId?: string) {
   if (layerId) editor.selectLayer(layerId)
   editor.deleteSelectedLayer()
   void updateTransformer()
+}
+
+function layerOuterBounds(layer: HandoutLayer): FlattenedLayerBounds {
+  const blur = Math.max(0, layer.effects?.blur ?? 0)
+  const strokePad = isShapeLayer(layer) ? Math.max(0, layer.strokeWidth ?? 0) : 0
+  const pad = Math.ceil(Math.max(4, blur * 2, strokePad * 2))
+  const width = Math.max(1, layer.width)
+  const height = Math.max(1, layer.height)
+  const corners = [
+    { x: 0, y: 0 },
+    { x: width, y: 0 },
+    { x: width, y: height },
+    { x: 0, y: height },
+  ]
+  const rotation = (layer.rotation * Math.PI) / 180
+  const cos = Math.cos(rotation)
+  const sin = Math.sin(rotation)
+  const points = corners.map((point) => ({
+    x: layer.x + point.x * cos - point.y * sin,
+    y: layer.y + point.x * sin + point.y * cos,
+  }))
+  const xs = points.map((point) => point.x)
+  const ys = points.map((point) => point.y)
+  return {
+    x: Math.floor(Math.min(...xs) - pad),
+    y: Math.floor(Math.min(...ys) - pad),
+    width: Math.ceil(Math.max(...xs) - Math.min(...xs) + pad * 2),
+    height: Math.ceil(Math.max(...ys) - Math.min(...ys) + pad * 2),
+  }
+}
+
+function selectedLayerBounds(): FlattenedLayerBounds | undefined {
+  const layers = editor.selectedLayers
+  if (!layers.length) return undefined
+  const bounds = layers.map(layerOuterBounds)
+  const minX = Math.min(...bounds.map((item) => item.x))
+  const minY = Math.min(...bounds.map((item) => item.y))
+  const maxX = Math.max(...bounds.map((item) => item.x + item.width))
+  const maxY = Math.max(...bounds.map((item) => item.y + item.height))
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, Math.ceil(maxX - minX)),
+    height: Math.max(1, Math.ceil(maxY - minY)),
+  }
+}
+
+function cloneLayerForFlatten(layer: HandoutLayer): HandoutLayer {
+  return JSON.parse(JSON.stringify(layer)) as HandoutLayer
+}
+
+function shiftedLayerForFlatten(layer: HandoutLayer, bounds: FlattenedLayerBounds, zIndex: number): HandoutLayer {
+  const cloned = cloneLayerForFlatten(layer)
+  return {
+    ...cloned,
+    x: layer.x - bounds.x,
+    y: layer.y - bounds.y,
+    zIndex,
+    mask: cloned.mask
+      ? {
+          ...cloned.mask,
+          x: cloned.mask.x - bounds.x,
+          y: cloned.mask.y - bounds.y,
+        }
+      : cloned.mask,
+  }
+}
+
+function flattenDocumentForSelectedLayers(bounds: FlattenedLayerBounds, layerIds: string[]): HandoutDocument {
+  const idSet = new Set(layerIds)
+  const layers = editor.document.layers
+    .filter((layer) => idSet.has(layer.id))
+    .sort((a, b) => a.zIndex - b.zIndex)
+    .map((layer, index) => shiftedLayerForFlatten(layer, bounds, index))
+  return {
+    schemaVersion: 1,
+    id: crypto.randomUUID(),
+    title: `${editor.document.title} flat`,
+    canvas: {
+      width: bounds.width,
+      height: bounds.height,
+      backgroundColor: 'rgba(0,0,0,0)',
+      backgroundVisible: true,
+      backgroundMask: null,
+      effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
+    },
+    layers,
+    groups: [],
+    projectAssets: [],
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+async function flattenSelectedLayers() {
+  const layerIds = [...editor.selectedLayerIds]
+  logFlat('flat-click', {
+    isFlattening: isFlatteningLayers.value,
+    selectedLayerIds: layerIds,
+    selectedLayers: editor.selectedLayers.map((layer) => ({
+      id: layer.id,
+      type: layer.type,
+      name: layer.name,
+      x: layer.x,
+      y: layer.y,
+      width: layer.width,
+      height: layer.height,
+      zIndex: layer.zIndex,
+    })),
+  })
+  if (isFlatteningLayers.value || !layerIds.length) return
+  const bounds = selectedLayerBounds()
+  logFlat('flat-bounds', { bounds })
+  if (!bounds) return
+  const confirmed = await confirm('Flatten selected layers into one image layer? This cannot be undone.', {
+    title: 'Confirm flatten',
+    kind: 'warning',
+    okLabel: 'Flat',
+    cancelLabel: 'Cancel',
+  })
+  logFlat('flat-confirmed', { confirmed })
+  if (!confirmed) return
+  isFlatteningLayers.value = true
+  try {
+    const flatDocument = flattenDocumentForSelectedLayers(bounds, layerIds)
+    logFlat('flat-render-start', {
+      canvas: flatDocument.canvas,
+      layers: flatDocument.layers.map((layer) => ({
+        id: layer.id,
+        type: layer.type,
+        name: layer.name,
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height,
+        zIndex: layer.zIndex,
+      })),
+    })
+    const dataUrl = await renderHandoutToDataUrl(flatDocument, editor.library, 1, imageElements, 'image/png', undefined, {
+      projectTarget: {
+        projectId: editor.currentProjectId,
+        projectDir: editor.projectDir || undefined,
+      },
+      masksEnabled: maskFeatureEnabled,
+      maskDataUrls: editor.maskDataUrls,
+    })
+    logFlat('flat-render-complete', {
+      dataUrlBytes: dataUrlByteSize(dataUrl),
+      dataUrlPrefix: dataUrl.slice(0, 32),
+    })
+    const assetId = crypto.randomUUID()
+    const fileName = `${editor.document.title.replace(/[^a-zA-Z0-9._-]+/g, '-') || 'handout'}-flat.png`
+    const path = await saveProjectAsset({
+      projectId: editor.currentProjectId,
+      projectDir: editor.projectDir || undefined,
+    }, assetId, fileName, dataUrl)
+    const now = new Date().toISOString()
+    const asset: LibraryRecord = {
+      id: assetId,
+      name: fileName,
+      fileName,
+      path,
+      thumbnailPath: null,
+      tags: ['flat'],
+      folder: '',
+      mediaType: 'image/png',
+      createdAt: now,
+      updatedAt: now,
+    }
+    editor.registerProjectAsset(asset)
+    logFlat('flat-project-asset-saved', {
+      assetId: asset.id,
+      name: asset.name,
+      path: asset.path,
+      mediaType: asset.mediaType,
+    })
+    await loadImage(asset)
+    editor.setLayerSelection(layerIds)
+    editor.flattenSelectedLayersToImage(asset, bounds)
+    logFlat('flat-document-replaced', {
+      assetId: asset.id,
+      selectedLayerIds: [...editor.selectedLayerIds],
+      layers: editor.document.layers.map((layer) => ({
+        id: layer.id,
+        type: layer.type,
+        name: layer.name,
+        assetId: isImageLayer(layer) ? layer.assetId : undefined,
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height,
+        zIndex: layer.zIndex,
+      })),
+    })
+    await nextTick()
+    void syncImages(editor.library)
+    void updateTransformer()
+  } catch (error) {
+    logFlat('flat-failed', { error: serializableLogData({ error }) })
+    throw error
+  } finally {
+    isFlatteningLayers.value = false
+  }
 }
 
 function onLayerDragStart(layer: HandoutLayer, event: KonvaEvent) {
@@ -924,6 +1880,7 @@ function onLayerDragStart(layer: HandoutLayer, event: KonvaEvent) {
 }
 
 function handleStagePointer(event: KonvaEvent) {
+  if (editor.maskEditTarget) return
   if (activeTool.value !== 'select') return
   if (suppressNextStageClick) {
     suppressNextStageClick = false
@@ -982,7 +1939,7 @@ function stopSelectionBox() {
   if (hasArea) {
     editor.setLayerSelection(
       editor.document.layers
-        .filter((layer) => layer.visible && containsSelection(layer))
+        .filter((layer) => isLayerEffectivelyVisible(editor.document, layer) && containsSelection(layer))
         .map((layer) => layer.id),
     )
     void updateTransformer()
@@ -1008,7 +1965,7 @@ function onTransformEnd(layer: HandoutLayer) {
     node.width(width)
     node.scaleX(1)
     node.scaleY(1)
-    height = Math.max(12, Math.ceil((node as Konva.Text).getClientRect({ skipTransform: true }).height))
+    height = autoTextLayerHeight(layer, node as Konva.Text)
   }
   const position = isShapeLayer(layer) && layer.shape === 'ellipse'
     ? {
@@ -1226,6 +2183,12 @@ async function updateTransformer() {
   await nextTick()
   const transformer = transformerRef.value?.getNode()
   if (!transformer) return
+  if (editor.maskEditTarget && activeTool.value === 'select') {
+    const maskNode = maskEditNodeRef.value?.getNode()
+    transformer.nodes(maskNode ? [maskNode] : [])
+    transformer.getLayer()?.batchDraw()
+    return
+  }
   const selectedNodes = editor.selectedLayerIds
     .map((layerId) => layerNodeRefs[layerId]?.getNode())
     .filter((node): node is Konva.Node => Boolean(node))
@@ -1408,6 +2371,14 @@ function selectedImageStatus(kind: 'background' | 'asset') {
   return record ? `Selected: ${record.name}` : 'Select an image file'
 }
 
+function fontPreviewSource(font: LibraryRecord) {
+  return previewUrl(font)
+}
+
+function toggleBackgroundVisibility() {
+  editor.patchCanvas({ backgroundVisible: !(editor.document.canvas.backgroundVisible !== false) })
+}
+
 async function createHandoutFromFinderImage(kind: 'background' | 'asset') {
   const record = selectedImageRecord(kind)
   if (!record) return
@@ -1437,24 +2408,13 @@ async function handleCreateBackgroundDrop(event: DragEvent) {
 }
 
 async function saveProject() {
-  const saved = await editor.saveCurrentProject()
-  if (saved && editor.currentProjectId) {
-    logHandoutPreview('rendering preview after save', {
-      projectId: editor.currentProjectId,
-      title: editor.document.title,
-      canvas: editor.document.canvas,
-      layers: editor.document.layers.length,
-    })
-    const dataUrl = await renderHandoutPreviewToDataUrl(editor.document, editor.library, imageElements)
-    const previewPath = await saveProjectPreview(editor.currentProjectId, dataUrl)
-    logHandoutPreview('saved preview after save', {
-      projectId: editor.currentProjectId,
-      previewPath,
-      dataUrlLength: dataUrl.length,
-      previewBytes: dataUrlByteSize(dataUrl),
-    })
-    await editor.refreshProjects()
-  }
+  await saveProjectWithPreview({
+    editor,
+    imageElements,
+    maxMaskEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+    maxCompositeEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+    logPreview: logHandoutPreview,
+  })
 }
 
 function selectedHandoutProject() {
@@ -1496,6 +2456,7 @@ async function ensureProjectPreviews() {
         || !project.previewPath.endsWith('preview.webp')
         || Number(project.previewSizeBytes || 0) > PREVIEW_TARGET_BYTES
       if (!shouldRegeneratePreview) continue
+      await waitForIdleTask()
       try {
         logHandoutPreview('generating preview', {
           projectId: project.id,
@@ -1504,7 +2465,13 @@ async function ensureProjectPreviews() {
           currentPreviewSizeBytes: project.previewSizeBytes,
         })
         const payload = await openManagedProject(project.id)
-        const dataUrl = await renderHandoutPreviewToDataUrl(payload.document, editor.library, imageElements)
+        const dataUrl = await renderHandoutPreviewToDataUrl(payload.document, editor.library, imageElements, {
+          projectTarget: { projectId: project.id },
+          masksEnabled: maskFeatureEnabled,
+          maxMaskEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+          maxCompositeEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+          usePixiMaskPreview: appConfiguration.mask.usePixiPreview,
+        })
         const previewPath = await saveProjectPreview(project.id, dataUrl)
         generated += 1
         logHandoutPreview('saved preview', {
@@ -1529,6 +2496,303 @@ async function ensureProjectPreviews() {
   }
 }
 
+async function refreshMaskedLayerImages() {
+  if (!maskFeatureEnabled) return
+  if (editor.view !== 'editor') return
+  if (isDraggingMask.value) {
+    void appendDebugLog('mask', 'refresh-masked-layer-images-skipped-dragging')
+    return
+  }
+  const runId = ++maskedLayerRefreshRunId
+  const startedAt = performance.now()
+  const maskedLayers = editor.document.layers.filter((layer) => layer.mask?.enabled)
+  const proxyMaxEdge = maskProxyMaxEdge()
+  void appendDebugLog('mask', 'refresh-masked-layer-images-start', {
+    runId,
+    count: maskedLayers.length,
+    stageScale: stageScale.value,
+    proxyMaxEdge,
+    previewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+    canvas: { width: editor.document.canvas.width, height: editor.document.canvas.height },
+  })
+  logCanvasLayerRenderState('editor-layer-render-state-before-mask-refresh', {
+    runId,
+    maskedLayerIds: maskedLayers.map((layer) => layer.id),
+    proxyMaxEdge,
+  })
+  const maskedIds = new Set(maskedLayers.map((layer) => layer.id))
+  const nextImages: Record<string, HTMLCanvasElement | undefined> = {}
+  for (const layer of maskedLayers) {
+    const layerStartedAt = performance.now()
+    const maskDataUrls = { ...editor.maskDataUrls }
+    if (layer.mask) {
+      const inMemoryMask = editor.maskDataUrls[layer.mask.id]
+      const current = inMemoryMask || await loadMaskPreviewCacheDataUrl(layer.mask)
+      if (runId !== maskedLayerRefreshRunId || isDraggingMask.value) {
+        void appendDebugLog('mask', 'refresh-masked-layer-images-discarded-stale', { runId, layerId: layer.id })
+        return
+      }
+      if (!current) {
+        nextImages[layer.id] = maskedLayerImages[layer.id]
+        void appendDebugLog('mask', 'refresh-layer-mask-waiting-for-cache', {
+          runId,
+          layerId: layer.id,
+          maskId: layer.mask.id,
+          sourceVersion: layer.mask.sourceVersion,
+        })
+        continue
+      }
+      void appendDebugLog('mask', 'refresh-layer-mask-loaded', {
+        runId,
+        layerId: layer.id,
+        maskId: layer.mask.id,
+        source: inMemoryMask ? 'memory' : 'cache',
+        dataUrlLength: current.length,
+        durationMs: Math.round(performance.now() - layerStartedAt),
+      })
+      maskDataUrls[layer.mask.id] = proxyMaxEdge < EDITOR_MASK_PREVIEW_MAX_EDGE
+        ? await downsampleDataUrl(current, proxyMaxEdge)
+        : current
+      if (runId !== maskedLayerRefreshRunId || isDraggingMask.value) {
+        void appendDebugLog('mask', 'refresh-masked-layer-images-discarded-stale', { runId, layerId: layer.id })
+        return
+      }
+      void appendDebugLog('mask', 'refresh-layer-mask-downsampled', {
+        runId,
+        layerId: layer.id,
+        maskId: layer.mask.id,
+        proxyMaxEdge,
+        dataUrlLength: maskDataUrls[layer.mask.id]?.length || 0,
+        durationMs: Math.round(performance.now() - layerStartedAt),
+      })
+    }
+    // Keep live editor preview on the Canvas2D path for now. The Pixi bridge is
+    // retained for later optimization, but a bad Pixi readback result must not
+    // prevent asset masks from being applied in the editor.
+    if (!nextImages[layer.id]) {
+      nextImages[layer.id] = await renderMaskedLayerImage(layer, editor.library, imageElements, {
+        projectTarget: {
+          projectId: editor.currentProjectId,
+          projectDir: editor.projectDir || undefined,
+        },
+        masksEnabled: maskFeatureEnabled,
+        maskDataUrls,
+        maxMaskEdge: proxyMaxEdge,
+        maxCompositeEdge: proxyMaxEdge,
+        usePixiMaskPreview: appConfiguration.mask.usePixiPreview,
+      })
+    }
+    if (runId !== maskedLayerRefreshRunId || isDraggingMask.value) {
+      void appendDebugLog('mask', 'refresh-masked-layer-images-discarded-stale', { runId, layerId: layer.id })
+      return
+    }
+    void appendDebugLog('mask', 'refresh-layer-mask-rendered', {
+      runId,
+      layerId: layer.id,
+      maskId: layer.mask?.id,
+      producedImage: nextImages[layer.id]
+        ? { width: nextImages[layer.id]?.width, height: nextImages[layer.id]?.height }
+        : null,
+      durationMs: Math.round(performance.now() - layerStartedAt),
+    })
+  }
+  if (runId !== maskedLayerRefreshRunId || isDraggingMask.value) {
+    void appendDebugLog('mask', 'refresh-masked-layer-images-discarded-stale', { runId })
+    return
+  }
+  for (const id of Object.keys(maskedLayerImages)) {
+    if (!maskedIds.has(id)) delete maskedLayerImages[id]
+  }
+  for (const [id, image] of Object.entries(nextImages)) {
+    maskedLayerImages[id] = image
+  }
+  void appendDebugLog('mask', 'refresh-masked-layer-images-complete', {
+    runId,
+    count: maskedLayers.length,
+    durationMs: Math.round(performance.now() - startedAt),
+  })
+  logCanvasLayerRenderState('editor-layer-render-state-after-mask-refresh', {
+    runId,
+    maskedLayerIds: maskedLayers.map((layer) => layer.id),
+    maskedImageIds: Object.keys(maskedLayerImages),
+    durationMs: Math.round(performance.now() - startedAt),
+  })
+}
+
+async function refreshMaskPreviewUrls() {
+  if (!maskFeatureEnabled) return
+  if (isDraggingMask.value) {
+    void appendDebugLog('mask', 'refresh-mask-preview-urls-skipped-dragging')
+    return
+  }
+  const startedAt = performance.now()
+  const masks = editor.document.layers.map((layer) => layer.mask).filter(Boolean)
+  void appendDebugLog('mask', 'refresh-mask-preview-urls-start', { count: masks.length })
+  const maskIds = new Set(masks.map((mask) => mask!.id))
+  for (const id of Object.keys(maskPreviewUrls)) {
+    if (!maskIds.has(id)) delete maskPreviewUrls[id]
+  }
+  await Promise.all(masks.map(async (mask) => {
+    if (!mask) return
+    const maskStartedAt = performance.now()
+    const inMemoryMask = editor.maskDataUrls[mask.id]
+    const dataUrl = inMemoryMask || await loadMaskPreviewCacheDataUrl(mask)
+    if (!dataUrl) {
+      delete maskPreviewUrls[mask.id]
+      void appendDebugLog('mask', 'refresh-mask-preview-url-waiting-for-cache', {
+        maskId: mask.id,
+        sourceVersion: mask.sourceVersion,
+      })
+      return
+    }
+    maskPreviewUrls[mask.id] = await downsampleDataUrl(dataUrl, 96)
+    void appendDebugLog('mask', 'refresh-mask-preview-url-complete', {
+      maskId: mask.id,
+      source: inMemoryMask ? 'memory' : 'cache',
+      sourceLength: dataUrl.length,
+      previewLength: maskPreviewUrls[mask.id]?.length || 0,
+      durationMs: Math.round(performance.now() - maskStartedAt),
+    })
+  }))
+  void appendDebugLog('mask', 'refresh-mask-preview-urls-complete', {
+    count: masks.length,
+    durationMs: Math.round(performance.now() - startedAt),
+  })
+}
+
+async function refreshMaskEditImage() {
+  if (!maskFeatureEnabled) return
+  if (isDraggingMask.value) {
+    void appendDebugLog('mask', 'refresh-mask-edit-image-skipped-dragging')
+    return
+  }
+  const runId = ++maskEditImageRefreshRunId
+  const startedAt = performance.now()
+  const layer = activeMaskEditLayer.value
+  if (!layer?.mask) {
+    maskEditImage.value = undefined
+    return
+  }
+  const proxyMaxEdge = maskProxyMaxEdge()
+  void appendDebugLog('mask', 'refresh-mask-edit-image-start', {
+    runId,
+    layerId: layer.id,
+    maskId: layer.mask.id,
+    proxyMaxEdge,
+    previewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+  })
+  const inMemoryMask = editor.maskDataUrls[layer.mask.id]
+  const dataUrl = inMemoryMask || await loadMaskPreviewCacheDataUrl(layer.mask)
+  if (!dataUrl) {
+    maskEditImage.value = undefined
+    void appendDebugLog('mask', 'refresh-mask-edit-image-waiting-for-cache', {
+      runId,
+      layerId: layer.id,
+      maskId: layer.mask.id,
+      sourceVersion: layer.mask.sourceVersion,
+    })
+    return
+  }
+  const image = await loadImageFromDataUrl(await downsampleDataUrl(dataUrl, proxyMaxEdge))
+  if (runId !== maskEditImageRefreshRunId || isDraggingMask.value) {
+    void appendDebugLog('mask', 'refresh-mask-edit-image-discarded-stale', { runId, layerId: layer.id, maskId: layer.mask.id })
+    return
+  }
+  maskEditImage.value = image
+  void appendDebugLog('mask', 'refresh-mask-edit-image-complete', {
+    runId,
+    layerId: layer.id,
+    maskId: layer.mask.id,
+    source: inMemoryMask ? 'memory' : 'cache',
+    sourceLength: dataUrl.length,
+    durationMs: Math.round(performance.now() - startedAt),
+  })
+}
+
+async function refreshMaskedBackgroundImage() {
+  if (!maskFeatureEnabled) return
+  if (editor.view !== 'editor') return
+  if (isDraggingMask.value) {
+    void appendDebugLog('mask', 'refresh-masked-background-skipped-dragging')
+    return
+  }
+  const runId = ++maskedBackgroundRefreshRunId
+  if (!editor.document.canvas.backgroundMask?.enabled) {
+    maskedBackgroundImage.value = undefined
+    return
+  }
+  const proxyMaxEdge = maskProxyMaxEdge()
+  void appendDebugLog('mask', 'refresh-masked-background-start', {
+    runId,
+    proxyMaxEdge,
+    previewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+    canvas: { width: editor.document.canvas.width, height: editor.document.canvas.height },
+  })
+  const backgroundDocument: HandoutDocument = {
+    ...editor.document,
+    layers: [],
+    groups: [],
+  }
+  const backgroundMask = editor.document.canvas.backgroundMask
+  const backgroundMaskPreview = backgroundMask ? await loadMaskPreviewCacheDataUrl(backgroundMask) : undefined
+  if (backgroundMask && !backgroundMaskPreview) {
+    maskedBackgroundImage.value = undefined
+    void appendDebugLog('mask', 'refresh-masked-background-waiting-for-cache', {
+      runId,
+      maskId: backgroundMask.id,
+      sourceVersion: backgroundMask.sourceVersion,
+    })
+    return
+  }
+  const dataUrl = await renderHandoutPreviewToDataUrl(backgroundDocument, editor.library, imageElements, {
+    projectTarget: {
+      projectId: editor.currentProjectId,
+      projectDir: editor.projectDir || undefined,
+    },
+    maskDataUrls: editor.document.canvas.backgroundMask
+      ? {
+          ...editor.maskDataUrls,
+          [editor.document.canvas.backgroundMask.id]: proxyMaxEdge < EDITOR_MASK_PREVIEW_MAX_EDGE
+            ? await downsampleDataUrl(backgroundMaskPreview || '', proxyMaxEdge)
+            : backgroundMaskPreview || '',
+        }
+      : editor.maskDataUrls,
+    masksEnabled: maskFeatureEnabled,
+    maxMaskEdge: proxyMaxEdge,
+    maxCompositeEdge: proxyMaxEdge,
+    usePixiMaskPreview: appConfiguration.mask.usePixiPreview,
+  })
+  const image = await loadImageFromDataUrl(dataUrl)
+  if (runId !== maskedBackgroundRefreshRunId || isDraggingMask.value) {
+    void appendDebugLog('mask', 'refresh-masked-background-discarded-stale', { runId })
+    return
+  }
+  maskedBackgroundImage.value = image
+  void appendDebugLog('mask', 'refresh-masked-background-complete', {
+    runId,
+    dataUrlLength: dataUrl.length,
+  })
+}
+
+function scheduleMaskCompositeRefresh(reason: string) {
+  if (!maskFeatureEnabled) return
+  if (maskCompositeRefreshTimer) window.clearTimeout(maskCompositeRefreshTimer)
+  void appendDebugLog('mask', 'schedule-mask-composite-refresh', {
+    reason,
+    isDraggingMask: isDraggingMask.value,
+  })
+  logCanvasLayerRenderState('editor-layer-render-state-scheduled', { reason })
+  maskCompositeRefreshTimer = window.setTimeout(() => {
+    maskCompositeRefreshTimer = undefined
+    if (isDraggingMask.value) {
+      void appendDebugLog('mask', 'schedule-mask-composite-refresh-skipped-dragging', { reason })
+      return
+    }
+    void refreshMaskedLayerImages()
+    void refreshMaskedBackgroundImage()
+  }, 180)
+}
+
 onMounted(async () => {
   try {
     resetKonvaDragButtons()
@@ -1546,6 +2810,7 @@ onMounted(async () => {
       .then(() => {
         finderRevision.background += 1
         finderRevision.asset += 1
+        finderRevision.font += 1
       })
       .catch((error) => logUpload('thumbnail repair failed', { error }))
     void ensureProjectPreviews()
@@ -1563,6 +2828,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeStageViewport)
   cleanupExportProgress()
   if (effectCacheRaf) window.cancelAnimationFrame(effectCacheRaf)
+  if (maskCompositeRefreshTimer) window.clearTimeout(maskCompositeRefreshTimer)
 })
 
 watch(() => editor.library.backgrounds, () => { void syncImages(editor.library) }, { deep: true })
@@ -1580,6 +2846,18 @@ watch(textLayerRenderSignature, () => {
 watch(layerEffectsSignature, (nextSignature, previousSignature) => {
   scheduleLayerEffectCacheRefresh(changedEffectLayerIds(nextSignature, previousSignature))
 })
+watch(layerMaskRenderSignature, () => {
+  scheduleMaskCompositeRefresh('layer-mask-signature')
+  void refreshMaskPreviewUrls()
+  void refreshMaskEditImage()
+}, { flush: 'post' })
+watch(() => editor.maskEditTarget, () => {
+  void refreshMaskEditImage()
+  void updateTransformer()
+}, { deep: true })
+watch(backgroundMaskRenderSignature, () => {
+  scheduleMaskCompositeRefresh('background-mask-signature')
+}, { flush: 'post' })
 watch(
   backgroundRenderSignature,
   () => {
@@ -1590,17 +2868,18 @@ watch(
 )
 watch(
   canvasSizeSignature,
-  () => nextTick(() => {
-    resizeStageViewport()
-    fitCanvasView('canvas-size')
-  }),
+  () => {
+    void fitEditorCanvas('canvas-size')
+  },
 )
 watch(
   () => editor.view,
-  () => nextTick(() => {
-    resizeStageViewport()
-    if (editor.view === 'editor') fitCanvasView('enter-editor')
-  }),
+  () => {
+    if (editor.view === 'editor') {
+      void fitEditorCanvas('enter-editor')
+      scheduleMaskCompositeRefresh('enter-editor')
+    }
+  },
 )
 </script>
 
@@ -1619,15 +2898,20 @@ watch(
     <header class="manager-header">
       <div>
         <h1>Handout Generator</h1>
-        <p>Manage handouts, backgrounds, assets, and fonts before opening the canvas editor.</p>
+        <p>Manage handouts, assets, and fonts before opening the canvas editor.</p>
       </div>
-      <Badge variant="secondary">{{ editor.status }}</Badge>
+      <ButtonGroup class="manager-header-actions">
+        <Button variant="outline" size="sm" @click="isSettingsDialogOpen = true">
+          <Settings data-icon="inline-start" />
+          Settings
+        </Button>
+        <Badge variant="secondary">{{ editor.status }}</Badge>
+      </ButtonGroup>
     </header>
 
     <Tabs default-value="handouts" class="manager-tabs">
       <TabsList class="manager-tab-list">
         <TabsTrigger value="handouts">Handouts</TabsTrigger>
-        <TabsTrigger value="backgrounds">Backgrounds</TabsTrigger>
         <TabsTrigger value="assets">Assets</TabsTrigger>
         <TabsTrigger value="fonts">Fonts</TabsTrigger>
       </TabsList>
@@ -1659,7 +2943,7 @@ watch(
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
               <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-              <div class="finder-status-actions">
+              <ButtonGroup class="finder-status-actions">
                 <Button
                   size="sm"
                   variant="outline"
@@ -1677,41 +2961,7 @@ watch(
                   <Save data-icon="inline-start" />
                   Export PNG
                 </Button>
-              </div>
-            </div>
-          </template>
-        </VueFinder>
-      </TabsContent>
-
-      <TabsContent value="backgrounds" class="manager-tab-content">
-        <VueFinder
-          :key="`background-${finderRevision.background}`"
-          id="background-finder"
-          class="manager-finder compact-finder large-grid-finder"
-          :style="backgroundFinderStyle"
-          :driver="finderDrivers.background"
-          :features="finderFeaturesForKind('background')"
-          :config="finderUploadConfig"
-          :context-menu-items="imageHandoutContextMenuItems.background"
-          selection-mode="single"
-          selection-filter-type="both"
-          @select="(items) => handleFinderSelect('background', items)"
-          @path-change="(path) => handleFinderPathChange('background', path)"
-          @file-dclick="(event) => handleFinderFileDoubleClick('background', event)"
-          @dragover.capture="handleDirectFinderDragover('background', $event as DragEvent)"
-          @drop.capture="handleDirectFinderDrop('background', $event as DragEvent)"
-        >
-          <template #status-bar="{ count }">
-            <div class="finder-status-bar">
-              <span>{{ count }} items · {{ selectedImageStatus('background') }}</span>
-              <Button
-                size="sm"
-                :disabled="!selectedImageRecord('background')"
-                @click="createHandoutFromFinderImage('background')"
-              >
-                <Plus data-icon="inline-start" />
-                Create handout
-              </Button>
+              </ButtonGroup>
             </div>
           </template>
         </VueFinder>
@@ -1769,7 +3019,10 @@ watch(
         <Input v-model="fontSearch" placeholder="Search fonts or tags" />
         <div class="font-grid">
           <div v-for="font in filteredFonts" :key="font.id" class="font-card">
-            <span class="font-card-preview" :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
+            <span class="font-card-preview">
+              <img v-if="font.thumbnailPath" :src="fontPreviewSource(font)" alt="" draggable="false" />
+              <span v-else :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
+            </span>
             <strong>{{ font.name }}</strong>
             <span>{{ font.tags.join(', ') || 'No tags' }}</span>
           </div>
@@ -1787,6 +3040,7 @@ watch(
       @background-drop="handleCreateBackgroundDrop"
       @background-input="handleCreateBackgroundInput"
     />
+    <ConfigurationDialog v-model:open="isSettingsDialogOpen" />
   </div>
 
   <ResizablePanelGroup v-else direction="horizontal" class="app-shell">
@@ -1803,11 +3057,11 @@ watch(
         </div>
       </div>
 
-      <Tabs default-value="assets" class="rail-tabs">
+      <Tabs v-model="activeRailTab" default-value="assets" class="rail-tabs">
         <TabsList class="grid grid-cols-4">
           <TabsTrigger value="assets">Assets</TabsTrigger>
           <TabsTrigger value="fonts">Fonts</TabsTrigger>
-          <TabsTrigger value="shapes">Shapes</TabsTrigger>
+          <TabsTrigger value="graph">Graph</TabsTrigger>
           <TabsTrigger value="layers">Layers</TabsTrigger>
         </TabsList>
 
@@ -1875,7 +3129,10 @@ watch(
               @dragstart="startFontDrag(font, $event)"
               @dragend="clearFontDrag"
             >
-              <span class="font-preview" :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
+              <span class="font-preview">
+                <img v-if="font.thumbnailPath" :src="fontPreviewSource(font)" alt="" draggable="false" />
+                <span v-else :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
+              </span>
               <span class="font-meta">
                 <strong>{{ font.name }}</strong>
                 <span>Click to apply/create · drag for New Text · {{ font.tags.join(', ') || 'No tags' }}</span>
@@ -1884,7 +3141,7 @@ watch(
           </ScrollArea>
         </TabsContent>
 
-        <TabsContent value="shapes" class="rail-tab-content">
+        <TabsContent value="graph" class="rail-tab-content">
           <ScrollArea class="rail-scroll">
             <button
               v-for="shape in shapeItems"
@@ -1948,7 +3205,7 @@ watch(
         </TabsContent>
 
         <TabsContent value="layers" class="rail-tab-content">
-          <div class="layer-actions">
+          <ButtonGroup class="layer-actions">
             <Button size="sm" variant="outline" @click="editor.addText()">
               <Type data-icon="inline-start" />
               Text
@@ -1957,60 +3214,153 @@ watch(
               <Brush data-icon="inline-start" />
               Paint
             </Button>
-            <Button size="sm" variant="outline" @click="editor.moveSelectedLayer(1)">
-              <ArrowUp data-icon="inline-start" />
-              Up
-            </Button>
-            <Button size="sm" variant="outline" @click="editor.moveSelectedLayer(-1)">
-              <ArrowDown data-icon="inline-start" />
-              Down
-            </Button>
-            <Button size="sm" variant="destructive" :disabled="!editor.selectedLayer" @click="deleteLayer()">
-              <Trash2 data-icon="inline-start" />
-              Delete
-            </Button>
-          </div>
-          <ScrollArea class="rail-scroll">
-            <div
-              v-for="layer in editor.layers"
-              :key="layer.id"
-              class="layer-row"
-              :class="{ selected: editor.selectedLayerIds.includes(layer.id), dragging: draggedLayerId === layer.id }"
-              role="button"
-              tabindex="0"
-              draggable="true"
-              @click="selectLayerFromList(layer.id, $event)"
-              @dragstart="startLayerListDrag(layer, $event)"
-              @dragover.prevent
-              @drop="handleLayerListDrop(layer, $event)"
-              @dragend="draggedLayerId = ''"
-              @keydown.enter="selectLayerFromList(layer.id, $event)"
+            <Button
+              v-if="maskFeatureEnabled"
+              class="mask-toggle"
+              size="sm"
+              variant="outline"
+              :disabled="!selectedMaskControlLayers.length"
+              :title="selectedMaskControlDeletes ? 'Delete masks from selected layers' : 'Add masks to selected layers without one'"
+              @click="toggleSelectedLayerMask"
             >
+              Mask {{ selectedMaskControlDeletes ? '-' : '+' }}
+            </Button>
+          </ButtonGroup>
+          <ScrollArea class="rail-scroll">
+            <template v-for="item in layerListItems" :key="item.kind === 'group' ? item.group.id : item.layer.id">
+              <div
+                v-if="item.kind === 'group'"
+                class="layer-row layer-group-row"
+                :class="{ dragging: draggedGroupId === item.group.id }"
+                role="button"
+                tabindex="0"
+                draggable="true"
+                @click="toggleGroupCollapsed(item.group.id)"
+                @dragstart="startGroupListDrag(item.group, $event)"
+                @dragover.prevent
+                @drop="handleGroupDrop(item.group, $event)"
+                @dragend="clearLayerDragState"
+                @keydown.enter="toggleGroupCollapsed(item.group.id)"
+              >
+                <ChevronRight v-if="groupIsCollapsed(item.group.id)" class="layer-icon" />
+                <ChevronDown v-else class="layer-icon" />
+                <span>
+                  <strong>{{ item.group.name }}</strong>
+                  <em>{{ item.layers.length }} layers · drag group to reorder</em>
+                </span>
+                <Button
+                  class="layer-visibility"
+                  size="icon"
+                  variant="ghost"
+                  :data-visible="item.group.visible"
+                  @click.stop="editor.toggleGroupVisibility(item.group.id)"
+                >
+                  <Eye v-if="item.group.visible" />
+                  <EyeOff v-else />
+                </Button>
+                <Button
+                  class="row-delete"
+                  size="icon"
+                  variant="ghost"
+                  title="Ungroup"
+                  @click.stop="editor.ungroupGroup(item.group.id)"
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+              <div
+                v-for="layer in item.kind === 'group' && !groupIsCollapsed(item.group.id) ? item.layers : item.kind === 'layer' ? [item.layer] : []"
+                :key="layer.id"
+                class="layer-row"
+                :class="{ selected: editor.selectedLayerIds.includes(layer.id), dragging: draggedLayerId === layer.id, child: item.kind === 'group' }"
+                role="button"
+                tabindex="0"
+                draggable="true"
+                @click="selectLayerFromList(layer.id, $event)"
+                @dragstart="startLayerListDrag(layer, $event)"
+                @dragover.prevent
+                @drop="handleLayerListDrop(layer, $event)"
+                @dragend="clearLayerDragState"
+                @keydown.enter="selectLayerFromList(layer.id, $event)"
+              >
+                <div class="layer-preview" :style="layerPreviewStyle(layer)">
+                  <span>{{ layerPreviewText(layer) }}</span>
+                </div>
+                <span>
+                  <strong>{{ layerName(layer) }}</strong>
+                  <em>{{ layer.type }} · z{{ layer.zIndex }}</em>
+                </span>
+                <div class="layer-row-actions">
+                  <div
+                    v-if="maskFeatureEnabled && layer.mask"
+                    class="mask-preview"
+                    :class="maskPreviewClass(layer)"
+                    draggable="true"
+                    title="Click to enter or exit mask edit, double click to enable or disable"
+                    @click="toggleMaskEditFromLayerRow(layer, $event)"
+                    @dblclick="toggleMaskEnabledFromLayerRow(layer, $event)"
+                    @dragstart.stop="startMaskDrag(layer, $event)"
+                    @dragend="clearLayerDragState"
+                  >
+                    <img v-if="maskPreviewUrls[layer.mask.id]" :src="maskPreviewUrls[layer.mask.id]" alt="" />
+                  </div>
+                  <Button
+                    class="layer-visibility"
+                    size="icon"
+                    variant="ghost"
+                    :data-visible="layer.visible"
+                    @click.stop="toggleLayerVisibility(layer)"
+                  >
+                    <Eye v-if="layer.visible" />
+                    <EyeOff v-else />
+                  </Button>
+                  <Button
+                    class="row-delete"
+                    size="icon"
+                    variant="ghost"
+                    @click.stop="deleteLayer(layer.id)"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </div>
+            </template>
+            <div class="layer-row background-layer-row" role="button" tabindex="-1">
               <Layers class="layer-icon" />
               <span>
-                <strong>{{ layerName(layer) }}</strong>
-                <em>{{ layer.type }} · z{{ layer.zIndex }}</em>
+                <strong>Background</strong>
+                <em>locked · bottom layer</em>
               </span>
               <Button
                 class="layer-visibility"
                 size="icon"
                 variant="ghost"
-                :data-visible="layer.visible"
-                @click.stop="toggleLayerVisibility(layer)"
+                :data-visible="editor.document.canvas.backgroundVisible !== false"
+                @click.stop="toggleBackgroundVisibility"
               >
-                <Eye v-if="layer.visible" />
+                <Eye v-if="editor.document.canvas.backgroundVisible !== false" />
                 <EyeOff v-else />
-              </Button>
-              <Button
-                class="row-delete"
-                size="icon"
-                variant="ghost"
-                @click.stop="deleteLayer(layer.id)"
-              >
-                <Trash2 />
               </Button>
             </div>
           </ScrollArea>
+          <ButtonGroup class="layer-actions layer-actions-bottom">
+            <Button size="sm" variant="outline" :disabled="!editor.selectedLayerIds.length" @click="editor.mergeSelectedLayersIntoGroup()">
+              Merge
+            </Button>
+            <Button size="sm" variant="outline" :disabled="!editor.selectedLayerIds.length || isFlatteningLayers" @click="flattenSelectedLayers">
+              Flat
+            </Button>
+            <Button size="icon" variant="outline" title="Move up" @click="editor.moveSelectedLayer(1)">
+              <ArrowUp />
+            </Button>
+            <Button size="icon" variant="outline" title="Move down" @click="editor.moveSelectedLayer(-1)">
+              <ArrowDown />
+            </Button>
+            <Button size="sm" variant="destructive" :disabled="!editor.selectedLayer" @click="deleteLayer()">
+              <Trash2 data-icon="inline-start" />
+              Delete
+            </Button>
+          </ButtonGroup>
         </TabsContent>
       </Tabs>
     </aside>
@@ -2059,11 +3409,12 @@ watch(
         <div class="canvas-meta">
           <Badge variant="secondary">{{ editor.document.canvas.width }} x {{ editor.document.canvas.height }} px</Badge>
           <Badge variant="outline">{{ Math.round(stageScale * 100) }}%</Badge>
+          <Badge v-if="maskFeatureEnabled && maskEditLabel" variant="secondary">Editing {{ maskEditLabel }}</Badge>
           <div class="zoom-controls">
             <Button size="icon" variant="outline" @click="zoomOut">
               <Minus />
             </Button>
-            <Button size="sm" variant="outline" @click="fitCanvasView('button')">Fit</Button>
+            <Button size="sm" variant="outline" @click="fitEditorCanvas('button')">Fit</Button>
             <Button size="icon" variant="outline" @click="zoomIn">
               <Plus />
             </Button>
@@ -2100,17 +3451,30 @@ watch(
               <v-layer>
               <v-group :config="contentGroupConfig">
                 <v-rect
+                  v-if="!maskedBackgroundImage"
                   :config="{
                     name: 'canvas-background',
                     x: 0,
                     y: 0,
                     width: editor.document.canvas.width,
                     height: editor.document.canvas.height,
-                    fill: editor.document.canvas.backgroundColor,
+                    fill: editor.document.canvas.backgroundVisible !== false ? editor.document.canvas.backgroundColor : 'rgba(0,0,0,0)',
                   }"
                 />
                 <v-image
-                  v-if="backgroundImage"
+                  v-if="maskedBackgroundImage && editor.document.canvas.backgroundVisible !== false"
+                  :config="{
+                    name: 'canvas-background',
+                    image: maskedBackgroundImage,
+                    x: 0,
+                    y: 0,
+                    width: editor.document.canvas.width,
+                    height: editor.document.canvas.height,
+                    listening: true,
+                  }"
+                />
+                <v-image
+                  v-if="!maskedBackgroundImage && backgroundImage && editor.document.canvas.backgroundVisible !== false"
                   :config="{
                     image: backgroundImage,
                     x: 0,
@@ -2120,9 +3484,21 @@ watch(
                     listening: false,
                   }"
                 />
-                <template v-for="layer in canvasLayers" :key="layer.id">
+                <template v-for="layer in visibleCanvasLayers" :key="layer.id">
                   <v-image
-                    v-if="isImageLayer(layer) && imageForLayer(layer)"
+                    v-if="maskedImageForLayer(layer)"
+                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
+                    :config="maskedLayerConfig(layer)"
+                    @click="selectCanvasLayer(layer.id, $event)"
+                    @tap="selectCanvasLayer(layer.id, $event)"
+                    @dragstart="onLayerDragStart(layer, $event)"
+                    @dragmove="onDragMove(layer, $event)"
+                    @dragend="onDragEnd(layer)"
+                    @transform="onTransform(layer, $event)"
+                    @transformend="onTransformEnd(layer)"
+                  />
+                  <v-image
+                    v-else-if="!layerMaskActive(layer) && isImageLayer(layer) && imageForLayer(layer)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="{ ...layerConfig(layer), image: imageForLayer(layer) }"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2134,7 +3510,7 @@ watch(
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-text
-                    v-else-if="isTextLayer(layer)"
+                    v-else-if="!layerMaskActive(layer) && isTextLayer(layer)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="textConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2146,7 +3522,7 @@ watch(
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-rect
-                    v-else-if="isShapeLayer(layer) && ['rect', 'round-rect'].includes(layer.shape)"
+                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && ['rect', 'round-rect'].includes(layer.shape)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="shapeConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2158,7 +3534,7 @@ watch(
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-line
-                    v-else-if="isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)"
+                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="shapeConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2170,7 +3546,7 @@ watch(
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-ellipse
-                    v-else-if="isShapeLayer(layer) && layer.shape === 'ellipse'"
+                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && layer.shape === 'ellipse'"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="shapeConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2182,7 +3558,7 @@ watch(
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-shape
-                    v-else-if="isShapeLayer(layer) && isCurveShape(layer.shape)"
+                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && isCurveShape(layer.shape)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="shapeConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2194,7 +3570,7 @@ watch(
                     @transformend="onTransformEnd(layer)"
                   />
                   <v-group
-                    v-else-if="isShapeLayer(layer) && layer.shape === 'line'"
+                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && layer.shape === 'line'"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="shapeConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2230,7 +3606,7 @@ watch(
                     <v-circle v-if="showLineHandle(layer, editor.selectedLayerIds)" :config="lineHandleConfig(layer)" />
                   </v-group>
                   <v-shape
-                    v-else-if="isPaintLayer(layer)"
+                    v-else-if="!layerMaskActive(layer) && isPaintLayer(layer)"
                     :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                     :config="paintConfig(layer)"
                     @click="selectCanvasLayer(layer.id, $event)"
@@ -2262,6 +3638,14 @@ watch(
                 <v-line
                   v-if="draftStroke"
                   :config="paintStrokeLineConfig(draftStroke)"
+                />
+                <v-image
+                  v-if="maskFeatureEnabled && activeMaskEditLayer?.mask && maskEditImage"
+                  :ref="setMaskEditNodeRef"
+                  :config="maskEditConfig(activeMaskEditLayer)"
+                  @dragstart="onMaskEditDragStart(activeMaskEditLayer)"
+                  @dragend="onMaskEditDragEnd(activeMaskEditLayer, $event)"
+                  @transformend="onMaskEditTransformEnd(activeMaskEditLayer, $event)"
                 />
                 <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">
                   <v-line
@@ -2322,6 +3706,7 @@ watch(
       :is-exporting="isExportingCurrent"
       :export-log="exportLog"
       :export-progress="exportProgress"
+      :active-tool="activeTool"
       @export-image="exportCurrentImage"
     />
     </ResizablePanel>

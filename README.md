@@ -51,6 +51,19 @@ data/
 
 `data/` is ignored by git because it contains user projects and imported files.
 
+## Configuration
+
+Local build-time configuration lives in `configuration.toml`.
+
+```toml
+[mask]
+enabled = true
+use_pixi_preview = true
+```
+
+- `enabled = false` disables all mask UI, mask editing, mask preview composition, and mask application during preview/export/flat rendering.
+- `use_pixi_preview = false` keeps masks enabled but disables PixiJS for low-frequency layer-mask preview composition. Final export still uses the deterministic Canvas2D/Konva path.
+
 ## Workflow
 
 The app opens on the project manager, not directly in the editor.

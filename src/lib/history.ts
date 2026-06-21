@@ -13,7 +13,7 @@ export interface CommandHistory<T> {
   undo: () => void
 }
 
-export function createHistory<T>(initial: T): CommandHistory<T> {
+export function createHistory<T>(initial: T, maxSteps = 100): CommandHistory<T> {
   const past = ref<T[]>([])
   const present = ref(initial)
   const future = ref<T[]>([])
@@ -32,7 +32,7 @@ export function createHistory<T>(initial: T): CommandHistory<T> {
       const next = mutator(present.value)
       if (Object.is(next, present.value)) return
 
-      if (!options?.merge) past.value = [...past.value, present.value]
+      if (!options?.merge) past.value = [...past.value, present.value].slice(-maxSteps)
       present.value = next
       future.value = []
     },
@@ -46,14 +46,14 @@ export function createHistory<T>(initial: T): CommandHistory<T> {
       if (!previous) return
 
       past.value = past.value.slice(0, -1)
-      future.value = [present.value, ...future.value]
+      future.value = [present.value, ...future.value].slice(0, maxSteps)
       present.value = previous
     },
     redo() {
       const next = future.value[0]
       if (!next) return
 
-      past.value = [...past.value, present.value]
+      past.value = [...past.value, present.value].slice(-maxSteps)
       future.value = future.value.slice(1)
       present.value = next
     },

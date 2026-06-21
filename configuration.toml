@@ -24,6 +24,18 @@ snap_threshold_screen_px = 5
 max_snap_candidates = 24
 continuous_edit_commit_delay_ms = 450
 
+[mask]
+# Set to false to disable all layer mask UI, editing, preview composition,
+# project preview masks, and export/flat mask application.
+enabled = true
+# Use PixiJS for low-frequency layer mask preview composition. Final export
+# still uses the Canvas2D/Konva path so the output is deterministic.
+use_pixi_preview = true
+
 [export]
 default_scale = 1
 min_scale = 0.1
+
+[debug]
+file_log_enabled = true
+render_perf_log_enabled = true

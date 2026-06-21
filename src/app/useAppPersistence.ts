@@ -1,5 +1,6 @@
 import type { LibraryIndex } from '@/lib/backend'
 import { saveProjectPreview } from '@/lib/backend'
+import { appConfiguration } from '@/lib/configuration'
 import type { HandoutDocument } from '@/lib/handout'
 import { dataUrlByteSize, renderHandoutPreviewToDataUrl } from '@/lib/render'
 
@@ -43,6 +44,8 @@ export async function saveProjectWithPreview(options: SaveProjectWithPreviewOpti
       maskDataUrls: options.editor.maskDataUrls,
       maxMaskEdge: options.maxMaskEdge,
       maxCompositeEdge: options.maxCompositeEdge,
+      masksEnabled: appConfiguration.mask.enabled,
+      usePixiMaskPreview: appConfiguration.mask.usePixiPreview,
     },
   )
   const previewPath = await saveProjectPreview(options.editor.currentProjectId, dataUrl)

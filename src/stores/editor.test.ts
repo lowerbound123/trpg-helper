@@ -116,4 +116,53 @@ describe('editor multi-selection state', () => {
       strokes: [{ id: 'stroke-1' }],
     })
   })
+
+  it('merges selected layers into a group and can move them out without deleting layers', () => {
+    const editor = useEditorStore()
+    editor.addText()
+    const first = editor.selectedLayerId!
+    editor.addText()
+    const second = editor.selectedLayerId!
+
+    editor.setLayerSelection([first, second])
+    editor.mergeSelectedLayersIntoGroup()
+
+    expect(editor.groups).toHaveLength(1)
+    expect(editor.groups[0].layerIds).toEqual([first, second])
+
+    editor.moveSelectedLayersOutOfGroup()
+    expect(editor.groups).toEqual([])
+    expect(editor.document.layers).toHaveLength(2)
+  })
+
+  it('deleting a group only ungroups child layers', () => {
+    const editor = useEditorStore()
+    editor.addText()
+    const first = editor.selectedLayerId!
+    editor.addText()
+    const second = editor.selectedLayerId!
+    editor.setLayerSelection([first, second])
+    editor.mergeSelectedLayersIntoGroup()
+    const groupId = editor.groups[0].id
+
+    editor.ungroupGroup(groupId)
+
+    expect(editor.groups).toEqual([])
+    expect(editor.document.layers.map((layer) => layer.id)).toEqual([first, second])
+  })
+
+  it('exits mask editing when active selection moves to another layer', () => {
+    const editor = useEditorStore()
+    editor.addText()
+    const first = editor.selectedLayerId!
+    editor.addText()
+    const second = editor.selectedLayerId!
+
+    editor.selectLayer(first)
+    editor.editLayerMask(first)
+    expect(editor.maskEditTarget).toEqual({ kind: 'layer', layerId: first })
+
+    editor.selectLayer(second)
+    expect(editor.maskEditTarget).toBeUndefined()
+  })
 })

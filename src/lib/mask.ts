@@ -73,7 +73,7 @@ export function applyGrayMaskToCanvas(source: HTMLCanvasElement, mask: HTMLImage
   return output
 }
 
-function transformedLayerPoint(layer: HandoutLayer, x: number, y: number) {
+export function transformedLayerPoint(layer: HandoutLayer, x: number, y: number) {
   const localX = layer.flipX ? layer.width - x : x
   const radians = ((layer.rotation || 0) * Math.PI) / 180
   return {
@@ -82,7 +82,30 @@ function transformedLayerPoint(layer: HandoutLayer, x: number, y: number) {
   }
 }
 
-function maskLocalPoint(mask: LayerMask, x: number, y: number) {
+export function layerLocalPointFromDocument(layer: HandoutLayer, x: number, y: number) {
+  const radians = -((layer.rotation || 0) * Math.PI) / 180
+  const dx = x - layer.x
+  const dy = y - layer.y
+  const rotatedX = dx * Math.cos(radians) - dy * Math.sin(radians)
+  const rotatedY = dx * Math.sin(radians) + dy * Math.cos(radians)
+  return {
+    x: layer.flipX ? layer.width - rotatedX : rotatedX,
+    y: rotatedY,
+  }
+}
+
+export function maskDocumentPoint(mask: LayerMask, x: number, y: number) {
+  const localX = mask.flipX ? mask.width - x : x
+  const scaledX = localX * (mask.scaleX || 1)
+  const scaledY = y * (mask.scaleY || 1)
+  const radians = ((mask.rotation || 0) * Math.PI) / 180
+  return {
+    x: mask.x + scaledX * Math.cos(radians) - scaledY * Math.sin(radians),
+    y: mask.y + scaledX * Math.sin(radians) + scaledY * Math.cos(radians),
+  }
+}
+
+export function maskLocalPoint(mask: LayerMask, x: number, y: number) {
   const radians = -((mask.rotation || 0) * Math.PI) / 180
   const dx = x - mask.x
   const dy = y - mask.y
@@ -94,6 +117,65 @@ function maskLocalPoint(mask: LayerMask, x: number, y: number) {
     x: mask.flipX ? mask.width - scaledX : scaledX,
     y: scaledY,
   }
+}
+
+export function imageToAlphaMaskCanvas(image: HTMLImageElement) {
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, image.width)
+  canvas.height = Math.max(1, image.height)
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) return canvas
+  context.drawImage(image, 0, 0, canvas.width, canvas.height)
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+  for (let index = 0; index < pixels.data.length; index += 4) {
+    const luminance = (pixels.data[index] + pixels.data[index + 1] + pixels.data[index + 2]) / 3
+    pixels.data[index] = 255
+    pixels.data[index + 1] = 255
+    pixels.data[index + 2] = 255
+    pixels.data[index + 3] = Math.round(pixels.data[index + 3] * (luminance / 255))
+  }
+  context.putImageData(pixels, 0, 0)
+  return canvas
+}
+
+function maskPointToLayerOutput(layer: HandoutLayer, mask: LayerMask, x: number, y: number, sourceScale: number) {
+  const docPoint = maskDocumentPoint(mask, x, y)
+  const layerPoint = layerLocalPointFromDocument(layer, docPoint.x, docPoint.y)
+  return {
+    x: layerPoint.x * sourceScale,
+    y: layerPoint.y * sourceScale,
+  }
+}
+
+export function createLayerLocalMaskCanvas(
+  maskImage: HTMLImageElement,
+  layer: HandoutLayer,
+  mask: LayerMask,
+  sourceWidth: number,
+  sourceHeight: number,
+  sourceScale = 1,
+) {
+  const alphaMask = imageToAlphaMaskCanvas(maskImage)
+  const output = document.createElement('canvas')
+  output.width = Math.max(1, Math.round(sourceWidth))
+  output.height = Math.max(1, Math.round(sourceHeight))
+  const context = output.getContext('2d')
+  if (!context) return output
+
+  const origin = maskPointToLayerOutput(layer, mask, 0, 0, sourceScale)
+  const xAxis = maskPointToLayerOutput(layer, mask, 1, 0, sourceScale)
+  const yAxis = maskPointToLayerOutput(layer, mask, 0, 1, sourceScale)
+  context.setTransform(
+    xAxis.x - origin.x,
+    xAxis.y - origin.y,
+    yAxis.x - origin.x,
+    yAxis.y - origin.y,
+    origin.x,
+    origin.y,
+  )
+  context.drawImage(alphaMask, 0, 0, mask.width, mask.height)
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  return output
 }
 
 export function applyLayerMaskToCanvas(
@@ -109,33 +191,10 @@ export function applyLayerMaskToCanvas(
   const context = output.getContext('2d')
   if (!context) return source
   context.drawImage(source, 0, 0)
-  const sourceData = context.getImageData(0, 0, output.width, output.height)
-
-  const maskCanvas = document.createElement('canvas')
-  maskCanvas.width = Math.max(1, Math.round(mask.width))
-  maskCanvas.height = Math.max(1, Math.round(mask.height))
-  const maskContext = maskCanvas.getContext('2d')
-  if (!maskContext) return source
-  maskContext.drawImage(maskImage, 0, 0, maskCanvas.width, maskCanvas.height)
-  const maskData = maskContext.getImageData(0, 0, maskCanvas.width, maskCanvas.height)
-
-  for (let y = 0; y < output.height; y += 1) {
-    for (let x = 0; x < output.width; x += 1) {
-      const sourceIndex = (y * output.width + x) * 4
-      const docPoint = transformedLayerPoint(layer, x / sourceScale, y / sourceScale)
-      const local = maskLocalPoint(mask, docPoint.x, docPoint.y)
-      const maskX = Math.round(local.x)
-      const maskY = Math.round(local.y)
-      if (maskX < 0 || maskY < 0 || maskX >= maskCanvas.width || maskY >= maskCanvas.height) {
-        sourceData.data[sourceIndex + 3] = 0
-        continue
-      }
-      const maskIndex = (maskY * maskCanvas.width + maskX) * 4
-      const luminance = (maskData.data[maskIndex] + maskData.data[maskIndex + 1] + maskData.data[maskIndex + 2]) / 3
-      sourceData.data[sourceIndex + 3] = Math.round(sourceData.data[sourceIndex + 3] * (luminance / 255))
-    }
-  }
-  context.putImageData(sourceData, 0, 0)
+  const localMask = createLayerLocalMaskCanvas(maskImage, layer, mask, output.width, output.height, sourceScale)
+  context.globalCompositeOperation = 'destination-in'
+  context.drawImage(localMask, 0, 0)
+  context.globalCompositeOperation = 'source-over'
   return output
 }
 

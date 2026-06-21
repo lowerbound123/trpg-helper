@@ -1,15 +1,15 @@
 import { ref, reactive } from 'vue'
 
 import {
-  exportImageToDownloads,
+  exportImageBlobToDownloads,
   openManagedProject,
   type LibraryRecord,
   type ProjectSummary,
 } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
-import { exportExtension, exportMimeType, exportQualityValue, type ExportFormat } from '@/lib/export-options'
+import { exportExtension, exportQualityValue, type ExportFormat } from '@/lib/export-options'
 import type { HandoutDocument } from '@/lib/handout'
-import { dataUrlByteSize, downloadFileName, renderHandoutToDataUrl } from '@/lib/render'
+import { downloadFileName, renderHandoutToBlob } from '@/lib/render'
 import { isImageLayer, useEditorStore } from '@/stores/editor'
 import { useExportProgress } from './useExportProgress'
 
@@ -89,26 +89,39 @@ export function useHandoutExport(options: {
       exportLog.value = 'Rendering export image...'
       await setExportProgress(42)
       const renderStartedAt = performance.now()
-      const dataUrl = await renderHandoutToDataUrl(
+      const blob = await renderHandoutToBlob(
         options.editor.document,
         options.editor.library,
         exportScale.value,
         options.imageElements,
-        exportMimeType(exportFormat.value),
-        exportQualityValue(exportFormat.value, exportQuality.value),
+        'image/png',
+        undefined,
+        {
+          projectTarget: {
+            projectId: options.editor.currentProjectId,
+            projectDir: options.editor.projectDir || undefined,
+          },
+          masksEnabled: appConfiguration.mask.enabled,
+          maskDataUrls: options.editor.maskDataUrls,
+        },
       )
       const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
-      options.logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: dataUrlByteSize(dataUrl) })
+      options.logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: blob.size })
       exportLog.value = `Writing ${exportFormat.value.toUpperCase()} to Downloads...`
       await setExportProgress(86)
       const writeStartedAt = performance.now()
-      const path = await exportImageToDownloads(downloadFileName(options.editor.document.title, new Date(), exportExtension(exportFormat.value)), dataUrl)
+      const path = await exportImageBlobToDownloads(
+        downloadFileName(options.editor.document.title, new Date(), exportExtension(exportFormat.value)),
+        blob,
+        exportFormat.value,
+        exportQualityValue(exportFormat.value, exportQuality.value) ? exportQuality.value : undefined,
+      )
       const writeMs = Math.round(performance.now() - writeStartedAt)
       lastCurrentExport.value = { signature, path }
       exportLog.value = `Exported image to ${path}`
       options.logExport('export current complete', {
         path,
-        bytes: dataUrlByteSize(dataUrl),
+        bytes: blob.size,
         clickToProgressMs,
         signatureMs,
         imageLoadMs,
@@ -151,7 +164,10 @@ export function useHandoutExport(options: {
       await ensureDocumentImages(payload.document)
       const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
       const renderStartedAt = performance.now()
-      const dataUrl = await renderHandoutToDataUrl(payload.document, options.editor.library, 1, options.imageElements)
+      const blob = await renderHandoutToBlob(payload.document, options.editor.library, 1, options.imageElements, 'image/png', undefined, {
+        projectTarget: { projectId: project.id },
+        masksEnabled: appConfiguration.mask.enabled,
+      })
       const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
       options.logExport('export handout render complete', {
         projectId: project.id,
@@ -159,17 +175,17 @@ export function useHandoutExport(options: {
         signatureMs,
         imageLoadMs,
         konvaRenderMs,
-        bytes: dataUrlByteSize(dataUrl),
+        bytes: blob.size,
       })
       const writeStartedAt = performance.now()
-      const path = await exportImageToDownloads(downloadFileName(payload.document.title), dataUrl)
+      const path = await exportImageBlobToDownloads(downloadFileName(payload.document.title), blob, 'png')
       const writeMs = Math.round(performance.now() - writeStartedAt)
       lastHandoutExports.set(project.id, { signature, path })
       exportLog.value = `Exported image to ${path}`
       options.logExport('export handout complete', {
         projectId: project.id,
         path,
-        bytes: dataUrlByteSize(dataUrl),
+        bytes: blob.size,
         clickToProgressMs,
         openDurationMs,
         signatureMs,

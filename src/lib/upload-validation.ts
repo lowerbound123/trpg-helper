@@ -11,7 +11,7 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 ])
 
 const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif|bmp|tiff?|tga|avif|qoi|ico)$/i
-const FONT_EXTENSION_PATTERN = /\.(ttf|otf|woff2?)$/i
+const FONT_EXTENSION_PATTERN = /\.(ttf|otf|ttc|otc|woff2?)$/i
 
 export function isSupportedUpload(kind: UploadKind, file: File) {
   if (kind === 'background' || kind === 'asset') {

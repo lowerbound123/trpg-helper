@@ -13,15 +13,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { appConfiguration } from '@/lib/configuration'
 import { fontRecordFamily } from '@/lib/backend'
 import { isPaintLayer, isShapeLayer, isTextLayer, useEditorStore } from '@/stores/editor'
+import type { BrushKind } from '@/lib/handout'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
 const exportFormat = defineModel<'png' | 'jpeg' | 'webp'>('exportFormat', { required: true })
 const exportQuality = defineModel<number>('exportQuality', { required: true })
 
-defineProps<{
+const props = defineProps<{
   isExporting?: boolean
   exportLog?: string
   exportProgress?: number
+  activeTool?: 'select' | 'brush' | 'eraser'
 }>()
 
 defineEmits<{
@@ -30,6 +32,10 @@ defineEmits<{
 
 const editor = useEditorStore()
 const activeLayer = computed(() => editor.selectedLayer)
+const isEditingActiveLayerMask = computed(() =>
+  Boolean(activeLayer.value && editor.maskEditTarget?.kind === 'layer' && editor.maskEditTarget.layerId === activeLayer.value.id),
+)
+const isEditingBackgroundMask = computed(() => editor.maskEditTarget?.kind === 'background')
 const activeTextLayer = computed(() => isTextLayer(activeLayer.value) ? activeLayer.value : undefined)
 const selectedLayers = computed(() => editor.selectedLayers)
 const selectedCount = computed(() => selectedLayers.value.length)
@@ -39,6 +45,13 @@ const selectedPaintLayers = computed(() => selectedLayers.value.filter(isPaintLa
 const allSelectedText = computed(() => selectedLayers.value.length > 0 && selectedTextLayers.value.length === selectedLayers.value.length)
 const allSelectedShapes = computed(() => selectedLayers.value.length > 0 && selectedShapeLayers.value.length === selectedLayers.value.length)
 const allSelectedPaint = computed(() => selectedLayers.value.length > 0 && selectedPaintLayers.value.length === selectedLayers.value.length)
+const showBrushControls = computed(() =>
+  allSelectedPaint.value
+  || props.activeTool === 'brush'
+  || props.activeTool === 'eraser'
+  || isEditingActiveLayerMask.value
+  || isEditingBackgroundMask.value,
+)
 const allSelectedLines = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'line'))
 const allSelectedRoundRects = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'round-rect'))
 const backgroundAsset = computed(() =>
@@ -77,10 +90,13 @@ const commonLineStartArrow = computed(() => commonValue(selectedShapeLayers.valu
 const commonLineEndArrow = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineEndArrow), undefined))
 const commonLineArrowSize = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineArrowSize), undefined))
 const commonLineStyle = computed(() => commonValue(selectedShapeLayers.value.map((layer) => layer.lineStyle), undefined))
-const commonBrushColor = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushColor), undefined))
-const commonBrushWidth = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushWidth), undefined))
-const commonEraserWidth = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.eraserWidth), undefined))
-const commonBrushTension = computed(() => commonValue(selectedPaintLayers.value.map((layer) => layer.brushTension), undefined))
+const commonBrushColor = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.brushColor), undefined) : editor.toolSettings.brushColor)
+const commonBrushKind = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.brushKind), undefined) : editor.toolSettings.brushKind)
+const commonBrushWidth = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.brushWidth), undefined) : editor.toolSettings.brushWidth)
+const commonBrushOpacity = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.brushOpacity), undefined) : editor.toolSettings.brushOpacity)
+const commonEraserWidth = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.eraserWidth), undefined) : editor.toolSettings.eraserWidth)
+const commonEraserOpacity = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.eraserOpacity), undefined) : editor.toolSettings.eraserOpacity)
+const commonBrushTension = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.brushTension), undefined) : editor.toolSettings.brushTension)
 const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
@@ -102,6 +118,11 @@ function endContinuousEdit(key: string) {
   editor.endContinuousEdit(key)
 }
 
+function patchBrushSettings(patch: Record<string, unknown>) {
+  if (allSelectedPaint.value) editor.patchSelectedLayers(patch as any)
+  else editor.patchToolSettings(patch as any)
+}
+
 onBeforeUnmount(() => {
   for (const timer of continuousEditTimers.values()) window.clearTimeout(timer)
   continuousEditTimers.clear()
@@ -110,6 +131,10 @@ onBeforeUnmount(() => {
 
 function setFont(fontId: string) {
   const font = editor.resolveFont(fontId)
+  if (font) {
+    editor.applyOrCreateTextWithFont(font)
+    return
+  }
   editor.patchSelectedLayers({
     fontId,
     fontFamily: fontRecordFamily(font),
@@ -227,12 +252,13 @@ function patchDocumentSaturation(value: number[] | undefined) {
               Flip
               <Button
                 type="button"
+                size="icon"
                 variant="outline"
+                title="Flip horizontal"
                 :data-active="commonFlipX === true"
                 @click="editor.patchSelectedLayers({ flipX: !(commonFlipX === true) })"
               >
-                <FlipHorizontal data-icon="inline-start" />
-                Horizontal
+                <FlipHorizontal />
               </Button>
             </label>
           </div>
@@ -261,6 +287,19 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 </SelectContent>
               </Select>
             </label>
+            <label v-if="showBrushControls" class="blend-control">
+              Brush type
+              <Select :model-value="commonBrushKind" @update:model-value="(value) => patchBrushSettings({ brushKind: value as BrushKind })">
+                <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pixel">Pixel</SelectItem>
+                  <SelectItem value="pencil">Pencil</SelectItem>
+                  <SelectItem value="marker">Marker</SelectItem>
+                  <SelectItem value="highlighter">Highlighter</SelectItem>
+                  <SelectItem value="airbrush">Airbrush</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
             <label v-if="allSelectedShapes" class="compact-color-control">
               Fill
               <Input
@@ -279,13 +318,13 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 @update:model-value="(value) => editor.patchSelectedLayers({ stroke: String(value) })"
               />
             </label>
-            <label v-if="allSelectedPaint" class="compact-color-control">
+            <label v-if="showBrushControls" class="compact-color-control">
               Brush
               <Input
                 :type="commonBrushColor ? 'color' : 'text'"
                 :model-value="commonBrushColor ?? ''"
                 placeholder="Mixed"
-                @update:model-value="(value) => editor.patchSelectedLayers({ brushColor: String(value) })"
+                @update:model-value="(value) => patchBrushSettings({ brushColor: String(value) })"
               />
             </label>
           </div>
@@ -495,7 +534,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
               </div>
             </template>
           </template>
-          <template v-if="allSelectedPaint">
+          <template v-if="showBrushControls">
             <div class="two-col">
               <label>
                 Brush width
@@ -505,7 +544,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                   step="1"
                   :model-value="commonBrushWidth ?? ''"
                   placeholder="Mixed"
-                  @update:model-value="(value) => editor.patchSelectedLayers({ brushWidth: Math.max(1, Number(value) || 1) })"
+                  @update:model-value="(value) => patchBrushSettings({ brushWidth: Math.max(1, Number(value) || 1) })"
                 />
               </label>
               <label>
@@ -516,7 +555,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                   step="1"
                   :model-value="commonEraserWidth ?? ''"
                   placeholder="Mixed"
-                  @update:model-value="(value) => editor.patchSelectedLayers({ eraserWidth: Math.max(1, Number(value) || 1) })"
+                  @update:model-value="(value) => patchBrushSettings({ eraserWidth: Math.max(1, Number(value) || 1) })"
                 />
               </label>
             </div>
@@ -530,7 +569,31 @@ function patchDocumentSaturation(value: number[] | undefined) {
                   step="0.05"
                   :model-value="commonBrushTension ?? ''"
                   placeholder="Mixed"
-                  @update:model-value="(value) => editor.patchSelectedLayers({ brushTension: Math.max(0, Math.min(1, Number(value) || 0)) })"
+                  @update:model-value="(value) => patchBrushSettings({ brushTension: Math.max(0, Math.min(1, Number(value) || 0)) })"
+                />
+              </label>
+              <label>
+                Brush opacity (%)
+                <Input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  :model-value="commonBrushOpacity === undefined ? '' : Math.round(commonBrushOpacity * 100)"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => patchBrushSettings({ brushOpacity: Math.max(0.01, Math.min(1, (Number(value) || 100) / 100)) })"
+                />
+              </label>
+              <label>
+                Eraser opacity (%)
+                <Input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  :model-value="commonEraserOpacity === undefined ? '' : Math.round(commonEraserOpacity * 100)"
+                  placeholder="Mixed"
+                  @update:model-value="(value) => patchBrushSettings({ eraserOpacity: Math.max(0.01, Math.min(1, (Number(value) || 100) / 100)) })"
                 />
               </label>
             </div>
@@ -552,7 +615,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Brightness {{ activeLayer.effects.brightness }}
+              Brightness {{ activeLayer.effects.brightness }}%
               <Slider
                 :model-value="[activeLayer.effects.brightness]"
                 :min="-100"
@@ -563,7 +626,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Contrast {{ activeLayer.effects.contrast }}
+              Contrast {{ activeLayer.effects.contrast }}%
               <Slider
                 :model-value="[activeLayer.effects.contrast]"
                 :min="-100"
@@ -574,7 +637,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Saturation {{ activeLayer.effects.saturation }}
+              Saturation {{ activeLayer.effects.saturation }}%
               <Slider
                 :model-value="[activeLayer.effects.saturation]"
                 :min="-100"
@@ -640,7 +703,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Document brightness {{ editor.document.canvas.effects.brightness }}
+              Document brightness {{ editor.document.canvas.effects.brightness }}%
               <Slider
                 :model-value="[editor.document.canvas.effects.brightness]"
                 :min="-100"
@@ -651,7 +714,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Document contrast {{ editor.document.canvas.effects.contrast }}
+              Document contrast {{ editor.document.canvas.effects.contrast }}%
               <Slider
                 :model-value="[editor.document.canvas.effects.contrast]"
                 :min="-100"
@@ -662,7 +725,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
             <label>
-              Document saturation {{ editor.document.canvas.effects.saturation }}
+              Document saturation {{ editor.document.canvas.effects.saturation }}%
               <Slider
                 :model-value="[editor.document.canvas.effects.saturation]"
                 :min="-100"

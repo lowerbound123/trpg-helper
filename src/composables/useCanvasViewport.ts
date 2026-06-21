@@ -9,7 +9,7 @@ type StageFrameRef = Ref<HTMLElement | undefined>
 type ViewportLog = (message: string, data?: Record<string, unknown>) => void
 
 export function useCanvasViewport(options: {
-  document: HandoutDocument
+  document: HandoutDocument | (() => HandoutDocument)
   stageRef: StageRef
   stageFrameRef: StageFrameRef
   logViewport?: ViewportLog
@@ -34,10 +34,15 @@ export function useCanvasViewport(options: {
     scaleY: stageScale.value,
   }))
 
+  function currentDocument() {
+    return typeof options.document === 'function' ? options.document() : options.document
+  }
+
   function computeFitScale() {
+    const document = currentDocument()
     const maxWidth = Math.max(240, stageViewport.width - 64)
     const maxHeight = Math.max(180, stageViewport.height - 64)
-    return Math.min(maxWidth / options.document.canvas.width, maxHeight / options.document.canvas.height, 1)
+    return Math.min(maxWidth / document.canvas.width, maxHeight / document.canvas.height, 1)
   }
 
   function resizeStageViewport() {
@@ -57,11 +62,19 @@ export function useCanvasViewport(options: {
   }
 
   function fitCanvasView(reason = 'fit') {
-    fitScale.value = computeFitScale()
+    const document = currentDocument()
+    const nextFitScale = computeFitScale()
+    fitScale.value = nextFitScale
     canvasZoom.value = 1
-    canvasPan.x = Math.round((stageViewport.width - options.document.canvas.width * stageScale.value) / 2)
-    canvasPan.y = Math.round((stageViewport.height - options.document.canvas.height * stageScale.value) / 2)
-    options.logViewport?.('fit-canvas-view', { reason })
+    canvasPan.x = Math.round((stageViewport.width - document.canvas.width * nextFitScale) / 2)
+    canvasPan.y = Math.round((stageViewport.height - document.canvas.height * nextFitScale) / 2)
+    options.logViewport?.('fit-canvas-view', {
+      reason,
+      canvas: { width: document.canvas.width, height: document.canvas.height },
+      viewport: { width: stageViewport.width, height: stageViewport.height },
+      fitScale: nextFitScale,
+      pan: { x: canvasPan.x, y: canvasPan.y },
+    })
   }
 
   function zoomCanvas(nextZoom: number, anchor = { x: stageViewport.width / 2, y: stageViewport.height / 2 }) {

@@ -1,6 +1,6 @@
 import { reactive, type Ref } from 'vue'
 
-import { fileUrl, readFileDataUrl, type LibraryIndex, type LibraryRecord } from '@/lib/backend'
+import { fileUrl, type LibraryIndex, type LibraryRecord } from '@/lib/backend'
 
 export function useResourceImages(fallbackWidth: Ref<number>, fallbackHeight: Ref<number>) {
   const imageElements = reactive<Record<string, HTMLImageElement>>({})
@@ -14,7 +14,7 @@ export function useResourceImages(fallbackWidth: Ref<number>, fallbackHeight: Re
     if (imageElements[record.id]) return imageElements[record.id]
     const image = new window.Image()
     image.crossOrigin = 'anonymous'
-    const src = await readFileDataUrl(record.path, record.mediaType)
+    const src = fileUrl(record.path)
     previewUrls[record.id] = src
     await new Promise<void>((resolve, reject) => {
       image.onload = () => {

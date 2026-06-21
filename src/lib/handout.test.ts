@@ -2,13 +2,30 @@ import { describe, expect, it } from 'vitest'
 
 import {
   addImageLayer,
+  addLayerGroup,
   addPaintLayer,
   addShapeLayer,
   addTextLayer,
   appendPaintStroke,
+  clearBackgroundMask,
+  clearLayerMask,
+  copyLayerMask,
+  createCanvasLayerMask,
   createDefaultHandout,
+  deleteBackgroundMask,
+  deleteLayerMask,
+  flattenLayersToImage,
+  isLayerEffectivelyVisible,
   moveLayer,
+  moveLayerGroup,
+  moveLayerOutOfGroup,
   normalizeHandoutDocument,
+  setBackgroundMask,
+  setLayerMask,
+  setLayerMaskEnabled,
+  setLayerGroupVisibility,
+  ungroupLayerGroup,
+  transferLayerMask,
   updateLayer,
 } from './handout'
 import { createHistory } from './history'
@@ -24,6 +41,8 @@ describe('handout document model', () => {
       width: 1280,
       height: 720,
       backgroundColor: 'rgba(0,0,0,0)',
+      backgroundVisible: true,
+      backgroundMask: null,
       effects: {
         brightness: 0,
         contrast: 0,
@@ -32,6 +51,7 @@ describe('handout document model', () => {
       },
     })
     expect(handout.layers).toEqual([])
+    expect(handout.groups).toEqual([])
   })
 
   it('adds image and single-style text layers in z-order', () => {
@@ -146,13 +166,16 @@ describe('handout document model', () => {
       name: 'paint-1',
       strokes: [],
       brushColor: '#111827',
+      brushKind: 'pixel',
       brushWidth: 6,
+      brushOpacity: 1,
       eraserWidth: 12,
+      eraserOpacity: 1,
       brushTension: 0.35,
     })
     expect(withStroke.layers[0]).toMatchObject({
       type: 'paint',
-      strokes: [{ id: 'stroke-1', mode: 'brush' }],
+      strokes: [{ id: 'stroke-1', mode: 'brush', rawPoints: [{ x: 0, y: 0, pressure: 0.5 }, { x: 20, y: 20, pressure: 0.5 }] }],
     })
     expect(withPaint.layers[0]).not.toBe(withStroke.layers[0])
   })
@@ -204,6 +227,7 @@ describe('handout document model', () => {
       type: 'paint',
       strokes: [],
       brushWidth: 6,
+      brushKind: 'pixel',
       eraserWidth: 12,
       effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
     })
@@ -214,6 +238,216 @@ describe('handout document model', () => {
         control: { x: 160, y: 14.4 },
         end: { x: 320, y: 135 },
       },
+    })
+    expect(normalized.groups).toEqual([])
+    expect(normalized.canvas.backgroundMask).toBeNull()
+    expect(normalized.layers.every((layer) => layer.mask === null)).toBe(true)
+  })
+
+  it('adds toggles clears and deletes layer masks immutably', () => {
+    const withLayer = addImageLayer(createDefaultHandout('Mask'), { assetId: 'asset-1' })
+    const layerId = withLayer.layers[0].id
+    const withMask = setLayerMask(withLayer, layerId, createCanvasLayerMask(withLayer.canvas, {
+      id: 'mask-1',
+      enabled: true,
+      path: 'masks/mask-1.png',
+      updatedAt: '2026-06-21T00:00:00.000Z',
+    }))
+    const disabled = setLayerMaskEnabled(withMask, layerId, false)
+    const cleared = clearLayerMask(disabled, layerId, '2026-06-21T00:00:01.000Z')
+    const deleted = deleteLayerMask(cleared, layerId)
+
+    expect(withMask.layers[0].mask).toMatchObject({ id: 'mask-1', enabled: true, path: 'masks/mask-1.png' })
+    expect(disabled.layers[0].mask?.enabled).toBe(false)
+    expect(cleared.layers[0].mask).toMatchObject({
+      enabled: true,
+      path: '',
+      width: withLayer.canvas.width,
+      height: withLayer.canvas.height,
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0,
+      flipX: false,
+      updatedAt: '2026-06-21T00:00:01.000Z',
+    })
+    expect(deleted.layers[0].mask).toBeNull()
+    expect(withLayer.layers[0].mask).toBeNull()
+  })
+
+  it('adds toggles clears and deletes background masks', () => {
+    const base = createDefaultHandout('Background Mask')
+    const withMask = setBackgroundMask(base, createCanvasLayerMask(base.canvas, {
+      id: 'background-mask',
+      enabled: true,
+      path: 'masks/background-mask.png',
+      updatedAt: '2026-06-21T00:00:00.000Z',
+    }))
+    const disabled = setBackgroundMask(withMask, { ...withMask.canvas.backgroundMask!, enabled: false })
+    const cleared = clearBackgroundMask(disabled, '2026-06-21T00:00:01.000Z')
+    const deleted = deleteBackgroundMask(cleared)
+
+    expect(withMask.canvas.backgroundMask).toMatchObject({ id: 'background-mask', enabled: true })
+    expect(disabled.canvas.backgroundMask?.enabled).toBe(false)
+    expect(cleared.canvas.backgroundMask).toMatchObject({
+      enabled: true,
+      path: '',
+      width: base.canvas.width,
+      height: base.canvas.height,
+      updatedAt: '2026-06-21T00:00:01.000Z',
+    })
+    expect(deleted.canvas.backgroundMask).toBeNull()
+  })
+
+  it('normalizes legacy masks to canvas-sized masks with identity transform', () => {
+    const legacy = addImageLayer(createDefaultHandout('Legacy Mask'), { assetId: 'asset-1' }) as any
+    legacy.layers[0].mask = {
+      id: 'legacy-mask',
+      enabled: true,
+      path: 'masks/legacy-mask.png',
+      width: 120,
+      height: 90,
+      updatedAt: '2026-06-21T00:00:00.000Z',
+    }
+
+    const normalized = normalizeHandoutDocument(legacy)
+
+    expect(normalized.layers[0].mask).toMatchObject({
+      id: 'legacy-mask',
+      width: normalized.canvas.width,
+      height: normalized.canvas.height,
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0,
+      flipX: false,
+    })
+  })
+
+  it('transfers and copies masks between layers', () => {
+    const withLayers = addTextLayer(
+      addImageLayer(createDefaultHandout('Move Mask'), { assetId: 'asset-1' }),
+      { text: 'Target' },
+    )
+    const [source, target] = withLayers.layers
+    const withMask = setLayerMask(withLayers, source.id, createCanvasLayerMask(withLayers.canvas, {
+      id: 'mask-source',
+      path: 'masks/source.png',
+      updatedAt: '2026-06-21T00:00:00.000Z',
+    }))
+
+    const transferred = transferLayerMask(withMask, source.id, target.id, '2026-06-21T00:00:01.000Z')
+    const copied = copyLayerMask(withMask, source.id, target.id, 'mask-copy', '2026-06-21T00:00:02.000Z')
+
+    expect(transferred.layers.find((layer) => layer.id === source.id)?.mask).toBeNull()
+    expect(transferred.layers.find((layer) => layer.id === target.id)?.mask).toMatchObject({
+      id: 'mask-source',
+      path: '',
+      updatedAt: '2026-06-21T00:00:01.000Z',
+    })
+    expect(copied.layers.find((layer) => layer.id === source.id)?.mask?.id).toBe('mask-source')
+    expect(copied.layers.find((layer) => layer.id === target.id)?.mask).toMatchObject({
+      id: 'mask-copy',
+      path: '',
+      updatedAt: '2026-06-21T00:00:02.000Z',
+    })
+  })
+
+  it('groups layers without nesting and ungrouping keeps child layers', () => {
+    const withLayers = addTextLayer(addTextLayer(createDefaultHandout('Groups'), { text: 'A' }), { text: 'B' })
+    const [first, second] = withLayers.layers
+    const grouped = addLayerGroup(withLayers, [first.id, second.id])
+    const hiddenGroup = setLayerGroupVisibility(grouped, grouped.groups[0].id, false)
+    const movedOut = moveLayerOutOfGroup(hiddenGroup, first.id)
+    const ungrouped = ungroupLayerGroup(movedOut, movedOut.groups[0].id)
+
+    expect(grouped.groups[0]).toMatchObject({
+      name: 'group-1',
+      layerIds: [first.id, second.id],
+      visible: true,
+    })
+    expect(isLayerEffectivelyVisible(hiddenGroup, second)).toBe(false)
+    expect(movedOut.groups[0].layerIds).toEqual([second.id])
+    expect(ungrouped.groups).toEqual([])
+    expect(ungrouped.layers.map((layer) => layer.id)).toEqual([first.id, second.id])
+  })
+
+  it('moves newly grouped layers below the highest selected layer as a contiguous block', () => {
+    const withLayers = ['A', 'B', 'C', 'D'].reduce(
+      (doc, text) => addTextLayer(doc, { text }),
+      createDefaultHandout('Group Order'),
+    )
+    const [a, b, c, d] = withLayers.layers
+    const grouped = addLayerGroup(withLayers, [a.id, c.id])
+
+    expect(grouped.groups[0].layerIds).toEqual([a.id, c.id])
+    expect(grouped.layers.map((layer) => layer.id)).toEqual([b.id, a.id, c.id, d.id])
+    expect(grouped.layers.map((layer) => layer.zIndex)).toEqual([0, 1, 2, 3])
+  })
+
+  it('moves an existing group as one contiguous layer block', () => {
+    const withLayers = ['A', 'B', 'C', 'D'].reduce(
+      (doc, text) => addTextLayer(doc, { text }),
+      createDefaultHandout('Move Group'),
+    )
+    const [a, b, c, d] = withLayers.layers
+    const grouped = addLayerGroup(withLayers, [b.id, c.id])
+    const moved = moveLayerGroup(grouped, grouped.groups[0].id, 0)
+
+    expect(grouped.layers.map((layer) => layer.id)).toEqual([a.id, b.id, c.id, d.id])
+    expect(moved.layers.map((layer) => layer.id)).toEqual([b.id, c.id, a.id, d.id])
+    expect(moved.groups[0].layerIds).toEqual([b.id, c.id])
+  })
+
+  it('flattens selected layers into one image layer and removes stale group references', () => {
+    const withLayers = ['A', 'B', 'C'].reduce(
+      (doc, text) => addTextLayer(doc, { text }),
+      createDefaultHandout('Flat Layers'),
+    )
+    const [a, b, c] = withLayers.layers
+    const grouped = addLayerGroup(withLayers, [a.id, b.id])
+    const flattened = flattenLayersToImage(grouped, [a.id, b.id], 'asset-flat', 'flat-test', {
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+    })
+
+    expect(flattened.layers).toHaveLength(2)
+    expect(flattened.layers[0]).toMatchObject({
+      type: 'image',
+      name: 'flat-test',
+      assetId: 'asset-flat',
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+      zIndex: 0,
+    })
+    expect(flattened.layers[1].id).toBe(c.id)
+    expect(flattened.groups).toEqual([])
+  })
+
+  it('flattens a single selected layer into one image layer', () => {
+    const withLayer = addShapeLayer(createDefaultHandout('Flat Single'), { shape: 'rect' })
+    const flattened = flattenLayersToImage(withLayer, [withLayer.layers[0].id], 'asset-single-flat', 'flat-single', {
+      x: 4,
+      y: 8,
+      width: 120,
+      height: 80,
+    })
+
+    expect(flattened.layers).toHaveLength(1)
+    expect(flattened.layers[0]).toMatchObject({
+      type: 'image',
+      assetId: 'asset-single-flat',
+      name: 'flat-single',
+      x: 4,
+      y: 8,
+      width: 120,
+      height: 80,
     })
   })
 

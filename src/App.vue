@@ -49,6 +49,10 @@ import { useTextLayerAutoResize } from '@/composables/useTextLayerAutoResize'
 import { useLayerRenderConfigs } from '@/composables/useLayerRenderConfigs'
 import { useRenderSignatures } from '@/composables/useRenderSignatures'
 import { useMaskComposition } from '@/composables/useMaskComposition'
+import { usePaintStrokes } from '@/composables/usePaintStrokes'
+import { useCurveEditing } from '@/composables/useCurveEditing'
+import { useSelectionBox } from '@/composables/useSelectionBox'
+import { useLayerDragTransform } from '@/composables/useLayerDragTransform'
 import {
   appendDebugLog,
   fontRecordFamily,
@@ -57,15 +61,13 @@ import {
   type ProjectSummary,
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
-import type { CanvasPoint, CurvePoints, FlattenedLayerBounds, HandoutDocument, HandoutLayer, LayerGroup, PaintLayer, PaintStroke, ShapeKind, ShapeLayer, StrokePoint } from '@/lib/handout'
-import { isCurveShape, isLayerEffectivelyVisible, strokePointsToFlat } from '@/lib/handout'
+import type { FlattenedLayerBounds, HandoutDocument, HandoutLayer, LayerGroup, ShapeKind } from '@/lib/handout'
+import { isCurveShape, isLayerEffectivelyVisible } from '@/lib/handout'
 import { createAppShortcutHandler } from '@/app/AppShortcuts'
 import { saveProjectWithPreview } from '@/app/useAppPersistence'
 import { appConfiguration } from '@/lib/configuration'
-import { layerPositionFromNode } from '@/lib/layer-rendering'
 import { paintStrokeLineConfig } from '@/lib/paint-rendering'
 import { dataUrlByteSize, renderHandoutToDataUrl } from '@/lib/render'
-import { containsRect } from '@/lib/selection'
 import {
   arrowDotConfig,
   arrowLineConfig,
@@ -78,15 +80,12 @@ import {
   showLineHandle,
 } from '@/lib/shape-rendering'
 import { shapeItems } from '@/lib/shape-items'
-import { calculateSnapGuides, SNAP_THRESHOLD_SCREEN_PX, type GuideLine, type SnapLayer } from '@/lib/snapping'
 import { partitionUploadFiles, type UploadKind } from '@/lib/upload-validation'
 import { isImageLayer, isPaintLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
-type SelectionBox = { visible: boolean; startX: number; startY: number; x: number; y: number; width: number; height: number }
 type EditorTool = 'select' | 'brush' | 'eraser'
-type CurvePointKey = 'start' | 'control' | 'control1' | 'control2' | 'end'
 
 Konva.dragButtons = [0]
 const PREVIEW_TARGET_BYTES = 512 * 1024
@@ -109,8 +108,6 @@ const isCreateDialogOpen = ref(false)
 const isSettingsDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
-const guideLines = ref<GuideLine[]>([])
-const selectionBox = reactive<SelectionBox>({ visible: false, startX: 0, startY: 0, x: 0, y: 0, width: 0, height: 0 })
 const activeTool = ref<EditorTool>('select')
 const activeRailTab = ref<'assets' | 'fonts' | 'graph' | 'layers'>('assets')
 const handleGlobalKeydown = createAppShortcutHandler({
@@ -127,16 +124,7 @@ const handleGlobalKeydown = createAppShortcutHandler({
     void updateTransformer()
   },
 })
-const draftStroke = ref<PaintStroke>()
-const curveControlRevision = ref(0)
 const isFlatteningLayers = ref(false)
-const multiDragState = reactive({
-  active: false,
-  layerId: '',
-  originX: 0,
-  originY: 0,
-  positions: {} as Record<string, { x: number; y: number }>,
-})
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
@@ -163,10 +151,7 @@ const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.find
 const EDITOR_EFFECT_CACHE_MAX_EDGE = 768
 const EDITOR_MASK_PREVIEW_MAX_EDGE = 1200
 const maskFeatureEnabled = appConfiguration.mask.enabled
-let lastSnapLogSignature = ''
-let lastEllipseDragLogSignature = ''
 let lastFontDragOverLogAt = 0
-let suppressNextStageClick = false
 let lastLayerListSelectionId = ''
 const logHandoutPreview = createDebugLogger('handout-preview')
 const logText = createDebugLogger('text')
@@ -377,6 +362,67 @@ const {
 })
 maskCompositionRefreshHolder.refreshMaskPreviewUrls = refreshMaskPreviewUrls
 maskCompositionRefreshHolder.scheduleMaskCompositeRefresh = scheduleMaskCompositeRefresh
+const {
+  draftStroke,
+  startPaintStroke,
+  movePaintStroke,
+  stopPaintStroke,
+} = usePaintStrokes({
+  editor,
+  activeTool,
+  maskFeatureEnabled,
+  canvasPointFromClient,
+  updateTransformer,
+})
+const {
+  selectionBox,
+  handleStagePointer,
+  startSelectionBox,
+  moveSelectionBox,
+  stopSelectionBox,
+} = useSelectionBox({
+  editor,
+  activeTool,
+  stageRef,
+  stageScale,
+  canvasPointFromClient,
+  updateTransformer,
+  startPaintStroke,
+  movePaintStroke,
+  stopPaintStroke,
+})
+const {
+  curvePointKeys,
+  curveHandleConfig,
+  curveGuideConfig,
+  curveGuideLineConfig,
+  moveCurvePoint,
+  endCurvePointMove,
+} = useCurveEditing({
+  editor,
+  layerNodeRefs,
+  stageScale,
+})
+const {
+  guideLines,
+  onLayerDragStart,
+  onTransformEnd,
+  onTransform,
+  onDragEnd,
+  onDragMove,
+} = useLayerDragTransform({
+  editor,
+  layerNodeRefs,
+  stageScale,
+  isShapeLayer,
+  selectCanvasLayer,
+  updateTransformer,
+  autoTextLayerHeight,
+  refreshLayerEffectCacheAfterUpdate,
+  logBackgroundRender,
+  logShape,
+  logSnap,
+})
 const {
   finderDrivers,
   handleFinderFileDoubleClick,
@@ -911,266 +957,6 @@ async function fitEditorCanvas(reason = 'fit') {
   fitCanvasView(reason)
 }
 
-function activePaintDefaults() {
-  const layer = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
-  const mode = activeTool.value === 'eraser' ? 'eraser' : 'brush'
-  return {
-    color: layer?.brushColor ?? editor.toolSettings.brushColor,
-    brushKind: layer?.brushKind ?? editor.toolSettings.brushKind,
-    width: mode === 'eraser' ? layer?.eraserWidth ?? editor.toolSettings.eraserWidth : layer?.brushWidth ?? editor.toolSettings.brushWidth,
-    opacity: layer?.brushOpacity ?? editor.toolSettings.brushOpacity,
-    eraserOpacity: layer?.eraserOpacity ?? editor.toolSettings.eraserOpacity,
-    tension: layer?.brushTension ?? editor.toolSettings.brushTension,
-  }
-}
-
-function localizeStrokePoints(points: StrokePoint[], layer?: PaintLayer) {
-  if (!layer) return points
-  return points.map((point) => ({
-    ...point,
-    x: point.x - layer.x,
-    y: point.y - layer.y,
-  }))
-}
-
-function maskLocalPoint(mask: NonNullable<HandoutLayer['mask']>, point: StrokePoint): StrokePoint {
-  const radians = -((mask.rotation || 0) * Math.PI) / 180
-  const dx = point.x - mask.x
-  const dy = point.y - mask.y
-  const rotatedX = dx * Math.cos(radians) - dy * Math.sin(radians)
-  const rotatedY = dx * Math.sin(radians) + dy * Math.cos(radians)
-  const scaledX = rotatedX / (mask.scaleX || 1)
-  const scaledY = rotatedY / (mask.scaleY || 1)
-  return {
-    ...point,
-    x: mask.flipX ? mask.width - scaledX : scaledX,
-    y: scaledY,
-  }
-}
-
-function localizeMaskStroke(stroke: PaintStroke) {
-  if (!maskFeatureEnabled) return undefined
-  const target = editor.maskEditTarget
-  if (!target) return undefined
-  if (target.kind === 'background') {
-    const mask = editor.document.canvas.backgroundMask
-    return mask ? { mask, stroke } : undefined
-  }
-  const layer = editor.document.layers.find((item) => item.id === target.layerId)
-  if (!layer?.mask) return undefined
-  const rawPoints = (stroke.rawPoints ?? []).map((point) => maskLocalPoint(layer.mask!, point))
-  const points = strokePointsToFlat(rawPoints)
-  return {
-    mask: layer.mask,
-    stroke: {
-      ...stroke,
-      rawPoints,
-      points,
-    },
-  }
-}
-
-function eventPressure(_event?: MouseEvent) {
-  return 0.5
-}
-
-function startPaintStroke(event: KonvaEvent) {
-  if (event.evt?.button !== 0) return false
-  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
-  const defaults = activePaintDefaults()
-  draftStroke.value = {
-    id: crypto.randomUUID(),
-    points: [point.x, point.y],
-    rawPoints: [{ x: point.x, y: point.y, pressure: eventPressure(event.evt) }],
-    strokeWidth: defaults.width,
-    color: defaults.color,
-    tension: defaults.tension,
-    mode: activeTool.value === 'eraser' ? 'eraser' : 'brush',
-    brushKind: defaults.brushKind,
-    opacity: defaults.brushKind === 'highlighter' ? Math.min(defaults.opacity, 0.38) : defaults.opacity,
-    eraserOpacity: defaults.eraserOpacity,
-  }
-  event.cancelBubble = true
-  return true
-}
-
-function movePaintStroke(event: KonvaEvent) {
-  if (!draftStroke.value || !event.evt) return false
-  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
-  const points = draftStroke.value.points
-  const lastX = points.at(-2)
-  const lastY = points.at(-1)
-  if (lastX !== undefined && lastY !== undefined && Math.hypot(point.x - lastX, point.y - lastY) < 0.5) return true
-  const nextPoints: StrokePoint[] = []
-  if (lastX !== undefined && lastY !== undefined) {
-    const distance = Math.hypot(point.x - lastX, point.y - lastY)
-    const spacing = Math.max(1.5, Math.min(6, draftStroke.value.strokeWidth / 3))
-    const steps = Math.max(1, Math.ceil(distance / spacing))
-    for (let step = 1; step <= steps; step += 1) {
-      const ratio = step / steps
-      nextPoints.push({
-        x: lastX + (point.x - lastX) * ratio,
-        y: lastY + (point.y - lastY) * ratio,
-        pressure: eventPressure(event.evt),
-      })
-    }
-  } else {
-    nextPoints.push({ x: point.x, y: point.y, pressure: eventPressure(event.evt) })
-  }
-  draftStroke.value = {
-    ...draftStroke.value,
-    points: [...points, ...strokePointsToFlat(nextPoints)],
-    rawPoints: [...(draftStroke.value.rawPoints ?? []), ...nextPoints],
-  }
-  event.cancelBubble = true
-  return true
-}
-
-function stopPaintStroke() {
-  if (!draftStroke.value) return false
-  if (editor.maskEditTarget) {
-    const maskStroke = localizeMaskStroke(draftStroke.value)
-    draftStroke.value = undefined
-    if (maskStroke) void editor.paintMask(maskStroke.mask, maskStroke.stroke)
-    return true
-  }
-  const selectedPaint = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
-  const stroke = {
-    ...draftStroke.value,
-    rawPoints: localizeStrokePoints(draftStroke.value.rawPoints ?? [], selectedPaint),
-  }
-  if (stroke.rawPoints.length === 1) {
-    stroke.rawPoints = [
-      ...stroke.rawPoints,
-      { ...stroke.rawPoints[0], x: stroke.rawPoints[0].x + 0.1, y: stroke.rawPoints[0].y + 0.1 },
-    ]
-  }
-  stroke.points = strokePointsToFlat(stroke.rawPoints)
-  editor.appendStrokeToPaintLayer(stroke)
-  draftStroke.value = undefined
-  void updateTransformer()
-  return true
-}
-
-function curvePointKeys(layer: ShapeLayer): CurvePointKey[] {
-  if (layer.shape === 'quadratic-curve') return ['start', 'control', 'end']
-  if (layer.shape === 'cubic-bezier') return ['start', 'control1', 'control2', 'end']
-  return []
-}
-
-function curvePoint(layer: ShapeLayer, key: CurvePointKey) {
-  return layer.curvePoints?.[key]
-}
-
-function curveNode(layer: ShapeLayer) {
-  return layerNodeRefs[layer.id]?.getNode()
-}
-
-function transformedCurvePoint(layer: ShapeLayer, point?: CanvasPoint) {
-  void curveControlRevision.value
-  if (!point) return { x: layer.x, y: layer.y }
-  const node = curveNode(layer)
-  if (!node) return { x: layer.x + point.x, y: layer.y + point.y }
-  return node.getTransform().point(point)
-}
-
-function curveHandleConfig(layer: ShapeLayer, key: CurvePointKey) {
-  const point = transformedCurvePoint(layer, curvePoint(layer, key))
-  return {
-    x: point.x,
-    y: point.y,
-    radius: 5 / stageScale.value,
-    fill: key === 'start' || key === 'end' ? '#14b8a6' : '#f59e0b',
-    stroke: '#ffffff',
-    strokeWidth: 1.5 / stageScale.value,
-    draggable: true,
-  }
-}
-
-function curveGuideConfig(layer: ShapeLayer) {
-  const points = layer.curvePoints
-  if (!points) return []
-  if (layer.shape === 'quadratic-curve' && points.control) {
-    return [
-      [points.start, points.control],
-      [points.control, points.end],
-    ]
-  }
-  if (layer.shape === 'cubic-bezier' && points.control1 && points.control2) {
-    return [
-      [points.start, points.control1],
-      [points.control2, points.end],
-    ]
-  }
-  return []
-}
-
-function curveGuideLineConfig(layer: ShapeLayer, guide: CanvasPoint[]) {
-  return {
-    points: guide.flatMap((point) => {
-      const transformed = transformedCurvePoint(layer, point)
-      return [transformed.x, transformed.y]
-    }),
-    stroke: '#94a3b8',
-    strokeWidth: 1 / stageScale.value,
-    dash: [4 / stageScale.value, 4 / stageScale.value],
-    listening: false,
-  }
-}
-
-function normalizeCurveLayerPatch(layer: ShapeLayer, curvePoints: CurvePoints, node?: Konva.Node) {
-  const points = curvePointKeys(layer)
-    .map((key) => curvePoints[key])
-    .filter((point): point is CanvasPoint => Boolean(point))
-  const padding = Math.max(0, layer.strokeWidth / 2)
-  const minX = Math.floor(Math.min(...points.map((point) => point.x)) - padding)
-  const minY = Math.floor(Math.min(...points.map((point) => point.y)) - padding)
-  const maxX = Math.ceil(Math.max(...points.map((point) => point.x)) + padding)
-  const maxY = Math.ceil(Math.max(...points.map((point) => point.y)) + padding)
-  if (minX === 0 && minY === 0 && maxX === layer.width && maxY === layer.height) return { curvePoints }
-  if (layer.rotation && layer.flipX) return { curvePoints }
-  const normalized: CurvePoints = {
-    start: { x: curvePoints.start.x - minX, y: curvePoints.start.y - minY },
-    control: curvePoints.control ? { x: curvePoints.control.x - minX, y: curvePoints.control.y - minY } : undefined,
-    control1: curvePoints.control1 ? { x: curvePoints.control1.x - minX, y: curvePoints.control1.y - minY } : undefined,
-    control2: curvePoints.control2 ? { x: curvePoints.control2.x - minX, y: curvePoints.control2.y - minY } : undefined,
-    end: { x: curvePoints.end.x - minX, y: curvePoints.end.y - minY },
-  }
-  const origin = layer.rotation && node
-    ? node.getTransform().point({ x: minX, y: minY })
-    : {
-        x: layer.flipX ? layer.x + layer.width - maxX : layer.x + minX,
-        y: layer.y + minY,
-      }
-  return {
-    x: Math.round(origin.x),
-    y: Math.round(origin.y),
-    width: Math.max(12, Math.ceil(maxX - minX)),
-    height: Math.max(12, Math.ceil(maxY - minY)),
-    curvePoints: normalized,
-  }
-}
-
-function moveCurvePoint(layer: ShapeLayer, key: CurvePointKey, event: KonvaEvent) {
-  const node = event.target
-  const curveTransform = curveNode(layer)?.getTransform().copy().invert()
-  const local = curveTransform?.point({ x: node.x(), y: node.y() }) ?? { x: node.x() - layer.x, y: node.y() - layer.y }
-  const point = { x: Math.round(local.x), y: Math.round(local.y) }
-  const curvePoints: CurvePoints = {
-    ...(layer.curvePoints ?? {
-      start: { x: 0, y: 0 },
-      end: { x: layer.width, y: layer.height },
-    }),
-    [key]: point,
-  }
-  editor.patchLayerContinuous(layer.id, `curve-point-${layer.id}-${key}`, normalizeCurveLayerPatch(layer, curvePoints, curveNode(layer)))
-  curveControlRevision.value += 1
-}
-
-function endCurvePointMove(layer: ShapeLayer, key: CurvePointKey) {
-  editor.endContinuousEdit(`curve-point-${layer.id}-${key}`)
-}
-
 function selectCanvasLayer(layerId: string, event?: KonvaEvent) {
   if (editor.maskEditTarget) {
     if (event) event.cancelBubble = true
@@ -1393,326 +1179,6 @@ async function flattenSelectedLayers() {
   } finally {
     isFlatteningLayers.value = false
   }
-}
-
-function onLayerDragStart(layer: HandoutLayer, event: KonvaEvent) {
-  if (event.evt?.metaKey || event.evt?.shiftKey || !editor.selectedLayerIds.includes(layer.id)) {
-    selectCanvasLayer(layer.id, event)
-  } else {
-    event.cancelBubble = true
-  }
-  if (!editor.selectedLayerIds.includes(layer.id) || editor.selectedLayerIds.length < 2) {
-    multiDragState.active = false
-    return
-  }
-  const position = layerPositionFromNode(layer, event.target)
-  multiDragState.active = true
-  multiDragState.layerId = layer.id
-  multiDragState.originX = position.x
-  multiDragState.originY = position.y
-  multiDragState.positions = Object.fromEntries(
-    editor.selectedLayers.map((item) => [item.id, { x: item.x, y: item.y }]),
-  )
-}
-
-function handleStagePointer(event: KonvaEvent) {
-  if (editor.maskEditTarget) return
-  if (activeTool.value !== 'select') return
-  if (suppressNextStageClick) {
-    suppressNextStageClick = false
-    return
-  }
-  const stage = stageRef.value?.getNode()
-  if (selectionBox.visible) return
-  if (stage && (event.target === stage || event.target.name() === 'canvas-background')) {
-    editor.selectLayer(undefined)
-    void updateTransformer()
-  }
-}
-
-function updateSelectionBox(from: { x: number; y: number }, to: { x: number; y: number }) {
-  selectionBox.x = Math.min(from.x, to.x)
-  selectionBox.y = Math.min(from.y, to.y)
-  selectionBox.width = Math.abs(to.x - from.x)
-  selectionBox.height = Math.abs(to.y - from.y)
-}
-
-function startSelectionBox(event: KonvaEvent) {
-  if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
-    startPaintStroke(event)
-    return
-  }
-  if (activeTool.value !== 'select') return
-  if (event.evt?.button !== 0 || event.target.name() !== 'canvas-background') return
-  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
-  selectionBox.visible = true
-  selectionBox.startX = point.x
-  selectionBox.startY = point.y
-  updateSelectionBox(point, point)
-}
-
-function moveSelectionBox(event: KonvaEvent) {
-  if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
-    movePaintStroke(event)
-    return
-  }
-  if (!selectionBox.visible || !event.evt) return
-  const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
-  updateSelectionBox({ x: selectionBox.startX, y: selectionBox.startY }, point)
-}
-
-function containsSelection(layer: HandoutLayer) {
-  return containsRect(selectionBox, layer)
-}
-
-function stopSelectionBox() {
-  if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
-    stopPaintStroke()
-    return
-  }
-  if (!selectionBox.visible) return
-  const hasArea = selectionBox.width > 3 / stageScale.value || selectionBox.height > 3 / stageScale.value
-  if (hasArea) {
-    editor.setLayerSelection(
-      editor.document.layers
-        .filter((layer) => isLayerEffectivelyVisible(editor.document, layer) && containsSelection(layer))
-        .map((layer) => layer.id),
-    )
-    void updateTransformer()
-    suppressNextStageClick = true
-  }
-  selectionBox.visible = false
-  selectionBox.width = 0
-  selectionBox.height = 0
-}
-
-function onTransformEnd(layer: HandoutLayer) {
-  const node = layerNodeRefs[layer.id]?.getNode()
-  if (!node) return
-  const scaleX = Math.abs(node.scaleX())
-  const scaleY = Math.abs(node.scaleY())
-  const width = isShapeLayer(layer) && layer.shape === 'line'
-    ? Math.max(12, Math.round(layer.width * scaleX))
-    : Math.max(12, Math.round(node.width() * scaleX))
-  let height = isShapeLayer(layer) && layer.shape === 'line'
-    ? Math.max(12, Math.round(layer.height * scaleY))
-    : Math.max(12, Math.round(node.height() * scaleY))
-  if (isTextLayer(layer)) {
-    node.width(width)
-    node.scaleX(1)
-    node.scaleY(1)
-    height = autoTextLayerHeight(layer, node as Konva.Text)
-  }
-  const position = isShapeLayer(layer) && layer.shape === 'ellipse'
-    ? {
-        x: Math.round(node.x() - width / 2),
-        y: Math.round(node.y() - height / 2),
-      }
-    : layerPositionFromNode(layer, node)
-  node.clearCache()
-  node.scaleX(layer.flipX ? -1 : 1)
-  node.scaleY(1)
-  node.width(width)
-  node.height(height)
-  editor.patchLayer(layer.id, {
-    x: position.x,
-    y: position.y,
-    width,
-    height,
-    rotation: Math.round(node.rotation()),
-  })
-  logBackgroundRender('after-layer-transform', {
-    layerId: layer.id,
-    layerType: layer.type,
-    layerBounds: { x: Math.round(position.x), y: Math.round(position.y), width, height },
-  })
-  void refreshLayerEffectCacheAfterUpdate(layer.id)
-}
-
-function onTransform(layer: HandoutLayer, event: KonvaEvent) {
-  if (isShapeLayer(layer) && isCurveShape(layer.shape)) curveControlRevision.value += 1
-  if (!event.evt?.shiftKey) return
-  const node = layerNodeRefs[layer.id]?.getNode()
-  if (!node) return
-  const snapped = Math.round(node.rotation() / 45) * 45
-  if (Math.abs(snapped - node.rotation()) <= 22.5) node.rotation(snapped)
-}
-
-function onDragEnd(layer: HandoutLayer) {
-  guideLines.value = []
-  lastSnapLogSignature = ''
-  const node = layerNodeRefs[layer.id]?.getNode()
-  if (!node) return
-  logEllipseDrag('ellipse-drag-end-before-patch', layer, node, {
-    patch: layerPositionFromNode(layer, node),
-  })
-  node.clearCache()
-  if (multiDragState.active) {
-    const patches = editor.selectedLayers
-      .map((item) => {
-        const selectedNode = layerNodeRefs[item.id]?.getNode()
-        if (!selectedNode) return undefined
-        return { id: item.id, patch: layerPositionFromNode(item, selectedNode) }
-      })
-      .filter((item): item is { id: string; patch: { x: number; y: number } } => Boolean(item))
-    for (const item of patches) editor.patchLayer(item.id, item.patch)
-    multiDragState.active = false
-    multiDragState.positions = {}
-  } else {
-    editor.patchLayer(layer.id, layerPositionFromNode(layer, node))
-  }
-  logBackgroundRender('after-layer-drag', {
-    layerId: layer.id,
-    layerType: layer.type,
-    layerPosition: layerPositionFromNode(layer, node),
-  })
-  if (isShapeLayer(layer) && layer.shape === 'ellipse') {
-    lastEllipseDragLogSignature = ''
-  }
-  void refreshLayerEffectCacheAfterUpdate(layer.id)
-}
-
-function snapLayerFromDocumentLayer(layer: HandoutLayer): SnapLayer {
-  return {
-    id: layer.id,
-    x: layer.x,
-    y: layer.y,
-    width: layer.width,
-    height: layer.height,
-    visible: layer.visible,
-    locked: layer.locked,
-  }
-}
-
-function snapLayerFromNode(layer: HandoutLayer, node: Konva.Node): SnapLayer {
-  const position = layerPositionFromNode(layer, node)
-  return {
-    ...snapLayerFromDocumentLayer(layer),
-    x: position.x,
-    y: position.y,
-    width: layer.width,
-    height: layer.height,
-  }
-}
-
-function applySnappedNodePosition(layer: HandoutLayer, node: Konva.Node, axis: 'x' | 'y', value: number) {
-  if (isShapeLayer(layer) && layer.shape === 'ellipse') {
-    if (axis === 'x') node.x(value + layer.width / 2)
-    else node.y(value + layer.height / 2)
-    return
-  }
-  if (axis === 'x') node.x(layer.flipX ? value + layer.width / 2 : value)
-  else node.y(value)
-}
-
-function ellipseDragSnapshot(layer: ShapeLayer, node: Konva.Node) {
-  const position = layerPositionFromNode(layer, node)
-  return {
-    model: {
-      x: layer.x,
-      y: layer.y,
-      width: layer.width,
-      height: layer.height,
-      rotation: layer.rotation,
-    },
-    node: {
-      x: Math.round(node.x() * 100) / 100,
-      y: Math.round(node.y() * 100) / 100,
-      width: Math.round(node.width() * 100) / 100,
-      height: Math.round(node.height() * 100) / 100,
-      scaleX: Math.round(node.scaleX() * 100) / 100,
-      scaleY: Math.round(node.scaleY() * 100) / 100,
-      rotation: Math.round(node.rotation() * 100) / 100,
-    },
-    derivedPosition: position,
-    stageScale: Math.round(stageScale.value * 1000) / 1000,
-  }
-}
-
-function logEllipseDrag(message: string, layer: HandoutLayer, node: Konva.Node, extra?: Record<string, unknown>) {
-  if (!isShapeLayer(layer) || layer.shape !== 'ellipse') return
-  const snapshot = ellipseDragSnapshot(layer, node)
-  const signature = JSON.stringify({
-    message,
-    x: snapshot.derivedPosition.x,
-    y: snapshot.derivedPosition.y,
-    nodeX: snapshot.node.x,
-    nodeY: snapshot.node.y,
-    extra,
-  })
-  if (signature === lastEllipseDragLogSignature) return
-  lastEllipseDragLogSignature = signature
-  logShape(message, {
-    layerId: layer.id,
-    ...snapshot,
-    ...extra,
-  })
-}
-
-function onDragMove(layer: HandoutLayer, event: KonvaEvent) {
-  const node = layerNodeRefs[layer.id]?.getNode()
-  if (!node || event.evt?.ctrlKey) {
-    guideLines.value = []
-    lastSnapLogSignature = ''
-    return
-  }
-
-  if (multiDragState.active && multiDragState.layerId === layer.id) {
-    const position = layerPositionFromNode(layer, node)
-    const dx = position.x - multiDragState.originX
-    const dy = position.y - multiDragState.originY
-    for (const id of editor.selectedLayerIds) {
-      if (id === layer.id) continue
-      const selectedLayer = editor.document.layers.find((item) => item.id === id)
-      const selectedNode = layerNodeRefs[id]?.getNode()
-      const origin = multiDragState.positions[id]
-      if (!selectedLayer || !selectedNode || !origin) continue
-      selectedNode.x(selectedLayer.flipX ? origin.x + dx + selectedLayer.width / 2 : origin.x + dx)
-      selectedNode.y(origin.y + dy)
-    }
-    guideLines.value = []
-    return
-  }
-
-  if (isShapeLayer(layer) && isCurveShape(layer.shape)) curveControlRevision.value += 1
-  logEllipseDrag('ellipse-drag-move-before-snap', layer, node)
-  const snap = calculateSnapGuides({
-    movingLayer: snapLayerFromNode(layer, node),
-    layers: editor.document.layers.map(snapLayerFromDocumentLayer),
-    canvas: {
-      width: editor.document.canvas.width,
-      height: editor.document.canvas.height,
-    },
-    stageScale: stageScale.value,
-  })
-  if (snap.x) applySnappedNodePosition(layer, node, 'x', snap.nextPosition.x)
-  if (snap.y) applySnappedNodePosition(layer, node, 'y', snap.nextPosition.y)
-  if (snap.x || snap.y) {
-    logEllipseDrag('ellipse-drag-move-after-snap', layer, node, {
-      snap: {
-        x: snap.x,
-        y: snap.y,
-        nextPosition: snap.nextPosition,
-      },
-    })
-  }
-  if (snap.lines.length > 0) {
-    const signature = `${layer.id}:${snap.lines.map((line) => `${line.orientation}:${line.value}`).join('|')}`
-    if (signature !== lastSnapLogSignature) {
-      lastSnapLogSignature = signature
-      logSnap('drag-snap', {
-        layerId: layer.id,
-        stageScale: stageScale.value,
-        screenThresholdPx: SNAP_THRESHOLD_SCREEN_PX,
-        canvasThresholdPx: snap.thresholdCanvas,
-        x: snap.x,
-        y: snap.y,
-      })
-    }
-  } else {
-    lastSnapLogSignature = ''
-  }
-  guideLines.value = snap.lines
 }
 
 async function updateTransformer() {

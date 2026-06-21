@@ -53,21 +53,21 @@ import { usePaintStrokes } from '@/composables/usePaintStrokes'
 import { useCurveEditing } from '@/composables/useCurveEditing'
 import { useSelectionBox } from '@/composables/useSelectionBox'
 import { useLayerDragTransform } from '@/composables/useLayerDragTransform'
+import { useFlattenLayers } from '@/composables/useFlattenLayers'
+import { useCanvasDrop } from '@/composables/useCanvasDrop'
+import { useProjectCreation } from '@/composables/useProjectCreation'
+import { useFinderSelection } from '@/composables/useFinderSelection'
 import {
   appendDebugLog,
   fontRecordFamily,
-  saveProjectAsset,
   type LibraryRecord,
-  type ProjectSummary,
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
-import type { FlattenedLayerBounds, HandoutDocument, HandoutLayer, LayerGroup, ShapeKind } from '@/lib/handout'
+import type { HandoutLayer, LayerGroup, ShapeKind } from '@/lib/handout'
 import { isCurveShape, isLayerEffectivelyVisible } from '@/lib/handout'
 import { createAppShortcutHandler } from '@/app/AppShortcuts'
-import { saveProjectWithPreview } from '@/app/useAppPersistence'
 import { appConfiguration } from '@/lib/configuration'
 import { paintStrokeLineConfig } from '@/lib/paint-rendering'
-import { dataUrlByteSize, renderHandoutToDataUrl } from '@/lib/render'
 import {
   arrowDotConfig,
   arrowLineConfig,
@@ -80,7 +80,7 @@ import {
   showLineHandle,
 } from '@/lib/shape-rendering'
 import { shapeItems } from '@/lib/shape-items'
-import { partitionUploadFiles, type UploadKind } from '@/lib/upload-validation'
+import { partitionUploadFiles } from '@/lib/upload-validation'
 import { isImageLayer, isPaintLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
@@ -102,9 +102,6 @@ const maskPreviewUrls = shallowReactive<Record<string, string | undefined>>({})
 const draggedMaskLayerId = ref('')
 const isDraggingMask = ref(false)
 
-const newProjectTitle = ref('Untitled handout')
-const createMode = ref<'blank' | 'upload-background'>('blank')
-const isCreateDialogOpen = ref(false)
 const isSettingsDialogOpen = ref(false)
 const blankWidth = ref(1280)
 const blankHeight = ref(720)
@@ -124,7 +121,6 @@ const handleGlobalKeydown = createAppShortcutHandler({
     void updateTransformer()
   },
 })
-const isFlatteningLayers = ref(false)
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
@@ -151,7 +147,6 @@ const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.find
 const EDITOR_EFFECT_CACHE_MAX_EDGE = 768
 const EDITOR_MASK_PREVIEW_MAX_EDGE = 1200
 const maskFeatureEnabled = appConfiguration.mask.enabled
-let lastFontDragOverLogAt = 0
 let lastLayerListSelectionId = ''
 const logHandoutPreview = createDebugLogger('handout-preview')
 const logText = createDebugLogger('text')
@@ -424,6 +419,81 @@ const {
   logSnap,
 })
 const {
+  isFlatteningLayers,
+  flattenSelectedLayers,
+} = useFlattenLayers({
+  editor,
+  imageElements,
+  imageSize,
+  loadImage,
+  syncImages,
+  updateTransformer,
+  isShapeLayer,
+  maskFeatureEnabled,
+  editorMaskPreviewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+  logFlat,
+})
+const projectCreationHolder: { createProjectFromBackground: (bg: LibraryRecord) => Promise<void> } = {
+  createProjectFromBackground: async () => {},
+}
+const finderSelectionHolder: { selectedImageRecord: (kind: 'background' | 'asset') => LibraryRecord | undefined } = {
+  selectedImageRecord: () => undefined,
+}
+const {
+  newProjectTitle,
+  createMode,
+  isCreateDialogOpen,
+  createProject,
+  createProjectFromBackground,
+  createHandoutFromImageRecord,
+  createHandoutFromFinderImage,
+  saveProject,
+  cloneHandoutProject,
+} = useProjectCreation({
+  editor,
+  imageElements,
+  imageSize,
+  selectedProjectFolder,
+  selectedImageRecord: (kind: 'background' | 'asset') => finderSelectionHolder.selectedImageRecord(kind),
+  editorMaskPreviewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
+  logHandoutPreview,
+  blankWidth,
+  blankHeight,
+})
+projectCreationHolder.createProjectFromBackground = createProjectFromBackground
+const {
+  uploadFiles,
+  handleDirectFinderDrop,
+  handleDirectFinderDragover,
+  selectedImageRecord,
+  selectedImageStatus,
+  fontPreviewSource,
+  handleFinderSelect,
+  handleCreateBackgroundInput,
+  handleCreateBackgroundDrop,
+  selectedHandoutProject,
+  selectedHandoutStatus,
+  isSelectedHandoutExporting,
+  exportSelectedHandout,
+} = useFinderSelection({
+  editor,
+  loadImage,
+  partitionUploadFiles,
+  imageRecordFromFinderEntry: (kind: 'background' | 'asset', entry: DirEntry) => imageRecordFromFinderEntry(kind, entry),
+  projectFromFinderEntry: (entry: DirEntry) => projectFromFinderEntry(entry),
+  previewUrl,
+  isHandoutExporting,
+  exportHandoutProject,
+  selectedFinderItems,
+  finderRevision,
+  selectedBackgroundFolder,
+  selectedAssetFolder,
+  selectedFontFolder,
+  createProjectFromBackground: (bg: LibraryRecord) => projectCreationHolder.createProjectFromBackground(bg),
+  logUpload,
+})
+finderSelectionHolder.selectedImageRecord = selectedImageRecord
+const {
   finderDrivers,
   handleFinderFileDoubleClick,
   handleFinderPathChange,
@@ -445,6 +515,27 @@ const {
     asset: selectedAssetFolder,
     font: selectedFontFolder,
   },
+})
+const {
+  handleCanvasDrop,
+  handleCanvasDragOver,
+  handleDocumentFontDragOver,
+  handleDocumentFontDrop,
+} = useCanvasDrop({
+  editor,
+  fontFamily,
+  canvasPointFromClient,
+  stageFrameRef,
+  imageSize,
+  updateTransformer,
+  draggedFontId,
+  draggedAssetId,
+  draggedShapeKind,
+  assetRecordFromDragPath,
+  createFontTextOnCanvas,
+  addShapeToCanvas,
+  logText,
+  logUpload,
 })
 
 function resetKonvaDragButtons() {
@@ -783,99 +874,6 @@ function addShapeToCanvas(shape: ShapeKind, position?: { x?: number; y?: number 
   void updateTransformer()
 }
 
-function handleCanvasDrop(event: DragEvent) {
-  event.preventDefault()
-  event.stopPropagation()
-  const point = canvasPointFromClient(event.clientX, event.clientY)
-
-  const fontId = event.dataTransfer?.getData('application/x-handout-font') || draggedFontId.value
-  const fontName = event.dataTransfer?.getData('application/x-handout-font-name') || event.dataTransfer?.getData('text/plain') || ''
-  const fontFamilyName = event.dataTransfer?.getData('application/x-handout-font-family') || ''
-  logText('canvas-drop', {
-    fontId,
-    fontName,
-    fontFamilyName,
-    draggedFontId: draggedFontId.value,
-    types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
-    position: point,
-  })
-  const font = editor.resolveFont(fontId)
-    || editor.library.fonts.find((item) => item.name === fontName || fontFamily(item) === fontName || fontFamily(item) === fontFamilyName)
-  if (font) {
-    createFontTextOnCanvas(font, point)
-    draggedFontId.value = ''
-    return
-  }
-
-  const shape = (event.dataTransfer?.getData('application/x-handout-shape') || draggedShapeKind.value) as ShapeKind | ''
-  if (shape && shapeItems.some((item) => item.kind === shape)) {
-    addShapeToCanvas(shape, point)
-    draggedShapeKind.value = undefined
-    return
-  }
-
-  let asset = editor.resolveAsset(event.dataTransfer?.getData('application/x-handout-asset') || draggedAssetId.value)
-  if (!asset) {
-    const items = event.dataTransfer?.getData('items')
-    if (items) {
-      try {
-        const paths = JSON.parse(items) as string[]
-        asset = paths.map((path) => assetRecordFromDragPath(path)).find(Boolean)
-      } catch (error) {
-        logUpload('failed to parse vuefinder drag items', { error, items })
-      }
-    }
-  }
-  if (!asset) return
-  void imageSize(asset).then((size) => {
-    editor.addLayerFromAssetAt(asset, point.x, point.y, size)
-    void updateTransformer()
-  })
-  draggedAssetId.value = ''
-}
-
-function handleCanvasDragOver(event: DragEvent) {
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-}
-
-function pointInsideStageFrame(clientX: number, clientY: number) {
-  const rect = stageFrameRef.value?.getBoundingClientRect()
-  if (!rect) return false
-  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
-}
-
-function handleDocumentFontDragOver(event: DragEvent) {
-  if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-  const now = window.performance.now()
-  if (now - lastFontDragOverLogAt > 300) {
-    lastFontDragOverLogAt = now
-    logText('font-document-dragover', {
-      draggedFontId: draggedFontId.value,
-      types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
-      client: { x: event.clientX, y: event.clientY },
-      canvas: canvasPointFromClient(event.clientX, event.clientY),
-    })
-  }
-}
-
-function handleDocumentFontDrop(event: DragEvent) {
-  if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) return
-  event.preventDefault()
-  const font = editor.resolveFont(draggedFontId.value)
-  logText('font-document-drop', {
-    draggedFontId: draggedFontId.value,
-    resolved: Boolean(font),
-    client: { x: event.clientX, y: event.clientY },
-    canvas: canvasPointFromClient(event.clientX, event.clientY),
-  })
-  if (!font) return
-  createFontTextOnCanvas(font, canvasPointFromClient(event.clientX, event.clientY))
-  draggedFontId.value = ''
-}
-
 function setMaskEditNodeRef(node: unknown) {
   maskEditNodeRef.value = node as NodeRef | undefined
 }
@@ -979,208 +977,6 @@ function deleteLayer(layerId?: string) {
   void updateTransformer()
 }
 
-function layerOuterBounds(layer: HandoutLayer): FlattenedLayerBounds {
-  const blur = Math.max(0, layer.effects?.blur ?? 0)
-  const strokePad = isShapeLayer(layer) ? Math.max(0, layer.strokeWidth ?? 0) : 0
-  const pad = Math.ceil(Math.max(4, blur * 2, strokePad * 2))
-  const width = Math.max(1, layer.width)
-  const height = Math.max(1, layer.height)
-  const corners = [
-    { x: 0, y: 0 },
-    { x: width, y: 0 },
-    { x: width, y: height },
-    { x: 0, y: height },
-  ]
-  const rotation = (layer.rotation * Math.PI) / 180
-  const cos = Math.cos(rotation)
-  const sin = Math.sin(rotation)
-  const points = corners.map((point) => ({
-    x: layer.x + point.x * cos - point.y * sin,
-    y: layer.y + point.x * sin + point.y * cos,
-  }))
-  const xs = points.map((point) => point.x)
-  const ys = points.map((point) => point.y)
-  return {
-    x: Math.floor(Math.min(...xs) - pad),
-    y: Math.floor(Math.min(...ys) - pad),
-    width: Math.ceil(Math.max(...xs) - Math.min(...xs) + pad * 2),
-    height: Math.ceil(Math.max(...ys) - Math.min(...ys) + pad * 2),
-  }
-}
-
-function selectedLayerBounds(): FlattenedLayerBounds | undefined {
-  const layers = editor.selectedLayers
-  if (!layers.length) return undefined
-  const bounds = layers.map(layerOuterBounds)
-  const minX = Math.min(...bounds.map((item) => item.x))
-  const minY = Math.min(...bounds.map((item) => item.y))
-  const maxX = Math.max(...bounds.map((item) => item.x + item.width))
-  const maxY = Math.max(...bounds.map((item) => item.y + item.height))
-  return {
-    x: minX,
-    y: minY,
-    width: Math.max(1, Math.ceil(maxX - minX)),
-    height: Math.max(1, Math.ceil(maxY - minY)),
-  }
-}
-
-function cloneLayerForFlatten(layer: HandoutLayer): HandoutLayer {
-  return JSON.parse(JSON.stringify(layer)) as HandoutLayer
-}
-
-function shiftedLayerForFlatten(layer: HandoutLayer, bounds: FlattenedLayerBounds, zIndex: number): HandoutLayer {
-  const cloned = cloneLayerForFlatten(layer)
-  return {
-    ...cloned,
-    x: layer.x - bounds.x,
-    y: layer.y - bounds.y,
-    zIndex,
-    mask: cloned.mask
-      ? {
-          ...cloned.mask,
-          x: cloned.mask.x - bounds.x,
-          y: cloned.mask.y - bounds.y,
-        }
-      : cloned.mask,
-  }
-}
-
-function flattenDocumentForSelectedLayers(bounds: FlattenedLayerBounds, layerIds: string[]): HandoutDocument {
-  const idSet = new Set(layerIds)
-  const layers = editor.document.layers
-    .filter((layer) => idSet.has(layer.id))
-    .sort((a, b) => a.zIndex - b.zIndex)
-    .map((layer, index) => shiftedLayerForFlatten(layer, bounds, index))
-  return {
-    schemaVersion: 1,
-    id: crypto.randomUUID(),
-    title: `${editor.document.title} flat`,
-    canvas: {
-      width: bounds.width,
-      height: bounds.height,
-      backgroundColor: 'rgba(0,0,0,0)',
-      backgroundVisible: true,
-      backgroundMask: null,
-      effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
-    },
-    layers,
-    groups: [],
-    projectAssets: [],
-    updatedAt: new Date().toISOString(),
-  }
-}
-
-async function flattenSelectedLayers() {
-  const layerIds = [...editor.selectedLayerIds]
-  logFlat('flat-click', {
-    isFlattening: isFlatteningLayers.value,
-    selectedLayerIds: layerIds,
-    selectedLayers: editor.selectedLayers.map((layer) => ({
-      id: layer.id,
-      type: layer.type,
-      name: layer.name,
-      x: layer.x,
-      y: layer.y,
-      width: layer.width,
-      height: layer.height,
-      zIndex: layer.zIndex,
-    })),
-  })
-  if (isFlatteningLayers.value || !layerIds.length) return
-  const bounds = selectedLayerBounds()
-  logFlat('flat-bounds', { bounds })
-  if (!bounds) return
-  const confirmed = await confirm('Flatten selected layers into one image layer? This cannot be undone.', {
-    title: 'Confirm flatten',
-    kind: 'warning',
-    okLabel: 'Flat',
-    cancelLabel: 'Cancel',
-  })
-  logFlat('flat-confirmed', { confirmed })
-  if (!confirmed) return
-  isFlatteningLayers.value = true
-  try {
-    const flatDocument = flattenDocumentForSelectedLayers(bounds, layerIds)
-    logFlat('flat-render-start', {
-      canvas: flatDocument.canvas,
-      layers: flatDocument.layers.map((layer) => ({
-        id: layer.id,
-        type: layer.type,
-        name: layer.name,
-        x: layer.x,
-        y: layer.y,
-        width: layer.width,
-        height: layer.height,
-        zIndex: layer.zIndex,
-      })),
-    })
-    const dataUrl = await renderHandoutToDataUrl(flatDocument, editor.library, 1, imageElements, 'image/png', undefined, {
-      projectTarget: {
-        projectId: editor.currentProjectId,
-        projectDir: editor.projectDir || undefined,
-      },
-      masksEnabled: maskFeatureEnabled,
-      maskDataUrls: editor.maskDataUrls,
-    })
-    logFlat('flat-render-complete', {
-      dataUrlBytes: dataUrlByteSize(dataUrl),
-      dataUrlPrefix: dataUrl.slice(0, 32),
-    })
-    const assetId = crypto.randomUUID()
-    const fileName = `${editor.document.title.replace(/[^a-zA-Z0-9._-]+/g, '-') || 'handout'}-flat.png`
-    const path = await saveProjectAsset({
-      projectId: editor.currentProjectId,
-      projectDir: editor.projectDir || undefined,
-    }, assetId, fileName, dataUrl)
-    const now = new Date().toISOString()
-    const asset: LibraryRecord = {
-      id: assetId,
-      name: fileName,
-      fileName,
-      path,
-      thumbnailPath: null,
-      tags: ['flat'],
-      folder: '',
-      mediaType: 'image/png',
-      createdAt: now,
-      updatedAt: now,
-    }
-    editor.registerProjectAsset(asset)
-    logFlat('flat-project-asset-saved', {
-      assetId: asset.id,
-      name: asset.name,
-      path: asset.path,
-      mediaType: asset.mediaType,
-    })
-    await loadImage(asset)
-    editor.setLayerSelection(layerIds)
-    editor.flattenSelectedLayersToImage(asset, bounds)
-    logFlat('flat-document-replaced', {
-      assetId: asset.id,
-      selectedLayerIds: [...editor.selectedLayerIds],
-      layers: editor.document.layers.map((layer) => ({
-        id: layer.id,
-        type: layer.type,
-        name: layer.name,
-        assetId: isImageLayer(layer) ? layer.assetId : undefined,
-        x: layer.x,
-        y: layer.y,
-        width: layer.width,
-        height: layer.height,
-        zIndex: layer.zIndex,
-      })),
-    })
-    await nextTick()
-    void syncImages(editor.library)
-    void updateTransformer()
-  } catch (error) {
-    logFlat('flat-failed', { error: serializableLogData({ error }) })
-    throw error
-  } finally {
-    isFlatteningLayers.value = false
-  }
-}
-
 async function updateTransformer() {
   await nextTick()
   const transformer = transformerRef.value?.getNode()
@@ -1198,190 +994,8 @@ async function updateTransformer() {
   transformer.getLayer()?.batchDraw()
 }
 
-async function uploadFiles(kind: UploadKind, files: FileList | File[], folder = '') {
-  const fileArray = validUploadFiles(kind, Array.from(files))
-  if (!fileArray.length) return []
-  const imported: LibraryRecord[] = []
-  for (const file of fileArray) {
-    if (kind === 'background') imported.push(await editor.importBackgroundFile(file, '', folder))
-    if (kind === 'asset') imported.push(await editor.importAssetFile(file, '', folder))
-    if (kind === 'font') imported.push(await editor.importFontFile(file, '', folder))
-  }
-  await Promise.allSettled(
-    imported
-      .filter((record) => record.mediaType.startsWith('image/'))
-      .map((record) => loadImage(record)),
-  )
-  finderRevision[kind] += 1
-  logUpload('uploaded files', {
-    kind,
-    folder,
-    files: fileArray.map((file) => ({ name: file.name, type: file.type, size: file.size })),
-    imported: imported.map((record) => ({ id: record.id, name: record.name, path: record.path })),
-  })
-  return imported
-}
-
-function validUploadFiles(kind: UploadKind, files: File[]) {
-  const { accepted, rejected } = partitionUploadFiles(kind, files)
-  if (rejected.length) {
-    const names = rejected.map((file) => file.name).join(', ')
-    editor.status = `Unsupported ${kind} file${rejected.length > 1 ? 's' : ''}: ${names}`
-    logUpload('rejected unsupported files', {
-      kind,
-      files: rejected.map((file) => ({ name: file.name, type: file.type, size: file.size })),
-    })
-  }
-  return accepted
-}
-
-async function handleDirectFinderDrop(kind: UploadKind, event: DragEvent) {
-  const files = Array.from(event.dataTransfer?.files || [])
-  if (!files.length) return
-  event.preventDefault()
-  event.stopPropagation()
-  const folder = kind === 'background'
-    ? selectedBackgroundFolder.value
-    : kind === 'asset'
-      ? selectedAssetFolder.value
-      : selectedFontFolder.value
-  await uploadFiles(kind, files, folder)
-}
-
-function handleDirectFinderDragover(kind: UploadKind, event: DragEvent) {
-  if (!event.dataTransfer?.types.includes('Files')) return
-  event.dataTransfer.dropEffect = 'copy'
-  event.dataTransfer.effectAllowed = 'copy'
-  event.preventDefault()
-  event.stopPropagation()
-  if (editor.status !== `Drop ${kind} files to upload`) editor.status = `Drop ${kind} files to upload`
-}
-
-async function createProject() {
-  if (createMode.value === 'blank') {
-    await editor.createManagedHandout(newProjectTitle.value, {
-      width: blankWidth.value,
-      height: blankHeight.value,
-      folder: selectedProjectFolder.value,
-    })
-    isCreateDialogOpen.value = false
-    return
-  }
-}
-
-async function createProjectFromBackground(background: LibraryRecord) {
-  const size = await imageSize(background)
-  await editor.createManagedHandout(newProjectTitle.value, {
-    width: size.width,
-    height: size.height,
-    backgroundId: background.id,
-    folder: selectedProjectFolder.value,
-  })
-  isCreateDialogOpen.value = false
-}
-
-function handoutTitleFromRecord(record: LibraryRecord) {
-  const name = record.name || record.fileName || 'Untitled handout'
-  return name.replace(/\.[^.]+$/, '') || name
-}
-
-async function createHandoutFromImageRecord(_kind: 'background' | 'asset', record: LibraryRecord) {
-  const size = await imageSize(record)
-  await editor.createManagedHandout(handoutTitleFromRecord(record), {
-    width: size.width,
-    height: size.height,
-    backgroundId: record.id,
-    folder: selectedProjectFolder.value,
-  })
-}
-
-function selectedImageRecord(kind: 'background' | 'asset') {
-  const selected = selectedFinderItems[kind]
-  if (selected.length !== 1) return undefined
-  return imageRecordFromFinderEntry(kind, selected[0])
-}
-
-function selectedImageStatus(kind: 'background' | 'asset') {
-  const selected = selectedFinderItems[kind]
-  if (selected.length === 0) return 'No image selected'
-  if (selected.length > 1) return `${selected.length} items selected`
-  const record = selectedImageRecord(kind)
-  return record ? `Selected: ${record.name}` : 'Select an image file'
-}
-
-function fontPreviewSource(font: LibraryRecord) {
-  return previewUrl(font)
-}
-
 function toggleBackgroundVisibility() {
   editor.patchCanvas({ backgroundVisible: !(editor.document.canvas.backgroundVisible !== false) })
-}
-
-async function createHandoutFromFinderImage(kind: 'background' | 'asset') {
-  const record = selectedImageRecord(kind)
-  if (!record) return
-  await createHandoutFromImageRecord(kind, record)
-}
-
-function handleFinderSelect(kind: 'handout' | 'background' | 'asset' | 'font', items: DirEntry[]) {
-  selectedFinderItems[kind] = items
-}
-
-async function handleCreateBackgroundInput(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
-  if (!background) return
-  await createProjectFromBackground(background)
-  ;(event.target as HTMLInputElement).value = ''
-}
-
-async function handleCreateBackgroundDrop(event: DragEvent) {
-  event.preventDefault()
-  const file = event.dataTransfer?.files?.[0]
-  if (!file) return
-  const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
-  if (!background) return
-  await createProjectFromBackground(background)
-}
-
-async function saveProject() {
-  await saveProjectWithPreview({
-    editor,
-    imageElements,
-    maxMaskEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
-    maxCompositeEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
-    logPreview: logHandoutPreview,
-  })
-}
-
-function selectedHandoutProject() {
-  const selected = selectedFinderItems.handout
-  if (selected.length !== 1) return undefined
-  return projectFromFinderEntry(selected[0])
-}
-
-function selectedHandoutStatus() {
-  const selected = selectedFinderItems.handout
-  if (selected.length === 0) return 'No handout selected'
-  if (selected.length > 1) return `${selected.length} items selected`
-  const project = selectedHandoutProject()
-  return project ? `Selected: ${project.title}` : 'Select a handout'
-}
-
-function isSelectedHandoutExporting() {
-  const project = selectedHandoutProject()
-  return isHandoutExporting(project?.id)
-}
-
-async function exportSelectedHandout() {
-  const project = selectedHandoutProject()
-  if (!project) return
-  await exportHandoutProject(project)
-}
-
-async function cloneHandoutProject(project: ProjectSummary) {
-  await editor.cloneManagedHandout(project.id)
 }
 
 onMounted(async () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowReactive, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowReactive, watch } from 'vue'
 import Konva from 'konva'
 import {
   ArrowDown,
@@ -13,8 +13,6 @@ import {
   EyeOff,
   Layers,
   Plus,
-  Save,
-  Settings,
   Trash2,
   Type,
 } from '@lucide/vue'
@@ -25,10 +23,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import RightInspector from '@/components/editor/RightInspector.vue'
-import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
-import ConfigurationDialog from '@/components/settings/ConfigurationDialog.vue'
 import BootSplash from '@/components/BootSplash.vue'
 import EditorTopBar from '@/components/EditorTopBar.vue'
+import ManagerShell from '@/components/ManagerShell.vue'
 import { Input } from '@/components/ui/input'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -578,6 +575,41 @@ const {
   updateTransformer,
 })
 layerListHolder.groupForLayer = groupForLayer
+provide('manager-context', {
+  isSettingsDialogOpen,
+  isCreateDialogOpen,
+  newProjectTitle,
+  createMode,
+  blankWidth,
+  blankHeight,
+  fontSearch,
+  finderRevision,
+  handoutFinderStyle,
+  finderUploadConfig,
+  finderDrivers,
+  handleFinderFileDoubleClick,
+  handleFinderPathChange,
+  handleFinderSelect,
+  handoutContextMenuItems,
+  imageHandoutContextMenuItems,
+  handleDirectFinderDrop,
+  handleDirectFinderDragover,
+  selectedHandoutStatus,
+  selectedHandoutProject,
+  isSelectedHandoutExporting,
+  exportSelectedHandout,
+  cloneHandoutProject,
+  createProject,
+  handleCreateBackgroundDrop,
+  handleCreateBackgroundInput,
+  selectedImageStatus,
+  selectedImageRecord,
+  createHandoutFromFinderImage,
+  fontPreviewSource,
+  fontFamily,
+  filteredFonts,
+  finderFeaturesForKind,
+})
 const handleGlobalKeydown = createAppShortcutHandler({
   isEditorView: () => editor.view === 'editor',
   hasSelectedLayer: () => Boolean(editor.selectedLayerId),
@@ -856,154 +888,7 @@ watch(
 <template>
   <BootSplash v-if="isBooting" />
 
-  <div v-else-if="editor.view === 'manager'" class="manager-shell">
-    <header class="manager-header">
-      <div>
-        <h1>Handout Generator</h1>
-        <p>Manage handouts, assets, and fonts before opening the canvas editor.</p>
-      </div>
-      <ButtonGroup class="manager-header-actions">
-        <Button variant="outline" size="sm" @click="isSettingsDialogOpen = true">
-          <Settings data-icon="inline-start" />
-          Settings
-        </Button>
-        <Badge variant="secondary">{{ editor.status }}</Badge>
-      </ButtonGroup>
-    </header>
-
-    <Tabs default-value="handouts" class="manager-tabs">
-      <TabsList class="manager-tab-list">
-        <TabsTrigger value="handouts">Handouts</TabsTrigger>
-        <TabsTrigger value="assets">Assets</TabsTrigger>
-        <TabsTrigger value="fonts">Fonts</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="handouts" class="manager-tab-content">
-        <section class="manager-actions">
-          <div class="create-header">
-            <Button @click="isCreateDialogOpen = true">
-              <Plus data-icon="inline-start" />
-              New handout
-            </Button>
-          </div>
-        </section>
-
-        <VueFinder
-          id="handout-finder"
-          class="manager-finder large-grid-finder"
-          :style="handoutFinderStyle"
-          :driver="finderDrivers.handout"
-          :features="finderFeaturesForKind('handout')"
-          :config="finderUploadConfig"
-          :context-menu-items="handoutContextMenuItems"
-          selection-mode="single"
-          selection-filter-type="both"
-          @select="(items) => handleFinderSelect('handout', items)"
-          @path-change="(path) => handleFinderPathChange('handout', path)"
-          @file-dclick="(event) => handleFinderFileDoubleClick('handout', event)"
-        >
-          <template #status-bar="{ count }">
-            <div class="finder-status-bar">
-              <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-              <ButtonGroup class="finder-status-actions">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  :disabled="!selectedHandoutProject()"
-                  @click="selectedHandoutProject() && cloneHandoutProject(selectedHandoutProject()!)"
-                >
-                  <Plus data-icon="inline-start" />
-                  Clone
-                </Button>
-                <Button
-                  size="sm"
-                  :disabled="!selectedHandoutProject() || isSelectedHandoutExporting()"
-                  @click="exportSelectedHandout"
-                >
-                  <Save data-icon="inline-start" />
-                  Export PNG
-                </Button>
-              </ButtonGroup>
-            </div>
-          </template>
-        </VueFinder>
-      </TabsContent>
-
-      <TabsContent value="assets" class="manager-tab-content">
-        <VueFinder
-          :key="`asset-${finderRevision.asset}`"
-          id="asset-finder"
-          class="manager-finder compact-finder"
-          :driver="finderDrivers.asset"
-          :features="finderFeaturesForKind('asset')"
-          :config="finderUploadConfig"
-          :context-menu-items="imageHandoutContextMenuItems.asset"
-          selection-mode="single"
-          selection-filter-type="both"
-          @select="(items) => handleFinderSelect('asset', items)"
-          @path-change="(path) => handleFinderPathChange('asset', path)"
-          @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
-          @dragover.capture="handleDirectFinderDragover('asset', $event as DragEvent)"
-          @drop.capture="handleDirectFinderDrop('asset', $event as DragEvent)"
-        >
-          <template #status-bar="{ count }">
-            <div class="finder-status-bar">
-              <span>{{ count }} items · {{ selectedImageStatus('asset') }}</span>
-              <Button
-                size="sm"
-                :disabled="!selectedImageRecord('asset')"
-                @click="createHandoutFromFinderImage('asset')"
-              >
-                <Plus data-icon="inline-start" />
-                Create handout
-              </Button>
-            </div>
-          </template>
-        </VueFinder>
-      </TabsContent>
-
-      <TabsContent value="fonts" class="manager-tab-content">
-        <VueFinder
-          :key="`font-${finderRevision.font}`"
-          id="font-finder"
-          class="manager-finder compact-finder"
-          :driver="finderDrivers.font"
-          :features="finderFeaturesForKind('font')"
-          :config="finderUploadConfig"
-          selection-mode="single"
-          selection-filter-type="both"
-          @select="(items) => handleFinderSelect('font', items)"
-          @path-change="(path) => handleFinderPathChange('font', path)"
-          @file-dclick="(event) => handleFinderFileDoubleClick('font', event)"
-          @dragover.capture="handleDirectFinderDragover('font', $event as DragEvent)"
-          @drop.capture="handleDirectFinderDrop('font', $event as DragEvent)"
-        />
-        <Input v-model="fontSearch" placeholder="Search fonts or tags" />
-        <div class="font-grid">
-          <div v-for="font in filteredFonts" :key="font.id" class="font-card">
-            <span class="font-card-preview">
-              <img v-if="font.thumbnailPath" :src="fontPreviewSource(font)" alt="" draggable="false" />
-              <span v-else :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
-            </span>
-            <strong>{{ font.name }}</strong>
-            <span>{{ font.tags.join(', ') || 'No tags' }}</span>
-          </div>
-        </div>
-      </TabsContent>
-    </Tabs>
-
-    <CreateHandoutDialog
-      v-model:open="isCreateDialogOpen"
-      v-model:title="newProjectTitle"
-      v-model:mode="createMode"
-      v-model:width="blankWidth"
-      v-model:height="blankHeight"
-      @blank="createProject"
-      @background-drop="handleCreateBackgroundDrop"
-      @background-input="handleCreateBackgroundInput"
-    />
-    <ConfigurationDialog v-model:open="isSettingsDialogOpen" />
-  </div>
+  <ManagerShell v-else-if="editor.view === 'manager'" />
 
   <ResizablePanelGroup v-else direction="horizontal" class="app-shell">
     <ResizablePanel :default-size="23" :min-size="16" :max-size="36" class="shell-panel">

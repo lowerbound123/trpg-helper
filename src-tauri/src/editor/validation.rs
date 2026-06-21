@@ -1,1 +1,0 @@
-//! Editor document validation boundary.

@@ -1,1 +1,0 @@
-//! Editor preview model boundary.

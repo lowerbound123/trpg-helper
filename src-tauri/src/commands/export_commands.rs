@@ -1,14 +1,60 @@
 //! Export command boundary.
 
-use std::{fs, time::Instant};
+use std::{
+    fs,
+    path::PathBuf,
+    time::Instant,
+};
 
 use tauri::{AppHandle, Manager};
 
 use crate::{
     clean_file_name,
     services::image_codec::{encode_export_image, normalize_export_file_name, ExportImageFormat},
+    services::path_service::decode_data_url,
     AppError, CommandResult,
 };
+
+#[tauri::command]
+pub fn export_image(file_path: String, data_url: String) -> CommandResult<String> {
+    let path = PathBuf::from(file_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(AppError::from)?;
+    }
+    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+        .map_err(AppError::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn export_image_to_downloads(
+    app: AppHandle,
+    file_name: String,
+    data_url: String,
+) -> CommandResult<String> {
+    let clean_name = clean_file_name(&file_name);
+    let lower_name = clean_name.to_lowercase();
+    let file_name = if lower_name.ends_with(".png")
+        || lower_name.ends_with(".jpg")
+        || lower_name.ends_with(".jpeg")
+        || lower_name.ends_with(".webp")
+    {
+        clean_name
+    } else {
+        format!("{clean_name}.png")
+    };
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&downloads)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    let path = downloads.join(file_name);
+    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+        .map_err(AppError::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
 
 #[tauri::command]
 pub fn export_image_bytes_to_downloads(

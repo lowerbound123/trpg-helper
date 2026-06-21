@@ -1,1 +1,0 @@
-//! Editor history model boundary.

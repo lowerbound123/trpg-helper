@@ -8,19 +8,15 @@ import {
   Brush,
   ChevronDown,
   ChevronRight,
-  Eraser,
   Minus,
   Eye,
   EyeOff,
   Layers,
-  MousePointer2,
   Plus,
-  Redo2,
   Save,
   Settings,
   Trash2,
   Type,
-  Undo2,
 } from '@lucide/vue'
 import { VueFinder, type DirEntry } from 'vuefinder'
 import 'vuefinder/dist/vuefinder.css'
@@ -31,10 +27,11 @@ import { ButtonGroup } from '@/components/ui/button-group'
 import RightInspector from '@/components/editor/RightInspector.vue'
 import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
 import ConfigurationDialog from '@/components/settings/ConfigurationDialog.vue'
+import BootSplash from '@/components/BootSplash.vue'
+import EditorTopBar from '@/components/EditorTopBar.vue'
 import { Input } from '@/components/ui/input'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useFinderManagement, finderFeaturesForKind } from '@/composables/useFinderManagement'
 import { useCanvasViewport } from '@/composables/useCanvasViewport'
@@ -857,15 +854,7 @@ watch(
 </script>
 
 <template>
-  <div v-if="isBooting" class="loading-shell">
-    <div class="loading-mark">
-      <span />
-      <span />
-      <span />
-    </div>
-    <strong>Handout Generator</strong>
-    <p>Loading library and projects...</p>
-  </div>
+  <BootSplash v-if="isBooting" />
 
   <div v-else-if="editor.view === 'manager'" class="manager-shell">
     <header class="manager-header">
@@ -1343,40 +1332,15 @@ watch(
 
     <ResizablePanel :default-size="57" :min-size="38" class="shell-panel">
     <main class="workspace">
-      <header class="topbar">
-        <div class="topbar-actions">
-          <Button @click="saveProject">
-            <Save data-icon="inline-start" />
-            Save
-          </Button>
-        </div>
-        <Separator orientation="vertical" />
-        <div class="topbar-actions tool-actions">
-          <Button size="sm" variant="outline" :data-active="activeTool === 'select'" @click="setActiveTool('select')">
-            <MousePointer2 data-icon="inline-start" />
-            Select
-          </Button>
-          <Button size="sm" variant="outline" :data-active="activeTool === 'brush'" @click="setActiveTool('brush')">
-            <Brush data-icon="inline-start" />
-            Brush
-          </Button>
-          <Button size="sm" variant="outline" :data-active="activeTool === 'eraser'" @click="setActiveTool('eraser')">
-            <Eraser data-icon="inline-start" />
-            Eraser
-          </Button>
-        </div>
-        <Separator orientation="vertical" />
-        <div class="topbar-actions">
-          <Button variant="outline" :disabled="!editor.canUndo" @click="editor.undo()">
-            <Undo2 data-icon="inline-start" />
-            Undo
-          </Button>
-          <Button variant="outline" :disabled="!editor.canRedo" @click="editor.redo()">
-            <Redo2 data-icon="inline-start" />
-            Redo
-          </Button>
-        </div>
-      </header>
+      <EditorTopBar
+        :active-tool="activeTool"
+        :can-undo="editor.canUndo"
+        :can-redo="editor.canRedo"
+        @save="saveProject"
+        @set-tool="setActiveTool"
+        @undo="editor.undo()"
+        @redo="editor.redo()"
+      />
 
       <section class="canvas-wrap">
         <div class="canvas-meta">

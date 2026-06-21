@@ -1,0 +1,1 @@
+//! Editor paint model boundary.

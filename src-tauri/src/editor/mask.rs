@@ -1,0 +1,1 @@
+//! Editor mask model boundary.

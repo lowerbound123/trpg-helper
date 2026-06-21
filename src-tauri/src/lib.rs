@@ -13,6 +13,14 @@ use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use uuid::Uuid;
 
+mod commands;
+mod editor;
+mod errors;
+mod services;
+mod types;
+
+use services::path_service::clean_file_name;
+
 const THUMBNAIL_MAX_EDGE: u32 = 256;
 const THUMBNAIL_QUALITY: f32 = 80.0;
 
@@ -32,6 +40,8 @@ enum AppError {
     Base64(#[from] base64::DecodeError),
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
+    #[error("unsupported image export format: {0}")]
+    InvalidImageFormat(String),
 }
 
 impl From<AppError> for String {
@@ -269,24 +279,6 @@ fn ensure_project_folder(app: &AppHandle, folder: &str) -> Result<(), AppError> 
     let mut index = read_project_folder_index(app)?;
     ensure_folder(&mut index.folders, folder);
     write_project_folder_index(app, &index)
-}
-
-fn clean_file_name(file_name: &str) -> String {
-    let fallback = "resource.bin";
-    let name = Path::new(file_name)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(fallback);
-
-    name.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 fn be_u16(bytes: &[u8], offset: usize) -> Option<u16> {
@@ -586,6 +578,27 @@ fn remove_dir_if_exists(path: impl AsRef<Path>) -> Result<(), AppError> {
     Ok(())
 }
 
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), AppError> {
+    if !source.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_recursive(&source_path, &target_path)?;
+        } else {
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(source_path, target_path)?;
+        }
+    }
+    Ok(())
+}
+
 fn encode_data_url(path: &Path, media_type: &str) -> Result<String, AppError> {
     let bytes = fs::read(path)?;
     Ok(format!(
@@ -597,6 +610,28 @@ fn encode_data_url(path: &Path, media_type: &str) -> Result<String, AppError> {
 
 fn project_dir(app: &AppHandle, project_id: &str) -> Result<PathBuf, AppError> {
     Ok(projects_root(app)?.join(project_id))
+}
+
+fn resolve_project_root(
+    app: &AppHandle,
+    project_id: Option<String>,
+    project_dir_value: Option<String>,
+) -> Result<PathBuf, AppError> {
+    if let Some(project_id) = project_id.filter(|value| !value.trim().is_empty()) {
+        return project_dir(app, project_id.trim());
+    }
+    if let Some(project_dir_value) = project_dir_value.filter(|value| !value.trim().is_empty()) {
+        return Ok(PathBuf::from(project_dir_value));
+    }
+    Err(AppError::DataDir)
+}
+
+pub(crate) fn safe_project_relative_path(relative_path: &str) -> Result<PathBuf, AppError> {
+    let path = Path::new(relative_path);
+    if path.is_absolute() || relative_path.split('/').any(|part| part == "..") {
+        return Err(AppError::DataDir);
+    }
+    Ok(path.to_path_buf())
 }
 
 fn document_title(document: &Value) -> String {
@@ -1049,6 +1084,22 @@ fn create_project(
 }
 
 #[tauri::command]
+fn copy_project_masks(
+    app: AppHandle,
+    source_project_id: String,
+    target_project_id: String,
+) -> CommandResult<()> {
+    let source = project_dir(&app, source_project_id.trim())
+        .map_err(String::from)?
+        .join("masks");
+    let target = project_dir(&app, target_project_id.trim())
+        .map_err(String::from)?
+        .join("masks");
+    copy_dir_recursive(&source, &target).map_err(String::from)?;
+    Ok(())
+}
+
+#[tauri::command]
 fn open_managed_project(app: AppHandle, project_id: String) -> CommandResult<ProjectPayload> {
     let root = project_dir(&app, &project_id).map_err(String::from)?;
     read_project_files(&root).map_err(String::from)
@@ -1257,6 +1308,144 @@ fn save_project_preview(
 }
 
 #[tauri::command]
+fn save_font_preview(
+    app: AppHandle,
+    font_id: String,
+    data_url: String,
+) -> CommandResult<LibraryIndex> {
+    let bytes = decode_data_url(&data_url).map_err(AppError::from)?;
+    let path = thumbnail_path(&app, &font_id).map_err(String::from)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(AppError::from)
+            .map_err(String::from)?;
+    }
+    fs::write(
+        &path,
+        encode_webp_thumbnail_bytes(&bytes).map_err(AppError::from)?,
+    )
+    .map_err(AppError::from)
+    .map_err(String::from)?;
+
+    let mut index = read_index(&app).map_err(String::from)?;
+    let record = index
+        .fonts
+        .iter_mut()
+        .find(|record| record.id == font_id)
+        .ok_or_else(|| "font record not found".to_string())?;
+    record.thumbnail_path = Some(path.to_string_lossy().to_string());
+    record.updated_at = Utc::now();
+    write_index(&app, &index).map_err(String::from)?;
+    Ok(index)
+}
+
+#[tauri::command]
+fn save_project_mask(
+    app: AppHandle,
+    project_id: Option<String>,
+    project_dir: Option<String>,
+    mask_id: String,
+    data_url: String,
+) -> CommandResult<String> {
+    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
+    let relative = PathBuf::from("masks").join(format!("{}.png", clean_file_name(&mask_id)));
+    let path = root.join(&relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(AppError::from)
+            .map_err(String::from)?;
+    }
+    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    Ok(relative.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn save_project_asset(
+    app: AppHandle,
+    project_id: Option<String>,
+    project_dir: Option<String>,
+    asset_id: String,
+    file_name: String,
+    data_url: String,
+) -> CommandResult<String> {
+    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
+    let clean_id = clean_file_name(&asset_id);
+    let clean_name = clean_file_name(&file_name);
+    let extension = Path::new(&clean_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("png");
+    let relative = PathBuf::from("assets").join(format!("{clean_id}.{extension}"));
+    let path = root.join(&relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(AppError::from)
+            .map_err(String::from)?;
+    }
+    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn save_project_mask_cache(
+    app: AppHandle,
+    project_id: Option<String>,
+    project_dir: Option<String>,
+    mask_id: String,
+    data_url: String,
+    max_edge: u32,
+) -> CommandResult<String> {
+    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
+    let bounded_edge = max_edge.max(1);
+    let relative = PathBuf::from(".cache").join("masks").join(format!(
+        "{}-preview-{}.png",
+        clean_file_name(&mask_id),
+        bounded_edge
+    ));
+    let path = root.join(&relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(AppError::from)
+            .map_err(String::from)?;
+    }
+    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    Ok(relative.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn read_project_file_data_url(
+    app: AppHandle,
+    project_id: Option<String>,
+    project_dir: Option<String>,
+    relative_path: String,
+    media_type: String,
+) -> CommandResult<String> {
+    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
+    let relative = safe_project_relative_path(&relative_path).map_err(String::from)?;
+    encode_data_url(&root.join(relative), &media_type).map_err(Into::into)
+}
+
+#[tauri::command]
+fn delete_project_mask(
+    app: AppHandle,
+    project_id: Option<String>,
+    project_dir: Option<String>,
+    relative_path: String,
+) -> CommandResult<()> {
+    let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
+    let relative = safe_project_relative_path(&relative_path).map_err(String::from)?;
+    remove_file_if_exists(root.join(relative))
+        .map_err(AppError::from)
+        .map_err(String::from)
+}
+
+#[tauri::command]
 fn append_debug_log(line: String) -> CommandResult<String> {
     let path = project_root().map_err(String::from)?.join("log.txt");
     let mut file = OpenOptions::new()
@@ -1280,6 +1469,8 @@ fn reset_debug_log() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             reset_debug_log();
             if cfg!(debug_assertions) {
@@ -1298,7 +1489,16 @@ pub fn run() {
             delete_project_entries,
             export_image,
             export_image_to_downloads,
+            commands::export_commands::export_image_bytes_to_downloads,
+            commands::export_commands::export_image_file_to_downloads,
             save_project_preview,
+            save_font_preview,
+            save_project_mask,
+            save_project_asset,
+            save_project_mask_cache,
+            read_project_file_data_url,
+            delete_project_mask,
+            copy_project_masks,
             create_project,
             create_library_folder,
             create_project_folder,

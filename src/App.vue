@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowReactive, watch } from 'vue'
 import Konva from 'konva'
-import { confirm } from '@tauri-apps/plugin-dialog'
 import {
   ArrowDown,
   ArrowLeft,
@@ -57,13 +56,16 @@ import { useFlattenLayers } from '@/composables/useFlattenLayers'
 import { useCanvasDrop } from '@/composables/useCanvasDrop'
 import { useProjectCreation } from '@/composables/useProjectCreation'
 import { useFinderSelection } from '@/composables/useFinderSelection'
+import { useTransformerSync } from '@/composables/useTransformerSync'
+import { useMaskActions } from '@/composables/useMaskActions'
+import { useLayerListDragDrop } from '@/composables/useLayerListDragDrop'
 import {
   appendDebugLog,
   fontRecordFamily,
   type LibraryRecord,
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
-import type { HandoutLayer, LayerGroup, ShapeKind } from '@/lib/handout'
+import type { ShapeKind } from '@/lib/handout'
 import { isCurveShape, isLayerEffectivelyVisible } from '@/lib/handout'
 import { createAppShortcutHandler } from '@/app/AppShortcuts'
 import { appConfiguration } from '@/lib/configuration'
@@ -107,20 +109,6 @@ const blankWidth = ref(1280)
 const blankHeight = ref(720)
 const activeTool = ref<EditorTool>('select')
 const activeRailTab = ref<'assets' | 'fonts' | 'graph' | 'layers'>('assets')
-const handleGlobalKeydown = createAppShortcutHandler({
-  isEditorView: () => editor.view === 'editor',
-  hasSelectedLayer: () => Boolean(editor.selectedLayerId),
-  saveProject: () => { void saveProject() },
-  undo: () => editor.undo(),
-  redo: () => editor.redo(),
-  deleteLayer: () => deleteLayer(),
-  setTool: (tool) => setActiveTool(tool),
-  setRailTab: (tab) => { activeRailTab.value = tab },
-  addText: () => {
-    editor.addText()
-    void updateTransformer()
-  },
-})
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
@@ -128,9 +116,6 @@ const selectedBackgroundFolder = ref('')
 const selectedAssetFolder = ref('')
 const selectedFontFolder = ref('')
 const isBooting = ref(true)
-const draggedLayerId = ref('')
-const draggedGroupId = ref('')
-const collapsedGroupIds = ref<string[]>([])
 const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>({
   handout: [],
   background: [],
@@ -147,7 +132,6 @@ const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.find
 const EDITOR_EFFECT_CACHE_MAX_EDGE = 768
 const EDITOR_MASK_PREVIEW_MAX_EDGE = 1200
 const maskFeatureEnabled = appConfiguration.mask.enabled
-let lastLayerListSelectionId = ''
 const logHandoutPreview = createDebugLogger('handout-preview')
 const logText = createDebugLogger('text')
 const logUpload = createDebugLogger('upload')
@@ -155,6 +139,13 @@ const logExport = createDebugLogger('export')
 const logSnap = createDebugLogger('snap')
 const logShape = createDebugLogger('shape')
 const logFlat = createDebugLogger('flat')
+const { updateTransformer } = useTransformerSync({
+  editor,
+  transformerRef,
+  layerNodeRefs,
+  maskEditNodeRef,
+  activeTool,
+})
 const {
   draggedAssetId,
   draggedFontId,
@@ -270,6 +261,9 @@ const activeMaskEditLayer = computed(() => {
   if (!target || target.kind !== 'layer') return undefined
   return editor.document.layers.find((layer) => layer.id === target.layerId)
 })
+const layerListHolder: { groupForLayer: (layerId: string) => import('@/lib/handout').LayerGroup | undefined } = {
+  groupForLayer: () => undefined,
+}
 const {
   layerName,
   imageForLayer,
@@ -323,7 +317,7 @@ const {
   canvasLayers,
   layerName,
   isShapeLayer,
-  groupForLayer,
+  groupForLayer: (layerId: string) => layerListHolder.groupForLayer(layerId),
   assetSearch,
   fontSearch,
   selectedAssetFolder,
@@ -537,6 +531,70 @@ const {
   logText,
   logUpload,
 })
+const {
+  maskPreviewClass,
+  toggleSelectedLayerMask,
+  toggleMaskEditFromLayerRow,
+  toggleMaskEnabledFromLayerRow,
+  startMaskDrag,
+  handleMaskDrop,
+  setMaskEditNodeRef,
+  maskEditConfig,
+  onMaskEditDragStart,
+  onMaskEditDragEnd,
+  onMaskEditTransformEnd,
+} = useMaskActions({
+  editor,
+  maskFeatureEnabled,
+  selectedMaskControlLayers,
+  selectedMaskControlDeletes,
+  refreshMaskPreviewUrls,
+  maskPreviewUrls,
+  maskPreviewCacheDataUrls,
+  layerName,
+  maskEditNodeRef,
+  activeTool,
+  maskEditImage,
+  maskProxyMaxEdge,
+  scheduleMaskCompositeRefresh,
+  updateTransformer,
+  draggedMaskLayerId,
+  isDraggingMask,
+})
+const {
+  draggedLayerId,
+  draggedGroupId,
+  startLayerListDrag,
+  startGroupListDrag,
+  handleLayerListDrop,
+  handleGroupDrop,
+  groupForLayer,
+  groupIsCollapsed,
+  toggleGroupCollapsed,
+  clearLayerDragState,
+  selectLayerFromList,
+  toggleLayerVisibility,
+} = useLayerListDragDrop({
+  editor,
+  draggedMaskLayerId,
+  handleMaskDrop,
+  updateTransformer,
+})
+layerListHolder.groupForLayer = groupForLayer
+const handleGlobalKeydown = createAppShortcutHandler({
+  isEditorView: () => editor.view === 'editor',
+  hasSelectedLayer: () => Boolean(editor.selectedLayerId),
+  saveProject: () => { void saveProject() },
+  undo: () => editor.undo(),
+  redo: () => editor.redo(),
+  deleteLayer: () => deleteLayer(),
+  setTool: (tool) => setActiveTool(tool),
+  setRailTab: (tab) => { activeRailTab.value = tab },
+  addText: () => {
+    editor.addText()
+    void updateTransformer()
+  },
+})
 
 function resetKonvaDragButtons() {
   Konva.dragButtons = [0]
@@ -544,16 +602,6 @@ function resetKonvaDragButtons() {
 
 function fontFamily(font: LibraryRecord) {
   return fontRecordFamily(font)
-}
-
-function maskPreviewClass(layer: HandoutLayer) {
-  if (!maskFeatureEnabled) return { enabled: false, disabled: false, editing: false, empty: true }
-  return {
-    enabled: Boolean(layer.mask?.enabled),
-    disabled: Boolean(layer.mask && !layer.mask.enabled),
-    editing: editor.maskEditTarget?.kind === 'layer' && editor.maskEditTarget.layerId === layer.id,
-    empty: !layer.mask,
-  }
 }
 
 function logViewport(message: string, data?: Record<string, unknown>) {
@@ -648,199 +696,6 @@ function logBackgroundRender(message: string, data?: Record<string, unknown>) {
   })
 }
 
-function startLayerListDrag(layer: HandoutLayer, event: DragEvent) {
-  draggedLayerId.value = layer.id
-  draggedGroupId.value = ''
-  event.dataTransfer?.setData('application/x-handout-layer', layer.id)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
-}
-
-function startGroupListDrag(group: LayerGroup, event: DragEvent) {
-  draggedGroupId.value = group.id
-  draggedLayerId.value = ''
-  event.dataTransfer?.setData('application/x-handout-group', group.id)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
-}
-
-async function handleLayerListDrop(targetLayer: HandoutLayer, event: DragEvent) {
-  event.preventDefault()
-  const maskLayerId = event.dataTransfer?.getData('application/x-handout-mask-layer') || draggedMaskLayerId.value
-  if (maskLayerId) {
-    await handleMaskDrop(targetLayer, event)
-    return
-  }
-  const groupId = event.dataTransfer?.getData('application/x-handout-group') || draggedGroupId.value
-  if (groupId) {
-    editor.moveGroupToIndex(groupId, targetLayer.zIndex)
-    draggedGroupId.value = ''
-    return
-  }
-  const layerId = event.dataTransfer?.getData('application/x-handout-layer') || draggedLayerId.value
-  if (!layerId || layerId === targetLayer.id) return
-  const targetGroup = groupForLayer(targetLayer.id)
-  const sourceGroup = groupForLayer(layerId)
-  if (targetGroup) {
-    editor.addLayerToGroupAt(layerId, targetGroup.id, targetLayer.id)
-    draggedLayerId.value = ''
-    return
-  }
-  if (sourceGroup) {
-    editor.moveLayerOutOfGroupToIndex(layerId, targetLayer.zIndex)
-    draggedLayerId.value = ''
-    return
-  }
-  editor.moveLayerToIndex(layerId, targetLayer.zIndex)
-  draggedLayerId.value = ''
-}
-
-function handleGroupDrop(group: LayerGroup, event: DragEvent) {
-  event.preventDefault()
-  const groupId = event.dataTransfer?.getData('application/x-handout-group') || draggedGroupId.value
-  if (groupId) {
-    if (groupId !== group.id) {
-      const topLayer = layersForGroup(group).at(-1)
-      editor.moveGroupToIndex(groupId, topLayer?.zIndex ?? editor.document.layers.length)
-    }
-    draggedGroupId.value = ''
-    return
-  }
-  const layerId = event.dataTransfer?.getData('application/x-handout-layer') || draggedLayerId.value
-  if (!layerId || group.layerIds.includes(layerId)) return
-  editor.addLayerToGroupAt(layerId, group.id)
-  draggedLayerId.value = ''
-}
-
-function groupForLayer(layerId: string) {
-  return editor.groups.find((group) => group.layerIds.includes(layerId))
-}
-
-function layersForGroup(group: LayerGroup) {
-  const byId = new Map(editor.document.layers.map((layer) => [layer.id, layer]))
-  return group.layerIds
-    .map((id) => byId.get(id))
-    .filter((layer): layer is HandoutLayer => Boolean(layer))
-}
-
-function groupIsCollapsed(groupId: string) {
-  return collapsedGroupIds.value.includes(groupId)
-}
-
-function toggleGroupCollapsed(groupId: string) {
-  collapsedGroupIds.value = groupIsCollapsed(groupId)
-    ? collapsedGroupIds.value.filter((id) => id !== groupId)
-    : [...collapsedGroupIds.value, groupId]
-}
-
-function clearLayerDragState() {
-  draggedLayerId.value = ''
-  draggedGroupId.value = ''
-  draggedMaskLayerId.value = ''
-}
-
-function selectLayerFromList(layerId: string, event?: MouseEvent | KeyboardEvent) {
-  if (event?.shiftKey && lastLayerListSelectionId) {
-    const layerIds = editor.layers.map((layer) => layer.id)
-    const from = layerIds.indexOf(lastLayerListSelectionId)
-    const to = layerIds.indexOf(layerId)
-    if (from >= 0 && to >= 0) {
-      const [start, end] = from < to ? [from, to] : [to, from]
-      editor.setLayerSelection(layerIds.slice(start, end + 1))
-    } else {
-      editor.setLayerSelection([layerId])
-    }
-  } else if (event?.metaKey) {
-    editor.toggleLayerSelection(layerId)
-  } else {
-    editor.selectLayer(layerId)
-  }
-  lastLayerListSelectionId = layerId
-  void updateTransformer()
-}
-
-function toggleLayerVisibility(layer: HandoutLayer) {
-  editor.patchLayer(layer.id, { visible: !layer.visible })
-  void updateTransformer()
-}
-
-async function toggleSelectedLayerMask() {
-  if (!maskFeatureEnabled) return
-  const layers = selectedMaskControlLayers.value
-  if (!layers.length) return
-  if (!selectedMaskControlDeletes.value) {
-    for (const layer of layers) {
-      if (!layer.mask) editor.addMaskToLayer(layer.id)
-    }
-    void refreshMaskPreviewUrls()
-    return
-  }
-  const confirmed = await confirm(`Delete masks from ${layers.length} selected layer${layers.length === 1 ? '' : 's'}?`, {
-    title: 'Delete layer mask',
-    kind: 'warning',
-    okLabel: 'Delete',
-    cancelLabel: 'Cancel',
-  })
-  if (!confirmed) return
-  for (const layer of layers) {
-    if (!layer.mask) continue
-    editor.deleteLayerMaskById(layer.id)
-    delete maskPreviewUrls[layer.mask.id]
-    delete maskPreviewCacheDataUrls[layer.mask.id]
-  }
-}
-
-function toggleMaskEditFromLayerRow(layer: HandoutLayer, event: MouseEvent) {
-  if (!maskFeatureEnabled) return
-  event.stopPropagation()
-  if (!layer.mask) return
-  const isEditing = editor.maskEditTarget?.kind === 'layer' && editor.maskEditTarget.layerId === layer.id
-  if (isEditing) {
-    editor.exitMaskEdit()
-    return
-  }
-  editor.selectLayer(layer.id)
-  editor.editLayerMask(layer.id)
-}
-
-function toggleMaskEnabledFromLayerRow(layer: HandoutLayer, event: MouseEvent) {
-  if (!maskFeatureEnabled) return
-  event.stopPropagation()
-  if (!layer.mask) return
-  editor.patchLayer(layer.id, {
-    mask: {
-      ...layer.mask,
-      enabled: !layer.mask.enabled,
-      updatedAt: new Date().toISOString(),
-    },
-  } as Partial<HandoutLayer>)
-}
-
-function startMaskDrag(layer: HandoutLayer, event: DragEvent) {
-  if (!maskFeatureEnabled) return
-  if (!layer.mask || !event.dataTransfer) return
-  draggedMaskLayerId.value = layer.id
-  event.dataTransfer.effectAllowed = 'copyMove'
-  event.dataTransfer.setData('application/x-handout-mask-layer', layer.id)
-}
-
-async function handleMaskDrop(targetLayer: HandoutLayer, event: DragEvent) {
-  if (!maskFeatureEnabled) return
-  const sourceLayerId = event.dataTransfer?.getData('application/x-handout-mask-layer') || draggedMaskLayerId.value
-  if (!sourceLayerId || sourceLayerId === targetLayer.id) return
-  const copy = event.metaKey || event.ctrlKey
-  if (targetLayer.mask) {
-    const confirmed = await confirm(`Replace mask on ${layerName(targetLayer)}?`, {
-      title: 'Replace layer mask',
-      kind: 'warning',
-      okLabel: copy ? 'Copy and replace' : 'Move and replace',
-      cancelLabel: 'Cancel',
-    })
-    if (!confirmed) return
-  }
-  await editor.moveOrCopyLayerMask(sourceLayerId, targetLayer.id, copy)
-  draggedMaskLayerId.value = ''
-  void refreshMaskPreviewUrls()
-}
-
 async function addAssetToCanvas(asset: LibraryRecord) {
   const size = await imageSize(asset)
   editor.addLayerFromAsset(asset, size)
@@ -871,76 +726,6 @@ function createFontTextOnCanvas(font: LibraryRecord, position?: { x?: number; y?
 
 function addShapeToCanvas(shape: ShapeKind, position?: { x?: number; y?: number }) {
   editor.addShape(shape, position)
-  void updateTransformer()
-}
-
-function setMaskEditNodeRef(node: unknown) {
-  maskEditNodeRef.value = node as NodeRef | undefined
-}
-
-function maskEditConfig(layer: HandoutLayer) {
-  if (!maskFeatureEnabled) return {}
-  const mask = layer.mask
-  const canDragMask = activeTool.value === 'select'
-  return {
-    image: maskEditImage.value,
-    x: mask?.flipX ? (mask.x + mask.width * mask.scaleX) : mask?.x,
-    y: mask?.y,
-    width: mask?.width,
-    height: mask?.height,
-    scaleX: mask?.flipX ? -mask.scaleX : mask?.scaleX,
-    scaleY: mask?.scaleY,
-    rotation: mask?.rotation,
-    opacity: isDraggingMask.value ? 0.42 : 0,
-    draggable: canDragMask,
-    listening: canDragMask,
-  }
-}
-
-function onMaskEditDragStart(layer: HandoutLayer) {
-  if (!maskFeatureEnabled) return
-  if (!layer.mask) return
-  isDraggingMask.value = true
-  void appendDebugLog('mask', 'mask-edit-drag-start', {
-    layerId: layer.id,
-    maskId: layer.mask.id,
-    previewMaxEdge: maskProxyMaxEdge(),
-  })
-}
-
-function onMaskEditDragEnd(layer: HandoutLayer, event: KonvaEvent) {
-  if (!maskFeatureEnabled) return
-  if (!layer.mask) return
-  const node = event.target
-  editor.patchLayerMask(layer.id, {
-    x: layer.mask.flipX ? node.x() - layer.mask.width * layer.mask.scaleX : node.x(),
-    y: node.y(),
-  })
-  isDraggingMask.value = false
-  void appendDebugLog('mask', 'mask-edit-drag-end', {
-    layerId: layer.id,
-    maskId: layer.mask.id,
-    x: node.x(),
-    y: node.y(),
-  })
-  scheduleMaskCompositeRefresh('mask-edit-drag-end')
-}
-
-function onMaskEditTransformEnd(layer: HandoutLayer, event: KonvaEvent) {
-  if (!maskFeatureEnabled) return
-  if (!layer.mask) return
-  const node = event.target
-  const scaleX = node.scaleX()
-  const scaleY = node.scaleY()
-  editor.patchLayerMask(layer.id, {
-    x: scaleX < 0 ? node.x() - layer.mask.width * Math.abs(scaleX) : node.x(),
-    y: node.y(),
-    scaleX: Math.abs(scaleX),
-    scaleY: Math.abs(scaleY),
-    rotation: node.rotation(),
-    flipX: scaleX < 0,
-  })
-  scheduleMaskCompositeRefresh('mask-edit-transform-end')
   void updateTransformer()
 }
 
@@ -975,23 +760,6 @@ function deleteLayer(layerId?: string) {
   if (layerId) editor.selectLayer(layerId)
   editor.deleteSelectedLayer()
   void updateTransformer()
-}
-
-async function updateTransformer() {
-  await nextTick()
-  const transformer = transformerRef.value?.getNode()
-  if (!transformer) return
-  if (editor.maskEditTarget && activeTool.value === 'select') {
-    const maskNode = maskEditNodeRef.value?.getNode()
-    transformer.nodes(maskNode ? [maskNode] : [])
-    transformer.getLayer()?.batchDraw()
-    return
-  }
-  const selectedNodes = editor.selectedLayerIds
-    .map((layerId) => layerNodeRefs[layerId]?.getNode())
-    .filter((node): node is Konva.Node => Boolean(node))
-  transformer.nodes(selectedNodes)
-  transformer.getLayer()?.batchDraw()
 }
 
 function toggleBackgroundVisibility() {

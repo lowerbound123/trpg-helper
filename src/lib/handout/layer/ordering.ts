@@ -52,6 +52,17 @@ function groupZRange(document: HandoutDocument, group: LayerGroup) {
   return { min: Math.min(...zIndices), max: Math.max(...zIndices) }
 }
 
+function swapLayerZ(document: HandoutDocument, layerIdA: string, layerIdB: string): HandoutDocument {
+  const layers = [...document.layers]
+  const idxA = layers.findIndex((l) => l.id === layerIdA)
+  const idxB = layers.findIndex((l) => l.id === layerIdB)
+  if (idxA < 0 || idxB < 0 || idxA === idxB) return document
+  const tmp = layers[idxA]
+  layers[idxA] = layers[idxB]
+  layers[idxB] = tmp
+  return touch({ ...document, layers: normalizeZIndex(layers) })
+}
+
 export function swapLayersInGroup(
   document: HandoutDocument,
   layerIdA: string,
@@ -84,6 +95,30 @@ export function swapLayersInGroup(
   return touch({ ...document, layers: normalized, groups: newGroups })
 }
 
+function findSkipTarget(
+  document: HandoutDocument,
+  startZ: number,
+  delta: number,
+): { targetZ: number; hitGroup: boolean } {
+  let targetZ = startZ
+  let hitGroup = false
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const g of document.groups) {
+      const range = groupZRange(document, g)
+      if (!range) continue
+      if (targetZ >= range.min && targetZ <= range.max) {
+        hitGroup = true
+        changed = true
+        targetZ = delta > 0 ? range.max : range.min - 1
+        break
+      }
+    }
+  }
+  return { targetZ: Math.max(0, targetZ), hitGroup }
+}
+
 export function moveLayerSkippingGroups(
   document: HandoutDocument,
   layerId: string,
@@ -92,13 +127,12 @@ export function moveLayerSkippingGroups(
   const layer = document.layers.find((l) => l.id === layerId)
   if (!layer) return document
 
-  let targetZ = layer.zIndex + delta
+  const { targetZ, hitGroup } = findSkipTarget(document, layer.zIndex + delta, delta)
 
-  for (const g of document.groups) {
-    const range = groupZRange(document, g)
-    if (!range) continue
-    if (targetZ >= range.min && targetZ <= range.max) {
-      targetZ = delta > 0 ? range.max + 1 : range.min - 1
+  if (hitGroup && delta < 0) {
+    const targetLayer = document.layers.find((l) => l.zIndex === targetZ)
+    if (targetLayer && targetLayer.id !== layerId) {
+      return swapLayerZ(document, layerId, targetLayer.id)
     }
   }
 
@@ -118,10 +152,13 @@ export function moveLayerInGroupAware(
   const gLayers = layersByIds(document, group.layerIds).sort((a, b) => a.zIndex - b.zIndex)
   const sortedIds = gLayers.map((l) => l.id)
   const posInGroup = sortedIds.indexOf(layerId)
-  const currentLayer = document.layers.find((l) => l.id === layerId)!
 
   if ((delta > 0 && posInGroup === sortedIds.length - 1) || (delta < 0 && posInGroup === 0)) {
-    return moveLayerGroup(document, group.id, currentLayer.zIndex + delta)
+    const groupMinZ = gLayers[0].zIndex
+    const nonGroupBelow = document.layers.filter(
+      (l) => !group.layerIds.includes(l.id) && l.zIndex < groupMinZ,
+    ).length
+    return moveLayerGroup(document, group.id, nonGroupBelow + delta)
   }
 
   const targetPos = posInGroup + (delta > 0 ? 1 : -1)

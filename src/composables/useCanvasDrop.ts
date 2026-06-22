@@ -36,7 +36,8 @@ export function useCanvasDrop(options: {
 
   function handleCanvasDrop(event: DragEvent) {
     event.preventDefault()
-    event.stopPropagation()
+    // NOTE: do NOT stopPropagation() — the document-level font drop
+    // handlers serve as a fallback when dataTransfer types are unavailable.
     const point = canvasPointFromClient(event.clientX, event.clientY)
 
     const fontId = event.dataTransfer?.getData('application/x-handout-font') || draggedFontId.value

@@ -896,8 +896,10 @@ onMounted(async () => {
     await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
     void syncImages(editor.library)
     window.addEventListener('keydown', handleGlobalKeydown)
-    document.addEventListener('dragover', handleDocumentFontDragOver)
-    document.addEventListener('drop', handleDocumentFontDrop)
+    // Use window-level capture so font drops are intercepted before any
+    // other element (Konva canvas, etc.) can interfere with the event.
+    window.addEventListener('dragover', handleDocumentFontDragOver, { capture: true })
+    window.addEventListener('drop', handleDocumentFontDrop, { capture: true })
     resizeStageViewport()
     window.addEventListener('resize', resizeStageViewport)
     isBooting.value = false
@@ -919,8 +921,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
-  document.removeEventListener('dragover', handleDocumentFontDragOver)
-  document.removeEventListener('drop', handleDocumentFontDrop)
+  window.removeEventListener('dragover', handleDocumentFontDragOver, { capture: true })
+  window.removeEventListener('drop', handleDocumentFontDrop, { capture: true })
   window.removeEventListener('resize', resizeStageViewport)
   cleanupExportProgress()
   cancelEffectCacheRefresh()

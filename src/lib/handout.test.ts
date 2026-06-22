@@ -756,6 +756,44 @@ describe('moveLayerInGroupAware', () => {
   })
 })
 
+describe('font text layer creation (drag-to-canvas path)', () => {
+  it('creates a text layer with specific fontId and fontFamily at given position', () => {
+    const doc = createDefaultHandout('Font Test')
+    const result = addTextLayer(doc, {
+      text: 'New text',
+      fontId: 'font-abc',
+      fontFamily: 'MyFont',
+      x: 320,
+      y: 240,
+    })
+
+    const layer = result.layers[0] as { type: string; text?: string; fontId?: string; fontFamily?: string; x: number; y: number }
+    expect(layer.type).toBe('text')
+    expect(layer.text).toBe('New text')
+    expect(layer.fontId).toBe('font-abc')
+    expect(layer.fontFamily).toBe('MyFont')
+    expect(layer.x).toBe(320)
+    expect(layer.y).toBe(240)
+  })
+
+  it('uses default position when none provided', () => {
+    const doc = createDefaultHandout('Font Test')
+    const result = addTextLayer(doc, { text: 'Hello', fontFamily: 'Inter' })
+
+    const layer = result.layers[0] as { x: number; y: number; fontFamily?: string }
+    expect(layer.x).toBe(160)
+    expect(layer.y).toBe(160)
+  })
+
+  it('uses Inter as default fontFamily when not provided', () => {
+    const doc = createDefaultHandout('Font Test')
+    const result = addTextLayer(doc, { text: 'Minimal' })
+
+    const layer = result.layers[0] as { fontFamily?: string }
+    expect(layer.fontFamily).toBe('Inter')
+  })
+})
+
 describe('export helpers', () => {
   it('creates safe timestamped png file names', () => {
     expect(downloadFileName('Case File: Alpha.png', new Date(2026, 5, 18, 7, 8, 9))).toBe(

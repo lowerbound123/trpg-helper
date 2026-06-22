@@ -166,3 +166,43 @@ describe('editor multi-selection state', () => {
     expect(editor.maskEditTarget).toBeUndefined()
   })
 })
+
+describe('font text layer creation (drag-to-canvas path)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('creates a text layer via addText with default "New text" content', () => {
+    const editor = useEditorStore()
+    editor.addText()
+
+    const layer = editor.document.layers[0]
+    expect(layer.type).toBe('text')
+    expect((layer as { text?: string }).text).toBe('New text')
+  })
+
+  it('creates a text layer with fallback font family "Inter" when no font provided', () => {
+    const editor = useEditorStore()
+    editor.addText()
+
+    const layer = editor.document.layers[0]
+    expect((layer as { fontFamily?: string }).fontFamily).toBe('Inter')
+  })
+
+  it('creates a text layer at specified position via addText', () => {
+    const editor = useEditorStore()
+    editor.addText(undefined, { x: 320, y: 240 })
+
+    const layer = editor.document.layers[0]
+    expect(layer.x).toBe(320)
+    expect(layer.y).toBe(240)
+  })
+
+  it('selects the newly created text layer', () => {
+    const editor = useEditorStore()
+    editor.addText()
+
+    expect(editor.selectedLayerId).toBeTruthy()
+    expect(editor.selectedLayerId).toBe(editor.document.layers[0].id)
+  })
+})

@@ -124,22 +124,34 @@ handout-generator/
 │
 ├── src/                          # 前端源码
 │   ├── main.ts                   # 应用入口
-│   ├── App.vue                   # 根组件（3714 行，应用中枢）
+│   ├── App.vue                   # 根组件（1020 行，shell + composable 编排）
 │   ├── style.css                 # 全局样式 + Tailwind 4 配置
-│   ├── app/                      # 应用外壳、快捷键、持久化
+│   ├── app/                      # 快捷键、持久化、生命周期
 │   ├── assets/                   # 静态资源
 │   ├── components/               # Vue 组件
 │   │   ├── ui/                   # shadcn-vue UI 原语（20 个组件）
-│   │   ├── editor/               # 编辑器面板
+│   │   ├── editor/               # 编辑器面板（RightInspector, ExportPanel）
 │   │   ├── handout/              # 新建讲义对话框
-│   │   └── settings/             # 配置对话框
-│   ├── composables/              # 组合式函数
+│   │   ├── settings/             # 配置对话框
+│   │   ├── BootSplash.vue        # 启动加载画面
+│   │   ├── EditorTopBar.vue      # 编辑器顶栏（Save/工具/Undo/Redo）
+│   │   ├── ManagerShell.vue      # 管理器视图（Handouts/Assets/Fonts 三标签）
+│   │   ├── LeftRail.vue          # 编辑器左栏（Assets/Fonts/Graph/Layers 四标签）
+│   │   └── CanvasWorkspace.vue   # Konva 画布工作区
+│   ├── composables/              # 24 个组合式函数（详见 6.7）
 │   ├── stores/                   # Pinia 状态仓库
+│   │   ├── editor.ts             # facade store（656 行）
+│   │   └── editor/               # 4 个子 store
+│   │       ├── font-store.ts
+│   │       ├── library-store.ts
+│   │       ├── mask-store.ts
+│   │       └── project-store.ts
 │   └── lib/                      # 核心业务逻辑
 │       ├── backend.ts            # Tauri IPC 桥接层
 │       ├── configuration.ts      # TOML 配置解析
 │       ├── history.ts            # 通用命令历史
-│       ├── render.ts             # Konva 离屏渲染与导出
+│       ├── render/               # Konva 离屏渲染（12 个模块）
+│       ├── handout/layer/        # 图层操作（9 个模块）
 │       ├── mask.ts               # 遮罩像素处理
 │       ├── shape-rendering.ts    # 形状渲染辅助
 │       ├── paint-rendering.ts    # 笔刷渲染
@@ -147,7 +159,6 @@ handout-generator/
 │       ├── effects.ts            # 效果→Konva 滤镜映射
 │       ├── snapping.ts           # 对齐辅助线计算
 │       ├── selection.ts          # 选择几何判断
-│       ├── handout/              # 文档模型（纯函数 reducer）
 │       └── pixi/                 # PixiJS 遮罩预览桥
 │
 ├── src-tauri/                    # Rust 后端
@@ -158,12 +169,12 @@ handout-generator/
 │   ├── icons/                    # 应用图标集
 │   └── src/
 │       ├── main.rs               # 二进制入口
-│       ├── lib.rs                # 核心逻辑（1472 行，38 个 IPC 命令）
-│       ├── types.rs              # 类型边界（占位）
-│       ├── errors.rs             # 错误边界（占位）
-│       ├── commands/             # IPC 命令模块
-│       ├── services/             # 服务层
-│       └── editor/               # 编辑器领域模块（占位）
+│       ├── lib.rs                # 模块声明 + run()（89 行）
+│       ├── types.rs              # 共享数据结构
+│       ├── errors.rs             # AppError 枚举
+│       ├── commands/             # IPC 命令模块（4 组 + mod.rs）
+│       ├── services/             # 服务层（5 模块 + mod.rs）
+│       └── editor/mod.rs         # 编辑器领域占位
 │
 └── data/                         # 运行时数据（git 忽略）
     ├── library/                  # 资源库
@@ -235,16 +246,13 @@ handout-generator/
 | 文件 | 用途 |
 |---|---|
 | `src/main.ts` | 应用启动入口。`createApp(App).use(createPinia()).use(VueKonva).use(VueFinderPlugin, { locale: 'zhCN' }).mount('#app')` |
-| `src/App.vue` | 根组件（3714 行）。应用状态中枢与画布编排器，详见 6.12 |
+| `src/App.vue` | 根组件（1020 行）。shell + composable 编排器，详见 6.12 |
 | `src/style.css` | 全局样式（1148 行）。`@import "tailwindcss"` + `@import "tw-animate-css"`；`:root` 定义 shadcn 设计令牌（HSL）；大量应用专属类（`.loading-shell`、`.manager-shell`、`.app-shell`、`.left-rail`、`.right-rail`、`.stage-frame`、`.topbar`、`.inspector-panel` 等） |
 
-### 6.2 `src/app/` — 应用外壳与编排
+### 6.2 `src/app/` — 快捷键、持久化、生命周期
 
 | 文件 | 用途 |
 |---|---|
-| `AppShell.vue` | 纯 `<slot />` 包装组件（预留扩展） |
-| `AppLayout.vue` | 纯 `<slot />` 包装组件（预留布局插槽） |
-| `AppDialogs.vue` | 纯 `<slot />` 包装组件（预留对话框插槽） |
 | `AppShortcuts.ts` | 全局键盘快捷键。`createAppShortcutHandler(context)`：`Cmd/Ctrl+S` 保存、`Cmd/Ctrl+Z`/`+Shift` 撤销/重做、`Delete` 删除图层、`S/B/E` 切换工具、`L/A/F/G` 切换标签页、`T` 添加文字 |
 | `useAppBootstrap.ts` | `requestAppIdleTask(task, timeout)` 用 `requestIdleCallback`（回退 setTimeout）调度空闲任务 |
 | `useAppPersistence.ts` | 项目保存编排：`saveProjectWithPreview(options)` → 保存文档 → 渲染缩略图 → 持久化预览 → 刷新项目列表 |
@@ -277,42 +285,85 @@ handout-generator/
 | `textarea` | `Textarea.vue` | 多行输入 |
 | `tooltip` | 4 文件 | 工具提示族 |
 
-### 6.4 `src/components/editor/` — 编辑器面板
+### 6.4 `src/components/` — 应用组件
+
+#### 6.4.1 编辑器面板（`editor/`）
 
 | 文件 | 用途 |
 |---|---|
 | `RightInspector.vue` | 右侧检视栏（755 行）。三个标签页：**Inspect**（图层属性：transform/opacity/blend/shape/brush/text/effects）、**Doc Type**（画布属性）、**Export**（嵌套 ExportPanel）。`scheduleContinuousEditEnd` 用 `continuousEditCommitDelayMs` 延迟合并历史。所有控件直接调用 `useEditorStore` 的 patch 方法 |
 | `ExportPanel.vue` | 导出面板（73 行）。`defineModel` 绑定 scale/format/quality；按钮 emit `exportImage`；带进度条与日志区 |
 
-### 6.5 `src/components/handout/` — 新建讲义对话框
+#### 6.4.2 新建讲义对话框（`handout/`）
 
 | 文件 | 用途 |
 |---|---|
 | `CreateHandoutDialog.vue` | 81 行。两种模式：`upload-background`（拖拽/选择图片作背景并以其尺寸建画布）与 `blank`（手填宽高） |
 
-### 6.6 `src/components/settings/` — 配置对话框
+#### 6.4.3 配置对话框（`settings/`）
 
 | 文件 | 用途 |
 |---|---|
-| `ConfigurationDialog.vue` | 330 行。编辑 `configuration.toml`。表单分组：Paths / Uploads & previews / Finder / Editor / Mask（enabled、usePixiPreview 两个 Switch）/ Export & debug。保存时序列化 TOML 并写入，提示需重启 |
+| `ConfigurationDialog.vue` | 330 行。编辑 `configuration.toml`。表单分组：Paths / Uploads & previews / Finder / Editor / Mask / Export & debug。保存时序列化 TOML 并写入，提示需重启 |
 
-### 6.7 `src/composables/` — 组合式函数
+#### 6.4.4 应用骨架组件（根目录）
 
-| 文件 | 用途 |
-|---|---|
-| `useCanvasViewport.ts` | 168 行。Konva 视口管理：`fitScale`、`canvasZoom`、`canvasPan`、`stageScale`、`fitCanvasView`、`zoomCanvas/in/out`、滚轮缩放（以鼠标为锚）、中键拖拽平移。zoom 限制 0.1–8 |
-| `useEditorDragPayloads.ts` | 80 行。HTML5 拖拽 payload 统一管理：`draggedAssetId/draggedFontId/draggedShapeKind` 及各 `start*/clear*` 函数 |
-| `useExportProgress.ts` | 56 行。模拟导出进度条：`beginExportProgress`（90ms 渐增到 95）、`prepareExportProgress`（等待 nextTick + RAF + setTimeout 让 UI 先绘制） |
-| `useFinderManagement.ts` | 531 行。把 Pinia store 包装成 VueFinder 的 Driver 接口，使 VueFinder 能管理 backgrounds/assets/fonts/handouts 四种"虚拟存储"。路径编码：`<storage>://<folder>/__<kind>-<id>`。注入右键菜单项（Create handout / Export PNG / Clone） |
-| `useHandoutExport.ts` | 222 行。导出当前文档或项目为 PNG/JPEG/WebP。`exportCurrentImage` 流程：签名去重 → `ensureDocumentImages` → `renderHandoutToBlob` → `exportImageBlobToDownloads`。带完整耗时日志 |
-| `useResourceImages.ts` | 68 行。`useResourceImages(fallbackW, fallbackH)`：图片预加载与缓存管理。`previewUrl(record)` 优先 thumbnailPath，回退 fileUrl |
+| 文件 | 行数 | 用途 |
+|---|---|---|
+| `BootSplash.vue` | 11 | 启动加载画面（三点跳动动画 + "Handout Generator" 标题） |
+| `EditorTopBar.vue` | 57 | 编辑器顶栏：Save 按钮 + 工具切换（Select/Brush/Eraser）+ Undo/Redo。Props: `activeTool`/`canUndo`/`canRedo`；Emits: `save`/`set-tool`/`undo`/`redo` |
+| `ManagerShell.vue` | 206 | 管理器视图：三标签页（Handouts/Assets/Fonts）+ VueFinder 实例 + Create/Clone/Export 操作 + CreateHandoutDialog + ConfigurationDialog。通过 `inject('manager-context')` 获取 33 个共享值 |
+| `LeftRail.vue` | 398 | 编辑器左栏：四标签页（Assets/Fonts/Graph/Layers）+ VueFinder + 搜索 + 可拖拽素材/字体列表 + SVG 形状预览 + 图层/分组列表（拖拽排序、mask 预览、可见性切换、Merge/Flat/Move/Delete）。通过 `inject('left-rail-context')` 获取 57 个共享值 |
+| `CanvasWorkspace.vue` | 388 | Konva 画布工作区：`<v-stage>` 含背景层 + 所有图层节点分支（masked image/raw image/text/rect/line/ellipse/curve/line group/paint）+ 曲线编辑手柄 + draftStroke + mask 编辑代理 + snap guideLines + marquee selectionBox + Transformer。通过 `inject('canvas-context')` 获取 65+ 共享值含 Konva refs |
+
+### 6.7 `src/composables/` — 组合式函数（24 个）
+
+#### 原有 composables（6 个）
+
+| 文件 | 行数 | 用途 |
+|---|---|---|
+| `useCanvasViewport.ts` | 168 | Konva 视口管理：`fitScale`/`canvasZoom`/`canvasPan`/`stageScale`/`fitCanvasView`/`zoomCanvas in/out`、滚轮缩放（以鼠标为锚）、中键拖拽平移。zoom 限制 0.1–8 |
+| `useEditorDragPayloads.ts` | 80 | HTML5 拖拽 payload 统一管理：`draggedAssetId`/`draggedFontId`/`draggedShapeKind` 及各 `start*/clear*` 函数 |
+| `useExportProgress.ts` | 56 | 模拟导出进度条：`beginExportProgress`（90ms 渐增到 95）、`prepareExportProgress`（等待 nextTick + RAF + setTimeout 让 UI 先绘制） |
+| `useFinderManagement.ts` | 531 | 把 Pinia store 包装成 VueFinder 的 Driver 接口，使 VueFinder 能管理 backgrounds/assets/fonts/handouts 四种"虚拟存储"。路径编码：`<storage>://<folder>/__<kind>-<id>`。注入右键菜单项 |
+| `useHandoutExport.ts` | 222 | 导出当前文档或项目为 PNG/JPEG/WebP。`exportCurrentImage` 流程：签名去重 → `ensureDocumentImages` → `renderHandoutToBlob` → `exportImageBlobToDownloads` |
+| `useResourceImages.ts` | 68 | 图片预加载与缓存管理。`previewUrl(record)` 优先 thumbnailPath，回退 fileUrl |
+
+#### 从 App.vue 抽取的 composables（18 个）
+
+| 文件 | 行数 | 用途 |
+|---|---|---|
+| `useMaskPreviewCache.ts` | 204 | idle-task mask 预览缓存队列：downsample/save/load cache data URL，`requestIdleTask`/`waitForIdleTask` |
+| `useMaskComposition.ts` | 362 | mask 合成/刷新：`refreshMaskedLayerImages`/`refreshMaskPreviewUrls`/`refreshMaskEditImage`/`refreshMaskedBackgroundImage`/`scheduleMaskCompositeRefresh`（带 runId 防竞态） |
+| `useLayerEffectCache.ts` | 99 | Konva 节点缓存：`refreshLayerEffectCache`（768px 上限）、RAF 批处理 `scheduleLayerEffectCacheRefresh`、签名 diff `changedEffectLayerIds` |
+| `usePaintStrokes.ts` | 172 | 画笔/橡皮擦：`activePaintDefaults`/`localizeStrokePoints`/`maskLocalPoint`/`startPaintStroke`/`movePaintStroke`/`stopPaintStroke`（draftStroke 实时更新） |
+| `useCurveEditing.ts` | 155 | 曲线手柄编辑：`curvePointKeys`/`curveHandleConfig`/`curveGuideConfig`/`moveCurvePoint`/`endCurvePointMove`/`normalizeCurveLayerPatch` |
+| `useLayerDragTransform.ts` | 319 | 拖拽/变换/吸附：`onLayerDragStart`/`onDragMove`（含 `calculateSnapGuides` 实时对齐、`multiDragState` 多选同步）/`onTransformEnd`/`onDragEnd`/`ellipseDragSnapshot` |
+| `useSelectionBox.ts` | 111 | 框选：`handleStagePointer`/`startSelectionBox`/`moveSelectionBox`/`stopSelectionBox`/`containsSelection`，含 `suppressNextStageClick` 防抖 |
+| `useFlattenLayers.ts` | 194 | 图层合并：`layerOuterBounds`/`selectedLayerBounds`/`flattenDocumentForSelectedLayers`/`flattenSelectedLayers`（弹 confirm → 离屏渲染 → saveProjectAsset → replace） |
+| `useProjectPreviews.ts` | 74 | 项目预览维护：`ensureProjectPreviews`（后台生成缺失/过期 webp 预览） |
+| `useProjectCreation.ts` | 99 | 项目创建：`createProject`/`createProjectFromBackground`/`createHandoutFromImageRecord`/`saveProject`/`cloneHandoutProject`，含对话框状态 |
+| `useFinderSelection.ts` | 171 | finder 选择/上传：`uploadFiles`/`handleDirectFinderDrop`/`selectedImageRecord`/`selectedHandoutProject`/`exportSelectedHandout`/`handleCreateBackgroundInput` |
+| `useCanvasDrop.ts` | 128 | 画布拖放：`handleCanvasDrop`（font/shape/asset 分派）/`handleCanvasDragOver`/`handleDocumentFontDragOver`/`handleDocumentFontDrop`/`pointInsideStageFrame` |
+| `useTextLayerAutoResize.ts` | 79 | 文本高度自适应：`autoResizeTextLayerHeights`/`autoTextLayerHeight`/`textLineCount`/`logTextLayerMetrics` |
+| `useLayerRenderConfigs.ts` | 233 | Konva 配置构建：`layerConfig`/`textConfig`/`shapeConfig`/`paintConfig`/`maskedLayerConfig`/`layerPreviewStyle`/`layerPreviewText`/`canvasLayerRenderInfo` |
+| `useRenderSignatures.ts` | 290 | 24 个 computed 渲染签名：`canvasLayers`/`visibleCanvasLayers`/`layerListItems`/各种 `*Signature`（watch 触发用）/`transformerConfig`/`documentFilterStyle`/`backgroundAsset`/`backgroundImage` |
+| `useMaskActions.ts` | 195 | mask 操作：`toggleSelectedLayerMask`/`toggleMaskEditFromLayerRow`/`toggleMaskEnabledFromLayerRow`/`startMaskDrag`/`handleMaskDrop`/`maskEditConfig`/`onMaskEditDragStart`/`onMaskEditDragEnd`/`onMaskEditTransformEnd`/`maskPreviewClass` |
+| `useLayerListDragDrop.ts` | 152 | 图层列表拖拽：`startLayerListDrag`/`handleLayerListDrop`/`handleGroupDrop`/`groupForLayer`/`layersForGroup`/`groupIsCollapsed`/`toggleGroupCollapsed`/`selectLayerFromList`/`toggleLayerVisibility` |
+| `useTransformerSync.ts` | 40 | Transformer 同步：`updateTransformer`（同步 Konva Transformer 节点到当前选择，mask-edit 模式附加 maskNode） |
 
 ### 6.8 `src/stores/` — Pinia 状态仓库
 
 | 文件 | 用途 |
 |---|---|
-| `editor.ts` | **核心 store**（1348 行）。setup 风格 `defineStore('editor', () => {...})`。聚合：历史记录（`createHistory(createDefaultHandout())`）、当前文档、图层选择、项目元数据、库、工具设置、遮罩编辑目标、dirty flags。详见 6.8.1 |
+| `editor.ts` | **facade store**（656 行）。setup 风格 `defineStore('editor', () => {...})`。聚合 4 个子 store 并全量展开其 API，消费者零改动。保留核心：历史记录、文档、图层选择、图层 CRUD/排序/分组/栅格化、工具设置、dirty flags。详见 6.8.1 |
+| `editor/font-store.ts` | 99 行。`createFontStore` 工厂：字体加载、预览生成、空闲调度 |
+| `editor/library-store.ts` | 133 行。`createLibraryStore` 工厂：库 CRUD、导入管线、`resolveAsset`/`resolveBackground`/`resolveFont`、项目资产合并 |
+| `editor/mask-store.ts` | 394 行。`createMaskStore` 工厂：所有 mask 操作（add/edit/delete/clear/transfer/copy）、mask data URL 缓存、mask 编辑目标、`persistProjectMasks` |
+| `editor/project-store.ts` | 214 行。`createProjectStore` 工厂：项目 CRUD、文件夹管理、save/open/clone/close 生命周期 |
 | `editor.test.ts` | 168 行 Vitest 测试，覆盖 commit/undo/redo、layer 增删移序、group、mask、flatten 等关键行为 |
+
+> 子 store 用普通工厂函数（非 `defineStore`），通过依赖注入接收共享 ref（`projectTarget()`、`status`、`maskEditTarget`）。facade 组装顺序：fontStore → libraryStore → maskStore → replaceDocument → projectStore。
 
 #### 6.8.1 `editor.ts` 关键 API
 
@@ -338,7 +389,8 @@ handout-generator/
 | `configuration.ts` | 239 | TOML 配置解析。从 `configuration.toml?raw` 内联默认配置，支持 localStorage 覆盖。导出 `AppConfiguration` 类型与 `appConfiguration` 实例 |
 | `history.ts` | 61 | 通用命令历史。`createHistory<T>(initial, maxSteps=100)`：`past/present/future` 三栈，`commit(mutator, {merge})`、`replace(next)`、`undo/redo` |
 | `mask.ts` | 229 | 遮罩像素处理。`createSolidMaskDataUrl`、`drawMaskStroke`、`applyGrayMaskToCanvas`、坐标互转（图层↔文档、遮罩↔文档）、`createLayerLocalMaskCanvas`、`applyLayerMaskToCanvas`（destination-in 合成） |
-| `render.ts` | 823 | **Konva 离屏渲染与导出**。`renderHandoutToBlob/renderHandoutToDataUrl/renderHandoutPreviewToDataUrl`；构造离屏 Konva.Stage；按 zIndex 渲染背景+图层；带遮罩走 `applyLayerMaskToCanvas`（Canvas2D 确定性路径，不走 Pixi）；预览在 PNG/WebP/JPEG 多档中选最小且 ≤1MB |
+| `render/` | 899 行（12 模块） | **Konva 离屏渲染与导出**（从原 `render.ts` 823 行拆分）。`index.ts` barrel 导出；`stage.ts` 构造离屏 Konva.Stage；`preview.ts` `renderHandoutPreviewToDataUrl`（≤1MB 预览）；`mask-composition.ts` `renderMaskedLayerImage`（Canvas2D/Pixi 合成）；`nodes/` 按类型生成 Konva 节点（image/text/shape/paint）；`image-loading.ts` 图片预加载 |
+| `handout/layer/` | 832 行（9 模块） | **图层类型与操作**（从原 `layer.ts` 778 行拆分）。`index.ts` barrel 导出；`types.ts` 类型定义；`factories.ts` `addImageLayer`/`addTextLayer`/`addShapeLayer`/`addPaintLayer`；`mask.ts` `setLayerMask`/`clearLayerMask`/`transferLayerMask`/`copyLayerMask`；`group.ts` 分组操作；`ordering.ts` 排序；`delete.ts` 删除；`update.ts` 更新 |
 | `shape-rendering.ts` | 243 | 形状渲染辅助。`shapeKonvaConfig`（按 ShapeKind 生成 Konva 配置）、`curveSceneFunc`（Bezier 自定义 sceneFunc）、`polygonPoints`（diamond/hexagon 顶点）、`lineDash`、`arrowDotConfig/arrowLineConfig`（自定义箭头） |
 | `paint-rendering.ts` | 180 | 笔刷渲染。`brushDefaults`（pixel/pencil/marker/highlighter/airbrush 五种预设）；`paintCanvasCache` 用 stroke 签名做增量缓存——只重画新增 stroke |
 | `layer-rendering.ts` | 53 | 图层→Konva 配置映射。`layerKonvaConfig`（id/x/y/w/h/scale/rotation/opacity/visible/draggable/blendMode）、`textKonvaConfig`（加 text/font/fontStyle/fill/align 等） |
@@ -359,7 +411,7 @@ handout-generator/
 |---|---|---|
 | `index.ts` | — | barrel 导出 |
 | `document.ts` | 111 | `HandoutDocument`/`CanvasSettings` 接口；`createDefaultHandout(title)`（1280×720，透明背景）；`updateCanvas`；`setBackgroundMask/clearBackgroundMask/deleteBackgroundMask` |
-| `layer.ts` | 778 | **图层类型与操作**。`LayerType`/`ShapeKind`/`HandoutLayer`（联合：Image/Text/Shape/Paint）/`LayerGroup`；`addImageLayer/addTextLayer/addShapeLayer/addPaintLayer`；`setLayerMask/clearLayerMask/deleteLayerMask/transferLayerMask/copyLayerMask`；`removeLayer/moveLayer`；`groupForLayer/addLayerGroup/ungroupLayerGroup/moveLayerOutOfGroup`；`flattenLayersToImage` |
+| `layer/` | 832 行（9 模块） | **图层类型与操作**（从原 `layer.ts` 778 行拆分）。`index.ts` barrel；`types.ts` 类型；`factories.ts` 各 `add*Layer`；`mask.ts` mask 操作；`group.ts` 分组；`ordering.ts` 排序；`delete.ts`/`update.ts`；`shared.ts` 共享工具 |
 | `mask.ts` | 118 | `LayerMask`/`MaskCacheMeta` 类型；`createCanvasLayerMask`（按画布尺寸创建）；`normalizeMask`/`normalizeMaskCache` |
 | `paint.ts` | 51 | `PaintMode`/`BrushKind`/`StrokePoint`/`PaintStroke`；`normalizePaintStroke`；`pointsToStrokePoints/strokePointsToFlat`（扁平坐标 ↔ StrokePoint[] 互转） |
 | `effects.ts` | 28 | `BlendMode`（6 种）、`LayerEffects`（brightness/contrast/saturation/blur）、`defaultEffects/normalizeEffects` |
@@ -399,39 +451,29 @@ handout-generator/
 
 ### 6.12 `src/App.vue` — 根组件深度解析
 
-**职责**：整个应用唯一的 view-layer 编排器，承担启动加载、manager 视图、editor 视图、所有 Konva 交互、遮罩预览调度、flatten 流程。
+**职责**：应用 shell + composable 编排器。管理三态切换（boot/manager/editor）、提供 3 个 provide 上下文给子组件、装配 18 个 composable、注册全局监听与 watcher。
 
-#### script setup 结构（1–2884 行）
+#### script setup 结构（1–850 行）
 
-- **imports**（1–82）：Vue/Konva/Tauri dialog/Lucide/vuefinder；本地 UI 组件、composables、lib、store
-- **类型**（84–91）：`NodeRef`/`KonvaEvent`/`SelectionBox`/`EditorTool`/`CurvePointKey`/`LayerListItem`
-- **响应式状态**（93–184）：editor store；stage/transformer/maskEdit node refs；`maskedLayerImages`/`maskPreviewUrls` 等 shallowReactive 缓存；对话框开关；`activeTool`/`activeRailTab`；`draftStroke`/`selectionBox`/`multiDragState`/`guideLines`
-- **composable 装配**（192–249）：`useEditorDragPayloads`/`useResourceImages`/`useHandoutExport`/`useCanvasViewport`
-- **computed**（250–481）：`canvasLayers`/`visibleCanvasLayers`、`layerListItems`（含 group 扁平化）、各种 `*Signature`（watch 触发用）、`transformerConfig`、`documentFilterStyle`
-- **工具函数**（483–818）：layerName/imageForLayer/maskedImageForLayer、mask 预览缓存调度（`requestIdleTask`/`scheduleMaskPreviewCache`/`generateMaskPreviewCache`）、日志
-- **图层列表拖拽**（890–981）：startLayerListDrag/handleLayerListDrop/groupForLayer/toggleGroupCollapsed
-- **遮罩操作**（1004–1081）：toggleSelectedLayerMask/toggleMaskEditFromLayerRow/startMaskDrag/handleMaskDrop
-- **画布添加**（1083–1207）：addAssetToCanvas/addFontTextToCanvas/addShapeToCanvas/handleCanvasDrop/handleDocumentFontDrop
-- **Konva 配置生成**（1209–1268）：layerConfig/textConfig/shapeConfig/paintConfig/maskedLayerConfig/maskEditConfig
-- **笔刷绘制**（1327–1467）：startPaintStroke/movePaintStroke/stopPaintStroke（draftStroke 实时更新）
-- **曲线编辑**（1468–1586）：curvePoint/curveHandleConfig/moveCurvePoint/endCurvePointMove
-- **文字度量**（1587–1637）：autoResizeTextLayerHeights/autoTextLayerHeight
-- **flatten**（1660–1860）：flattenSelectedLayers（弹 confirm → 离屏渲染 dataURL → saveProjectAsset → registerProjectAsset → flattenSelectedLayersToImage）
-- **Konva 交互**（1862–2071）：onLayerDragStart/handleStagePointer/startSelectionBox/onTransform/onDragMove（含 calculateSnapGuides 实时对齐、multiDragState 多选同步）
-- **Transformer 与效果缓存**（2182–2262）：updateTransformer/refreshLayerEffectCache（RAF 批处理 + 768px 上限缓存）
-- **上传与创建**（2263–2448）：uploadFiles/createProject/createProjectFromBackground/createHandoutFromImageRecord/saveProject/exportSelectedHandout/cloneHandoutProject
-- **预览/遮罩异步刷新**（2449–2795）：ensureProjectPreviews/refreshMaskedLayerImages/refreshMaskPreviewUrls/refreshMaskEditImage/refreshMaskedBackgroundImage/scheduleMaskCompositeRefresh（带 runId 防竞态）
-- **生命周期**（2796–2884）：onMounted 并行刷新 library + projects、同步图片、注册监听、repairLibraryThumbnails、ensureProjectPreviews；14 个 watch 把签名变化映射到 transformer 更新、effect 缓存刷新、mask 合成、文字自适应
+- **imports**（1–55）：Vue/Konva/Tauri；4 个子组件、24 个 composable、lib、store
+- **类型**（57–59）：`NodeRef`/`KonvaEvent`/`EditorTool`
+- **响应式状态**（61–100）：editor store；stage/transformer/maskEdit node refs；`maskedLayerImages`/`maskPreviewUrls`/`maskEditImage`（传给 C2/C17）；`isDraggingMask`/`draggedMaskLayerId`（传给 C11）；对话框开关；`activeTool`/`activeRailTab`；`isBooting`；finder 选择/revision
+- **composable 装配**（102–580）：按依赖序调用 18 个 composable，用 holder 模式打破循环依赖（`maskCompositionRefreshHolder`/`projectCreationHolder`/`finderSelectionHolder`/`layerListHolder`）
+- **provide 注入**（520–580）：`manager-context`（33 值）、`left-rail-context`（57 值）、`canvas-context`（65+ 值含 Konva refs）
+- **handleGlobalKeydown**（582–595）：`createAppShortcutHandler` 绑定快捷键
+- **辅助函数**（597–850）：`resetKonvaDragButtons`/`fontFamily`/`logViewport`/`roundMetric`/`backgroundRenderMetrics`/`logBackgroundRender`/`setActiveTool`/`fitEditorCanvas`/`selectCanvasLayer`/`deleteLayer`/`toggleBackgroundVisibility`/`addAssetToCanvas`/`addFontTextToCanvas`/`createFontTextOnCanvas`/`addShapeToCanvas`
+- **生命周期**（800–840）：onMounted 并行刷新 library + projects、同步图片、注册监听、ensureProjectPreviews；onBeforeUnmount 移除监听、cleanup
+- **watch**（840–870）：14 个 watch 把签名变化映射到 transformer 更新、effect 缓存刷新、mask 合成、文字自适应
 
-#### template 结构（2886–3714 行）
+#### template 结构（852–1020 行）
 
 三态切换：
 
-1. **`isBooting`** → `.loading-shell`（三点跳动动画）
-2. **`editor.view === 'manager'`** → `.manager-shell`：header + Tabs（handouts/assets/fonts）+ VueFinder + CreateHandoutDialog + ConfigurationDialog
+1. **`isBooting`** → `<BootSplash />`
+2. **`editor.view === 'manager'`** → `<ManagerShell />`（通过 inject 获取上下文）
 3. **editor 视图** → `<ResizablePanelGroup direction="horizontal">` 三栏：
-   - **左栏（23%）**：`.left-rail` + `.brand-strip` + Tabs（assets/fonts/graph/layers）
-   - **中栏（57%）**：`.workspace` → `.topbar`（Save/工具/Undo/Redo）+ `.canvas-wrap` + `.stage-frame` + `<v-stage>` → `<v-layer>` → `<v-group>`（pan/zoom）→ 背景层 + 图层节点（v-image/v-text/v-rect/v-line/v-ellipse/v-shape）+ 曲线手柄 + draftStroke + mask 编辑节点 + guideLines + selectionBox + `<v-transformer>`
+   - **左栏（23%）**：`<LeftRail />`（通过 inject 获取上下文）
+   - **中栏（57%）**：`<EditorTopBar />` + `<CanvasWorkspace />`
    - **右栏（20%）**：`<RightInspector>` 绑定 export 模型，`@export-image="exportCurrentImage"`
 
 ---
@@ -454,28 +496,32 @@ handout-generator/
 | 文件 | 用途 |
 |---|---|
 | `src/main.rs` | 6 行。二进制入口，release 模式隐藏 Windows 控制台，调用 `app_lib::run()` |
-| `src/lib.rs` | **1472 行核心**。模块声明、`AppError` 枚举、所有 serde 数据结构、路径解析、库/项目 I/O、字体元数据解析、缩略图生成、32 个 IPC 命令、`run()` 构建 Tauri 应用并注册全部 38 个命令处理器 |
+| `src/lib.rs` | 89 行。模块声明 + `run()` 构建 Tauri 应用并注册全部 38 个命令处理器 |
 
-#### 占位模块（staged module split，仅 doc-comment）
-
-| 文件 | 状态 |
-|---|---|
-| `src/types.rs` | 占位："Shared backend type boundary" |
-| `src/errors.rs` | 占位："Application error boundary" |
-| `src/commands/{asset,editor,preview,project}_commands.rs` | 占位（各 1 行 doc-comment） |
-| `src/services/{asset,export,preview,project}_service.rs` | 占位（各 1 行 doc-comment） |
-| `src/editor/{document,history,layer,mask,migration,paint,preview,validation}.rs` | 占位（各 1 行 doc-comment） |
-
-#### 实际逻辑模块
+#### 模块结构（staged module split 已完成）
 
 | 文件 | 行数 | 用途 |
 |---|---|---|
-| `src/commands/export_commands.rs` | 86 | 2 个导出命令：`export_image_bytes_to_downloads`（转码 inline bytes）、`export_image_file_to_downloads`（转码 staging 文件 + 删除 staging + 耗时日志） |
-| `src/commands/mask_commands.rs` | 87 | 4 个遮罩/项目文件 I/O 命令：`save_project_mask`、`save_project_mask_cache`、`read_project_file_data_url`、`delete_project_mask`。均通过 `safe_project_relative_path` 防路径穿越 |
-| `src/services/image_codec.rs` | 104 | 图像转码核心。`ExportImageFormat` 枚举（PNG/JPEG/WebP）；`encode_export_image(input, format, quality)`；`normalize_export_file_name`。含单元测试（验证 WebP/PNG magic bytes） |
-| `src/services/path_service.rs` | 21 | `clean_file_name(file_name)`：提取文件名组件，非字母数字字符映射为 `_` |
+| `src/types.rs` | 86 | 共享数据结构：`LibraryRecord`/`LibraryIndex`/`ImportResult`/`ProjectPayload`/`ProjectSummary`/`ProjectFolderIndex`/`DeleteEntries` |
+| `src/errors.rs` | 30 | `AppError` 枚举 + `CommandResult<T>` 别名 |
+| `src/commands/mod.rs` | 5 | 模块声明 |
+| `src/commands/asset_commands.rs` | 311 | 15 个库/config 命令 |
+| `src/commands/project_commands.rs` | 324 | 13 个项目命令 |
+| `src/commands/preview_commands.rs` | 68 | `save_project_preview` + `save_project_asset` |
+| `src/commands/export_commands.rs` | 132 | 2 个导出命令：`export_image_bytes_to_downloads`/`export_image_file_to_downloads` |
+| `src/commands/mask_commands.rs` | 87 | 4 个遮罩/项目文件 I/O 命令 |
+| `src/services/mod.rs` | 5 | 模块声明 |
+| `src/services/path_service.rs` | 182 | 路径/文件夹/fs/data-url/debug log |
+| `src/services/preview_service.rs` | 56 | 缩略图/预览编码 |
+| `src/services/project_service.rs` | 144 | 项目文件 I/O + folder index |
+| `src/services/asset_service.rs` | 311 | 库 I/O + 字体解析 + import pipeline |
+| `src/services/image_codec.rs` | 104 | 图像转码核心（PNG/JPEG/WebP） |
+| `src/services/export_service.rs` | 1 | 占位（逻辑在 `export_commands.rs`） |
+| `src/editor/mod.rs` | 5 | 编辑器领域占位 |
 
-### 7.3 `lib.rs` 关键内容
+### 7.3 关键数据结构与路径解析
+
+> 数据结构已迁移至 `src/types.rs`，路径解析至 `src/services/path_service.rs`，字体元数据解析至 `src/services/asset_service.rs`，缩略图管线至 `src/services/preview_service.rs`。详见 7.2 模块表。
 
 #### 数据结构（均 `#[serde(rename_all = "camelCase")]`）
 
@@ -652,14 +698,14 @@ main.ts → createApp → App.vue onMounted
 
 ### 10.3 store → Konva 画布渲染
 
-`App.vue` 的 computed（`canvasLayers`/`layerEffectsSignature`/`layerMaskRenderSignature`/...）是 `editor.document` 的派生视图。template 中 `<v-stage>` 的 `<v-group>` 套用 `useCanvasViewport` 的 pan/zoom；每个图层节点用 `layerConfig/textConfig/shapeConfig/paintConfig/maskedLayerConfig` 生成 Konva config。Vue-Konva 响应式应用并 `layer.draw()`。
+`useRenderSignatures`（C18）的 computed（`canvasLayers`/`layerEffectsSignature`/`layerMaskRenderSignature`/...）是 `editor.document` 的派生视图。`CanvasWorkspace.vue` 的 `<v-stage>` 的 `<v-group>` 套用 `useCanvasViewport` 的 pan/zoom；每个图层节点用 `useLayerRenderConfigs`（C17）的 `layerConfig`/`textConfig`/`shapeConfig`/`paintConfig`/`maskedLayerConfig` 生成 Konva config。Vue-Konva 响应式应用并 `layer.draw()`。
 
-- **带效果的图层**：`refreshLayerEffectCacheAfterUpdate` 中 `node.cache()`（768px 上限）
-- **带遮罩的图层**：`watch(layerMaskRenderSignature)` → `refreshMaskedLayerImages` → `renderMaskedLayerImage` 离屏合成（Canvas2D 或 Pixi 桥）→ 结果存入 `maskedLayerImages[layer.id]` → `<v-image>` 显示
+- **带效果的图层**：`useLayerEffectCache`（C3）的 `refreshLayerEffectCacheAfterUpdate` 中 `node.cache()`（768px 上限）
+- **带遮罩的图层**：`watch(layerMaskRenderSignature)` → `useMaskComposition`（C2）的 `refreshMaskedLayerImages` → `renderMaskedLayerImage` 离屏合成 → 结果存入 `maskedLayerImages[layer.id]` → `<v-image>` 显示
 
 ### 10.4 画布交互回写 store
 
-拖拽/变换时 Konva 事件 → `onDragMove/onTransform/onTransformEnd`（含 `calculateSnapGuides` 实时对齐、`multiDragState` 多选同步）→ `editor.patchSelectedLayersContinuous(...)` 回写 store；改 transform 时同步移动/缩放/旋转 mask。14 个 `watch` 监听签名变化，触发 transformer 重建、effect 缓存刷新、mask 合成、文字自适应等副作用，形成闭环。
+拖拽/变换时 Konva 事件 → `useLayerDragTransform`（C6）的 `onDragMove`/`onTransform`/`onTransformEnd`（含 `calculateSnapGuides` 实时对齐、`multiDragState` 多选同步）→ `editor.patchSelectedLayersContinuous(...)` 回写 store；改 transform 时同步移动/缩放/旋转 mask。App.vue 的 14 个 `watch` 监听签名变化，触发 transformer 重建、effect 缓存刷新、mask 合成、文字自适应等副作用，形成闭环。
 
 ### 10.5 持久化
 
@@ -726,9 +772,16 @@ Export 标签 → exportImage emit → exportCurrentImage()
 
 `safe_project_relative_path` 拒绝绝对路径和 `..` 段；`clean_file_name` 清洗所有用户输入文件名，防止路径穿越和非法字符。
 
-### 11.8 渐进式模块拆分
+### 11.8 四阶段代码拆解
 
-Rust 后端处于"staged module split"中间态：`lib.rs` 仍是 1472 行单体内核，`commands/`/`services/`/`editor/` 目录已创建但多数为占位文件，真实逻辑仅分布在 `lib.rs`、`commands/export_commands.rs`、`commands/mask_commands.rs`、`services/image_codec.rs`、`services/path_service.rs` 五个文件中。
+项目经历四阶段结构性重构，将高耦合大文件分解为模块化架构：
+
+1. **Rust 后端**（`lib.rs` 1472→89 行）：拆分为 `types.rs`/`errors.rs` + `commands/`（4 组）+ `services/`（5 模块）
+2. **渲染与图层模块**（`render.ts` 823 行 → `render/` 12 模块；`layer.ts` 778 行 → `layer/` 9 模块）：barrel 导出保持 API 不变
+3. **Editor store**（`editor.ts` 1348→656+840 行）：facade + 4 子 store（font/library/mask/project），工厂函数 + 依赖注入
+4. **App.vue**（3714→1020 行）：18 个 composable + 5 个子组件，provide/inject 共享上下文
+
+所有阶段均保持 38 个测试全通过、typecheck 清洁、生产构建成功。消费者代码零改动。
 
 ### 11.9 未使用依赖
 
@@ -738,19 +791,28 @@ Rust 后端处于"staged module split"中间态：`lib.rs` 仍是 1472 行单体
 
 ## 附录：模块成熟度
 
+### 前端
+
 | 文件 | 行数 | 状态 |
 |---|---|---|
-| `src/App.vue` | 3714 | 完整实现 |
-| `src/stores/editor.ts` | 1348 | 完整实现 |
-| `src/lib/render.ts` | 823 | 完整实现 |
-| `src/lib/handout/layer.ts` | 778 | 完整实现 |
+| `src/App.vue` | 1020 | shell + composable 编排 |
+| `src/stores/editor.ts` | 656 | facade store |
+| `src/stores/editor/` (4 文件) | 840 | 子 store |
+| `src/composables/` (24 文件) | 4202 | 完整实现 |
+| `src/components/` (5 新组件) | 1060 | 完整实现 |
 | `src/components/editor/RightInspector.vue` | 755 | 完整实现 |
-| `src/composables/useFinderManagement.ts` | 531 | 完整实现 |
 | `src/lib/backend.ts` | 445 | 完整实现 |
+| `src/lib/render/` (12 模块) | 899 | 完整实现 |
+| `src/lib/handout/layer/` (9 模块) | 832 | 完整实现 |
 | `src/lib/handout.test.ts` | 520 | 完整测试 |
-| `src-tauri/src/lib.rs` | 1472 | 完整实现（单体内核） |
-| `src-tauri/src/commands/export_commands.rs` | 86 | 完整实现 |
-| `src-tauri/src/commands/mask_commands.rs` | 87 | 完整实现 |
-| `src-tauri/src/services/image_codec.rs` | 104 | 完整实现（含测试） |
-| `src-tauri/src/services/path_service.rs` | 21 | 完整实现 |
-| `src-tauri/src/{types,errors,commands/*,services/*,editor/*}.rs` | 1-2 each | 占位（staged module split） |
+
+### Rust 后端
+
+| 文件 | 行数 | 状态 |
+|---|---|---|
+| `src-tauri/src/lib.rs` | 89 | 模块声明 + run() |
+| `src-tauri/src/types.rs` | 86 | 完整实现 |
+| `src-tauri/src/errors.rs` | 30 | 完整实现 |
+| `src-tauri/src/commands/` (5 文件) | 927 | 完整实现 |
+| `src-tauri/src/services/` (6 文件) | 802 | 完整实现（export_service 占位） |
+| `src-tauri/src/editor/mod.rs` | 5 | 占位 |

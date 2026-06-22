@@ -14,8 +14,10 @@ dist
 dist-ssr
 data
 src-tauri/target
+src-tauri/~
 .superpowers
 *.local
+output.zip
 
 # Editor directories and files
 .vscode/*

@@ -47,15 +47,15 @@ export function useTransformerSync(options: {
     transformer.nodes(selectedNodes)
     transformer.getLayer()?.batchDraw()
 
-    // Konva Transformer miscomputes rotation for scaleX=-1 nodes
-    // (reports 180-visualRotation instead of visualRotation).
-    // Force the correct visual rotation after attaching flipped nodes.
+    // Konva Transformer computes rotation from the bounding box, which
+    // is mirrored when scaleX=-1. For flipped nodes, sync the
+    // Transformer's rotation to the node's actual rotation so the handle
+    // follows the node's orientation (scaleX=-1 handles the visual flip).
     for (const node of selectedNodes) {
       const layer = editor.document.layers.find((l) => l.id === node.id())
-      if (layer?.flipX) {
-        const visualRotation = ((360 - layer.rotation) % 360 + 360) % 360
-        transformer.rotation(visualRotation)
-        console.log('[rotation] updateTransformer ROTATION FIX — model.rotation:', layer.rotation, 'visualRotation:', visualRotation, 'transformer.rotation was:', transformer.rotation(), 'now:', visualRotation)
+      if (layer?.flipX && node.rotation() !== transformer.rotation()) {
+        console.log('[rotation] updateTransformer SYNC — transformer.rotation was:', transformer.rotation(), '→ setting to node.rotation:', node.rotation())
+        transformer.rotation(node.rotation())
       }
     }
 

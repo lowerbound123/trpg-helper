@@ -165,8 +165,9 @@ export function paintKonvaConfig(layer: PaintLayer, base: PaintBaseConfig) {
 
 export function paintStrokeLineConfig(stroke: PaintStroke) {
   const kind = stroke.brushKind ?? 'pixel'
+  const points = (stroke.points && stroke.points.length >= 2) ? stroke.points : [0, 0]
   return {
-    points: stroke.points,
+    points,
     stroke: stroke.mode === 'eraser' ? 'rgba(255,255,255,0.9)' : stroke.color,
     strokeWidth: Math.max(1, stroke.strokeWidth * brushDefaults[kind].widthMultiplier),
     opacity: stroke.mode === 'eraser' ? stroke.eraserOpacity : stroke.opacity,

@@ -797,41 +797,38 @@ describe('font text layer creation (drag-to-canvas path)', () => {
 describe('flip-aware rotation compensation', () => {
   /**
    * Pure extraction of the rotation formula used in onTransformEnd.
-   * For flipped layers (scaleX=-1), the Konva Transformer reports rotation
-   * in mirrored coordinates where the delta sign is inverted.
+   * Step 1: Normalize from node's current scaleY to scaleY=1.
+   * Step 2: Convert from screen-space to model rotation (negate if flipX).
    */
-  function compensateFlippedRotation(
-    oldRotation: number,
+  function computeNodeRotation(
     nodeRotation: number,
     flipX: boolean,
+    nodeScaleY: number = 1,
   ): number {
-    if (!flipX) return Math.round(nodeRotation)
-    const raw = oldRotation - nodeRotation
-    const delta = ((raw + 180) % 360 + 360) % 360 - 180
-    return Math.round(oldRotation + delta)
+    // Step 1: Undo Konva Transformer's scaleY flip
+    if (nodeScaleY < 0) nodeRotation = 180 - nodeRotation
+    // Step 2: flipX (scaleX=-1) reverses visual rotation direction
+    const result = Math.round(flipX ? -nodeRotation : nodeRotation)
+    return result === 0 ? 0 : result // normalize -0 to 0
   }
 
   it('non-flipped: rotation = rounded node rotation', () => {
-    expect(compensateFlippedRotation(0, 30.2, false)).toBe(30)
-    expect(compensateFlippedRotation(45, 75.8, false)).toBe(76)
+    expect(computeNodeRotation(30.2, false)).toBe(30)
+    expect(computeNodeRotation(75.8, false)).toBe(76)
   })
 
-  it('flipped +30° from 0: mirrors delta sign', () => {
-    // Node reports -30 in mirrored coords
-    expect(compensateFlippedRotation(0, -30, true)).toBe(30)
+  it('flipped, scaleY=1: rotation negated (mirrored x-axis)', () => {
+    // Node rotation in mirrored coords → model rotation is negated
+    expect(computeNodeRotation(0, true)).toBe(0)
+    expect(computeNodeRotation(-30, true)).toBe(30)
+    expect(computeNodeRotation(45, true)).toBe(-45)
   })
 
-  it('flipped +30° from 45: recovers 75', () => {
-    expect(compensateFlippedRotation(45, 15, true)).toBe(75)
-  })
-
-  it('flipped -45° from 0: recovers -45', () => {
-    expect(compensateFlippedRotation(0, 45, true)).toBe(-45)
-  })
-
-  it('flipped: delta clamps to [-180,180] to survive node normalization', () => {
-    // Even if Konva normalizes -200 to 160 (atan2 wrapping), result stays sane
-    expect(compensateFlippedRotation(0, 160, true)).toBe(-160)
+  it('flipped, scaleY=-1: undo Transformer Y-flip before negating', () => {
+    // Transformer changed scaleY=-1,rot=164: normalize 180-164=16, then flip: -16
+    expect(computeNodeRotation(164, true, -1)).toBe(-16)
+    // Transformer at 180 → 0 after normalization, then 0
+    expect(computeNodeRotation(180, true, -1)).toBe(0)
   })
 })
 

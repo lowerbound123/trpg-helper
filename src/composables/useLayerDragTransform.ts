@@ -98,25 +98,29 @@ export function useLayerDragTransform(options: {
           y: Math.round(node.y() - height / 2),
         }
       : layerPositionFromNode(layer, node)
-    node.clearCache()
+    const nodeScaleXBefore = node.scaleX()
+    const nodeScaleYBefore = node.scaleY()
+    let nodeRotation = node.rotation()
+
+    // Step 1: Normalize to scaleY=1 coordinate system.
+    // Konva Transformer may flip scaleY to -1 (and adjust rotation by 180°)
+    // as an equivalent representation. Undo this before computing delta.
+    if (nodeScaleYBefore < 0) {
+      nodeRotation = 180 - nodeRotation
+    }
+
+    // Step 2: Convert from screen-space rotation to model rotation.
+    // For flipX (scaleX=-1), the visual rotation direction is reversed.
+    const rawRotation = Math.round(layer.flipX ? -nodeRotation : nodeRotation)
+    const rotation = rawRotation === 0 ? 0 : rawRotation // normalize -0
+
+    console.log('[rotation] onTransformEnd — nodeScaleX:', nodeScaleXBefore, 'nodeScaleY:', nodeScaleYBefore, 'nodeRotationRaw:', node.rotation(), 'nodeRotationNorm:', nodeRotation, 'flipX:', layer.flipX, 'finalRotation:', rotation)
+
+    // Reset node to model state AFTER reading rotation
     node.scaleX(layer.flipX ? -1 : 1)
     node.scaleY(1)
     node.width(width)
     node.height(height)
-    const nodeRotation = node.rotation()
-    const rotation = layer.flipX
-      ? (() => {
-          // In mirrored coords (scaleX=-1), the Transformer negates the
-          // rotation delta. Clamp delta to [-180,180] so Konva angle
-          // normalization (atan2 wrapping) never corrupts the value.
-          const raw = layer.rotation - nodeRotation
-          const delta = ((raw + 180) % 360 + 360) % 360 - 180
-          const result = Math.round(layer.rotation + delta)
-          console.log('[rotation] onTransformEnd FLIPPED — layer.rotation:', layer.rotation, 'nodeRotation:', nodeRotation, 'raw:', raw, 'delta:', delta, 'result:', result)
-          return result
-        })()
-      : Math.round(nodeRotation)
-    console.log('[rotation] onTransformEnd PATCH — rotation:', rotation, 'position:', { x: position.x, y: position.y }, 'size:', { width, height })
     editor.patchLayer(layer.id, {
       x: position.x,
       y: position.y,

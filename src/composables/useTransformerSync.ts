@@ -26,6 +26,7 @@ export function useTransformerSync(options: {
     console.log('[rotation] updateTransformer — selectedLayerIds:', editor.selectedLayerIds, 'maskEditTarget:', editor.maskEditTarget)
     if (editor.maskEditTarget && activeTool.value === 'select') {
       const maskNode = maskEditNodeRef.value?.getNode()
+      transformer.nodes([])
       transformer.nodes(maskNode ? [maskNode] : [])
       transformer.getLayer()?.batchDraw()
       return
@@ -33,6 +34,10 @@ export function useTransformerSync(options: {
     const selectedNodes = editor.selectedLayerIds
       .map((layerId) => layerNodeRefs[layerId]?.getNode())
       .filter((node): node is Konva.Node => Boolean(node))
+    // Detach first to force full refresh of Transformer internal state,
+    // then re-attach. This ensures handle positions are recomputed when
+    // node properties like scaleX change (e.g. after flipX toggle).
+    transformer.nodes([])
     transformer.nodes(selectedNodes)
     transformer.getLayer()?.batchDraw()
   }

@@ -362,6 +362,28 @@ export const useEditorStore = defineStore('editor', () => {
     ids.forEach((id) => markLayerDirty(id, reason))
   }
 
+  /**
+   * Toggle flipX on all selected layers, simultaneously negating rotation
+   * so the visual orientation stays the same.  scaleX=-1 reverses the
+   * visual rotation direction, so the model rotation must be compensated.
+   */
+  function toggleSelectedLayersFlipX() {
+    const ids = selectedLayerIds.value
+    if (!ids.length) return
+    commit((doc) =>
+      ids.reduce((next, id) => {
+        const layer = next.layers.find((l) => l.id === id)
+        if (!layer) return next
+        const newFlipX = !layer.flipX
+        // Negate rotation: scaleX=-1 reverses visual rotation direction.
+        // (360 - rot) % 360 normalises to [0, 360).
+        const newRotation = ((360 - layer.rotation) % 360 + 360) % 360
+        return updateLayerWithMaskSync(next, id, { flipX: newFlipX, rotation: newRotation })
+      }, doc),
+    )
+    ids.forEach((id) => markLayerDirty(id, 'transform-changed'))
+  }
+
   function patchSelectedLayersContinuous(key: string, patch: LayerPatch) {
     const ids = selectedLayerIds.value
     if (!ids.length) return
@@ -564,6 +586,7 @@ export const useEditorStore = defineStore('editor', () => {
     patchSelectedLayerEffect,
     patchSelectedLayerEffectContinuous,
     patchSelectedLayers,
+    toggleSelectedLayersFlipX,
     patchSelectedLayersContinuous,
     patchToolSettings,
     projectTarget,

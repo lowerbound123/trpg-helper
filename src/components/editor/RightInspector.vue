@@ -256,7 +256,7 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 variant="outline"
                 title="Flip horizontal"
                 :data-active="commonFlipX === true"
-                @click="editor.patchSelectedLayers({ flipX: !(commonFlipX === true) })"
+                @click="editor.toggleSelectedLayersFlipX()"
               >
                 <FlipHorizontal />
               </Button>

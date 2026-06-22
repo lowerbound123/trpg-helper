@@ -381,10 +381,28 @@ export const useEditorStore = defineStore('editor', () => {
         if (!layer) return next
         const newFlipX = !layer.flipX
         // Negate rotation: scaleX=-1 reverses visual rotation direction.
-        // (360 - rot) % 360 normalises to [0, 360).
         const newRotation = ((360 - layer.rotation) % 360 + 360) % 360
-        console.log('[rotation] toggleSelectedLayersFlipX — id:', id, 'flipX:', layer.flipX, '→', newFlipX, 'rotation:', layer.rotation, '→', newRotation)
-        return updateLayerWithMaskSync(next, id, { flipX: newFlipX, rotation: newRotation })
+
+        // When flipping a rotated image, the rotation origin changes from
+        // left-edge to right-edge (or vice versa), shifting the visual center.
+        // Compensate x to keep the visual position stable.
+        const rad = (layer.rotation * Math.PI) / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        let newX = layer.x
+        if (newFlipX) {
+          // Flipping TO flipped: origin moves from left-edge to right-edge.
+          // Right-edge origin at (x+w, y). Compensate for rotation shift.
+          newX = Math.round(layer.x + layer.width * cos - layer.height * sin - layer.width)
+        } else {
+          // Flipping FROM flipped: origin moves back to left-edge.
+          // Use the TARGET rotation for compensation.
+          const targetRad = (newRotation * Math.PI) / 180
+          newX = Math.round(layer.x + layer.width - layer.width * Math.cos(targetRad) + layer.height * Math.sin(targetRad))
+        }
+
+        console.log('[rotation] toggleSelectedLayersFlipX — id:', id, 'flipX:', layer.flipX, '→', newFlipX, 'rotation:', layer.rotation, '→', newRotation, 'x:', layer.x, '→', newX, '(delta:', (newX - layer.x), ')')
+        return updateLayerWithMaskSync(next, id, { flipX: newFlipX, rotation: newRotation, x: newX })
       }, doc),
     )
     ids.forEach((id) => markLayerDirty(id, 'transform-changed'))

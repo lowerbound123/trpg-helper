@@ -77,7 +77,8 @@ export function useLayerDragTransform(options: {
     if (!node) return
     const nodeScaleX = node.scaleX()
     const nodeScaleY = node.scaleY()
-    console.log('[rotation] onTransformEnd START — layer.rotation:', layer.rotation, 'layer.flipX:', layer.flipX, 'node.scaleX:', nodeScaleX, 'node.scaleY:', nodeScaleY)
+    const centerBefore = { x: Math.round(layer.x + layer.width / 2), y: Math.round(layer.y + layer.height / 2) }
+    console.log('[rotation] onTransformEnd START — layer.rotation:', layer.rotation, 'layer.flipX:', layer.flipX, 'node.scaleX:', nodeScaleX, 'node.scaleY:', nodeScaleY, 'centerBefore:', centerBefore, 'layer.x:', layer.x, 'layer.y:', layer.y, 'layer.w:', layer.width, 'layer.h:', layer.height)
     const scaleX = Math.abs(nodeScaleX)
     const scaleY = Math.abs(nodeScaleY)
     const width = isShapeLayer(layer) && layer.shape === 'line'
@@ -114,7 +115,8 @@ export function useLayerDragTransform(options: {
     const rawRotation = Math.round(layer.flipX ? -nodeRotation : nodeRotation)
     const rotation = rawRotation === 0 ? 0 : rawRotation // normalize -0
 
-    console.log('[rotation] onTransformEnd — nodeScaleX:', nodeScaleXBefore, 'nodeScaleY:', nodeScaleYBefore, 'nodeRotationRaw:', node.rotation(), 'nodeRotationNorm:', nodeRotation, 'flipX:', layer.flipX, 'finalRotation:', rotation)
+    const centerAfter = { x: Math.round(position.x + width / 2), y: Math.round(position.y + height / 2) }
+    console.log('[rotation] onTransformEnd — nodeScaleX:', nodeScaleXBefore, 'nodeScaleY:', nodeScaleYBefore, 'nodeRotationRaw:', node.rotation(), 'nodeRotationNorm:', nodeRotation, 'flipX:', layer.flipX, 'finalRotation:', rotation, 'centerAfter:', centerAfter, 'newX:', position.x, 'newY:', position.y, 'newW:', width, 'newH:', height)
 
     // Reset node to model state AFTER reading rotation
     node.scaleX(layer.flipX ? -1 : 1)

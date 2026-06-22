@@ -714,6 +714,8 @@ const handleGlobalKeydown = createAppShortcutHandler({
     editor.addText()
     void updateTransformer()
   },
+  moveLayerUp: () => editor.moveSelectedLayer(1),
+  moveLayerDown: () => editor.moveSelectedLayer(-1),
 })
 
 function resetKonvaDragButtons() {

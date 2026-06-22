@@ -10,6 +10,8 @@ export type AppShortcutContext = {
   setTool: (tool: 'select' | 'brush' | 'eraser') => void
   setRailTab: (tab: 'assets' | 'fonts' | 'graph' | 'layers') => void
   addText: () => void
+  moveLayerUp: () => void
+  moveLayerDown: () => void
 }
 
 export function createAppShortcutHandler(context: AppShortcutContext) {
@@ -36,6 +38,21 @@ export function createAppShortcutHandler(context: AppShortcutContext) {
       return
     }
     if (command || event.altKey || event.shiftKey) return
+
+    // Layer reordering via arrow keys (requires a selected layer)
+    if (event.key === 'ArrowUp') {
+      if (!context.hasSelectedLayer()) return
+      event.preventDefault()
+      context.moveLayerUp()
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      if (!context.hasSelectedLayer()) return
+      event.preventDefault()
+      context.moveLayerDown()
+      return
+    }
+
     if (key === 's') context.setTool('select')
     else if (key === 'b') context.setTool('brush')
     else if (key === 'e') context.setTool('eraser')

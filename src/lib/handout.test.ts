@@ -15,9 +15,11 @@ import {
   deleteBackgroundMask,
   deleteLayerMask,
   flattenLayersToImage,
+  groupForLayer,
   isLayerEffectivelyVisible,
   moveLayer,
   moveLayerGroup,
+  moveLayerInGroupAware,
   moveLayerOutOfGroup,
   normalizeHandoutDocument,
   setBackgroundMask,
@@ -497,6 +499,260 @@ describe('command history', () => {
     expect(history.current.layers[0].x).toBe(40)
     history.undo()
     expect(history.current.layers[0].x).toBe(10)
+  })
+})
+
+describe('moveLayerInGroupAware', () => {
+  /** Helper: asserts that every group's layerIds map to contiguous indices in document.layers. */
+  function groupsAreContiguous(doc: ReturnType<typeof createDefaultHandout>) {
+    for (const g of doc.groups) {
+      const indices = g.layerIds
+        .map((id) => doc.layers.findIndex((l) => l.id === id))
+        .filter((i) => i >= 0)
+        .sort((a, b) => a - b)
+      if (indices.length !== g.layerIds.length) return false
+      for (let i = 1; i < indices.length; i++) {
+        if (indices[i] !== indices[i - 1] + 1) return false
+      }
+    }
+    return true
+  }
+
+  /** Helper: creates a document with N text layers named "A", "B", "C", … */
+  function docWithLayers(count: number): ReturnType<typeof createDefaultHandout> {
+    let doc = createDefaultHandout('Order Test')
+    for (let i = 0; i < count; i++) {
+      doc = addTextLayer(doc, { text: String.fromCharCode(65 + i) })
+    }
+    return doc
+  }
+
+  /** Helper: groups two layers by index in the current document.layers order. */
+  function groupLayersByIndex(doc: ReturnType<typeof createDefaultHandout>, a: number, b: number) {
+    return addLayerGroup(doc, [doc.layers[a].id, doc.layers[b].id])
+  }
+
+  /** Helper: get layer ID by its text content. */
+  function idByText(doc: ReturnType<typeof createDefaultHandout>, text: string) {
+    return doc.layers.find((l) => l.type === 'text' && (l as { text?: string }).text === text)!.id
+  }
+
+  /** Helper: get text labels of all layers in order. */
+  function layerTexts(doc: ReturnType<typeof createDefaultHandout>) {
+    return doc.layers.map((l) => (l.type === 'text' ? (l as { text?: string }).text : l.name))
+  }
+
+  // ── Requirement 1: Independent ↔ Independent ─────────────────────
+
+  it('swaps independent layer up with adjacent independent layer', () => {
+    const doc = docWithLayers(3) // [A@0, B@1, C@2]
+    const result = moveLayerInGroupAware(doc, idByText(doc, 'B'), 1)
+
+    expect(layerTexts(result)).toEqual(['A', 'C', 'B'])
+    expect(result.layers.map((l) => l.zIndex)).toEqual([0, 1, 2])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('swaps independent layer down with adjacent independent layer', () => {
+    const doc = docWithLayers(3)
+    const result = moveLayerInGroupAware(doc, idByText(doc, 'B'), -1)
+
+    expect(layerTexts(result)).toEqual(['B', 'A', 'C'])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('does nothing when topmost independent layer tries to move up', () => {
+    const doc = docWithLayers(2)
+    const result = moveLayerInGroupAware(doc, idByText(doc, 'B'), 1)
+
+    expect(layerTexts(result)).toEqual(['A', 'B'])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('does nothing when bottommost independent layer tries to move down', () => {
+    const doc = docWithLayers(2)
+    const result = moveLayerInGroupAware(doc, idByText(doc, 'A'), -1)
+
+    expect(layerTexts(result)).toEqual(['A', 'B'])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  // ── Requirement 2: Independent ↔ Group (block move) ─────────────
+
+  it('independent up past group: group block moves down unchanged', () => {
+    // A [B C] → A up → [B C] A (group composition never changes)
+    const doc = docWithLayers(3) // [A@0, B@1, C@2]
+    const grouped = groupLayersByIndex(doc, 1, 2) // group [B, C]
+    const aId = idByText(grouped, 'A')
+    const bId = idByText(doc, 'B')
+    const cId = idByText(doc, 'C')
+    const result = moveLayerInGroupAware(grouped, aId, 1)
+
+    // Group block [B, C] moved down, A moved above: [B, C, A]
+    expect(layerTexts(result)).toEqual(['B', 'C', 'A'])
+    // Group [B, C] is unchanged
+    const grp = groupForLayer(result, bId)
+    expect(grp).toBeTruthy()
+    expect(new Set(grp!.layerIds)).toEqual(new Set([bId, cId]))
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('independent down past group: group block moves up unchanged', () => {
+    // [A B] C → C down → C [A B]
+    const doc = docWithLayers(3) // [A@0, B@1, C@2]
+    const grouped = groupLayersByIndex(doc, 0, 1) // group [A, B]
+    const aId = idByText(doc, 'A')
+    const bId = idByText(doc, 'B')
+    const cId = idByText(grouped, 'C')
+    const result = moveLayerInGroupAware(grouped, cId, -1)
+
+    // Group block [A, B] moved up, C moved below: [C, A, B]
+    expect(layerTexts(result)).toEqual(['C', 'A', 'B'])
+    // Group [A, B] is unchanged
+    const grp = groupForLayer(result, aId)
+    expect(grp).toBeTruthy()
+    expect(new Set(grp!.layerIds)).toEqual(new Set([aId, bId]))
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  // ── Requirement 3: Group interior swap ───────────────────────────
+
+  it('swaps with sibling up within a group', () => {
+    const doc = docWithLayers(4) // [A@0, B@1, C@2, D@3]
+    const grouped = addLayerGroup(doc, [doc.layers[1].id, doc.layers[2].id]) // group [B, C]
+    const bId = idByText(grouped, 'B')
+    const cId = idByText(doc, 'C')
+    const result = moveLayerInGroupAware(grouped, bId, 1)
+
+    // B swaps with C within the group
+    expect(layerTexts(result)).toEqual(['A', 'C', 'B', 'D'])
+    const grp = groupForLayer(result, bId)
+    expect(grp!.layerIds).toEqual([cId, bId]) // C, B in z-order (C first = lower z)
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('swaps with sibling down within a group', () => {
+    const doc = docWithLayers(4)
+    const grouped = addLayerGroup(doc, [doc.layers[1].id, doc.layers[2].id]) // group [B, C]
+    const bId = idByText(doc, 'B')
+    const cId = idByText(grouped, 'C')
+    const result = moveLayerInGroupAware(grouped, cId, -1)
+
+    expect(layerTexts(result)).toEqual(['A', 'C', 'B', 'D'])
+    const grp = groupForLayer(result, cId)
+    expect(grp!.layerIds).toEqual([cId, bId]) // C, B in z-order (C first = lower z = bottom)
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  // ── Requirement 4: Group block move ──────────────────────────────
+
+  it('moves entire group up when top boundary layer moves up', () => {
+    // x [A,B,C] y → top up → x y [A,B,C]
+    const doc = docWithLayers(5) // [A@0, B@1, C@2, D@3, E@4]
+    const grouped = addLayerGroup(doc, [doc.layers[1].id, doc.layers[2].id, doc.layers[3].id]) // group [B, C, D]
+    const dId = idByText(grouped, 'D') // D is the top of the group
+    const result = moveLayerInGroupAware(grouped, dId, 1)
+
+    // Group block moves up: E slides below the group
+    expect(layerTexts(result)).toEqual(['A', 'E', 'B', 'C', 'D'])
+    // Group still has the same 3 members
+    const grp = result.groups[0]
+    expect(grp.layerIds).toHaveLength(3)
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('moves entire group down when bottom boundary layer moves down', () => {
+    // x [A,B,C] y → bottom down → [A,B,C] x y
+    const doc = docWithLayers(5)
+    const grouped = addLayerGroup(doc, [doc.layers[1].id, doc.layers[2].id, doc.layers[3].id]) // group [B, C, D]
+    const bId = idByText(grouped, 'B') // B is the bottom of the group
+    const result = moveLayerInGroupAware(grouped, bId, -1)
+
+    // Group block moves down: A slides above the group
+    expect(layerTexts(result)).toEqual(['B', 'C', 'D', 'A', 'E'])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('does nothing when group is at top and top layer tries to move up', () => {
+    const doc = docWithLayers(3) // [A@0, B@1, C@2]
+    const grouped = addLayerGroup(doc, [doc.layers[1].id, doc.layers[2].id]) // group [B, C] at top
+    const cId = idByText(grouped, 'C')
+    const result = moveLayerInGroupAware(grouped, cId, 1)
+
+    // No change — group is already at the top
+    expect(layerTexts(result)).toEqual(['A', 'B', 'C'])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  it('does nothing when group is at bottom and bottom layer tries to move down', () => {
+    const doc = docWithLayers(3) // [A@0, B@1, C@2]
+    const grouped = addLayerGroup(doc, [doc.layers[0].id, doc.layers[1].id]) // group [A, B] at bottom
+    const aId = idByText(grouped, 'A')
+    const result = moveLayerInGroupAware(grouped, aId, -1)
+
+    // No change — group is already at the bottom
+    expect(layerTexts(result)).toEqual(['A', 'B', 'C'])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  // ── Two-group interaction ────────────────────────────────────────
+
+  it('swaps two adjacent group blocks when top of lower group moves up', () => {
+    const doc = docWithLayers(4) // [A@0, B@1, C@2, D@3]
+    const g1 = addLayerGroup(doc, [doc.layers[0].id, doc.layers[1].id]) // group [A, B]
+    const g2 = addLayerGroup(g1, [g1.layers[2].id, g1.layers[3].id]) // group [C, D]
+    const bId = idByText(g2, 'B') // B is top of first group
+    const result = moveLayerInGroupAware(g2, bId, 1)
+
+    // Groups swap: [C, D] [A, B]
+    expect(layerTexts(result)).toEqual(['C', 'D', 'A', 'B'])
+    expect(result.groups).toHaveLength(2)
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  // ── Single-layer group ───────────────────────────────────────────
+
+  it('moves a single-layer group as a block', () => {
+    const doc = docWithLayers(3) // [A@0, B@1, C@2]
+    const grouped = addLayerGroup(doc, [doc.layers[1].id]) // group [B] alone
+    const bId = idByText(grouped, 'B')
+    const result = moveLayerInGroupAware(grouped, bId, 1)
+
+    // B (alone in group) swaps with C
+    expect(layerTexts(result)).toEqual(['A', 'C', 'B'])
+    const grp = groupForLayer(result, bId)
+    expect(grp).toBeTruthy()
+    expect(grp!.layerIds).toEqual([bId])
+    expect(groupsAreContiguous(result)).toBe(true)
+  })
+
+  // ── Contiguity invariant ─────────────────────────────────────────
+
+  it('maintains group contiguity after multiple operations', () => {
+    let doc = docWithLayers(5) // [A@0, B@1, C@2, D@3, E@4]
+    // Group [B, C] and [D, E]
+    const g1 = addLayerGroup(doc, [doc.layers[1].id, doc.layers[2].id])
+    doc = addLayerGroup(g1, [g1.layers[3].id, g1.layers[4].id])
+
+    // Op 1: Move independent A up (group [B, C] moves down as a block)
+    let aId = idByText(doc, 'A')
+    doc = moveLayerInGroupAware(doc, aId, 1)
+    expect(groupsAreContiguous(doc)).toBe(true)
+
+    // Op 2: Move within a group
+    let bId = idByText(doc, 'B')
+    doc = moveLayerInGroupAware(doc, bId, 1)
+    expect(groupsAreContiguous(doc)).toBe(true)
+
+    // Op 3: Move group block
+    let dId = idByText(doc, 'D')
+    doc = moveLayerInGroupAware(doc, dId, 1)
+    expect(groupsAreContiguous(doc)).toBe(true)
+
+    // Op 4: Two-group swap
+    let cId = idByText(doc, 'C')
+    doc = moveLayerInGroupAware(doc, cId, 1)
+    expect(groupsAreContiguous(doc)).toBe(true)
   })
 })
 

@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowReactive, watch } from 'vue'
 import Konva from 'konva'
-import { Minus } from '@lucide/vue'
 import type { DirEntry } from 'vuefinder'
 
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import RightInspector from '@/components/editor/RightInspector.vue'
 import BootSplash from '@/components/BootSplash.vue'
 import EditorTopBar from '@/components/EditorTopBar.vue'
 import ManagerShell from '@/components/ManagerShell.vue'
 import LeftRail from '@/components/LeftRail.vue'
+import CanvasWorkspace from '@/components/CanvasWorkspace.vue'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { useFinderManagement, finderFeaturesForKind } from '@/composables/useFinderManagement'
 import { useCanvasViewport } from '@/composables/useCanvasViewport'
@@ -42,22 +40,11 @@ import {
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
 import type { ShapeKind } from '@/lib/handout'
-import { isCurveShape, isLayerEffectivelyVisible } from '@/lib/handout'
+import { isLayerEffectivelyVisible } from '@/lib/handout'
 import { createAppShortcutHandler } from '@/app/AppShortcuts'
 import { appConfiguration } from '@/lib/configuration'
-import { paintStrokeLineConfig } from '@/lib/paint-rendering'
-import {
-  arrowDotConfig,
-  arrowLineConfig,
-  lineDoubleOffset,
-  lineHandleConfig,
-  lineHitConfig,
-  lineVisualConfig,
-  manualArrowVisible,
-  showLineHandle,
-} from '@/lib/shape-rendering'
 import { partitionUploadFiles } from '@/lib/upload-validation'
-import { isImageLayer, isPaintLayer, isTextLayer, useEditorStore } from '@/stores/editor'
+import { useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
@@ -646,6 +633,72 @@ provide('left-rail-context', {
   deleteLayer,
   toggleBackgroundVisibility,
 })
+provide('canvas-context', {
+  stageFrameRef,
+  stageRef,
+  transformerRef,
+  layerNodeRefs,
+  stageConfig,
+  contentGroupConfig,
+  stageScale,
+  documentFilterStyle,
+  transformerConfig,
+  activeTool,
+  maskFeatureEnabled,
+  maskEditLabel,
+  panState,
+  draggedAssetId,
+  draggedFontId,
+  draggedShapeKind,
+  visibleCanvasLayers,
+  selectedCurveLayers,
+  draftStroke,
+  selectionBox,
+  guideLines,
+  maskedBackgroundImage,
+  backgroundImage,
+  maskEditImage,
+  activeMaskEditLayer,
+  handleCanvasDragOver,
+  handleCanvasDrop,
+  handleCanvasWheel,
+  startCanvasPan,
+  moveCanvasPan,
+  stopCanvasPan,
+  handleStagePointer,
+  startSelectionBox,
+  moveSelectionBox,
+  stopSelectionBox,
+  selectCanvasLayer,
+  onLayerDragStart,
+  onDragMove,
+  onDragEnd,
+  onTransform,
+  onTransformEnd,
+  setMaskEditNodeRef,
+  onMaskEditDragStart,
+  onMaskEditDragEnd,
+  onMaskEditTransformEnd,
+  maskedLayerConfig,
+  layerConfig,
+  textConfig,
+  shapeConfig,
+  paintConfig,
+  maskEditConfig,
+  curveHandleConfig,
+  curveGuideConfig,
+  curveGuideLineConfig,
+  curvePointKeys,
+  moveCurvePoint,
+  endCurvePointMove,
+  maskedImageForLayer,
+  layerMaskActive,
+  imageForLayer,
+  isShapeLayer,
+  zoomIn,
+  zoomOut,
+  fitEditorCanvas,
+})
 const handleGlobalKeydown = createAppShortcutHandler({
   isEditorView: () => editor.view === 'editor',
   hasSelectedLayer: () => Boolean(editor.selectedLayerId),
@@ -945,294 +998,7 @@ watch(
         @redo="editor.redo()"
       />
 
-      <section class="canvas-wrap">
-        <div class="canvas-meta">
-          <Badge variant="secondary">{{ editor.document.canvas.width }} x {{ editor.document.canvas.height }} px</Badge>
-          <Badge variant="outline">{{ Math.round(stageScale * 100) }}%</Badge>
-          <Badge v-if="maskFeatureEnabled && maskEditLabel" variant="secondary">Editing {{ maskEditLabel }}</Badge>
-          <div class="zoom-controls">
-            <Button size="icon" variant="outline" @click="zoomOut">
-              <Minus />
-            </Button>
-            <Button size="sm" variant="outline" @click="fitEditorCanvas('button')">Fit</Button>
-            <Button size="icon" variant="outline" @click="zoomIn">
-              <Plus />
-            </Button>
-          </div>
-        </div>
-
-        <div
-          ref="stageFrameRef"
-          class="stage-frame"
-          :class="{
-            'stage-frame-dropping': draggedAssetId || draggedFontId || draggedShapeKind,
-            'stage-frame-panning': panState.active,
-            'stage-frame-drawing': activeTool === 'brush' || activeTool === 'eraser',
-          }"
-          @dragenter.capture="handleCanvasDragOver"
-          @dragover.capture="handleCanvasDragOver"
-          @drop.capture="handleCanvasDrop"
-          @wheel.prevent="handleCanvasWheel"
-          @pointerdown="startCanvasPan"
-          @pointermove="moveCanvasPan"
-          @pointerup="stopCanvasPan"
-          @pointerleave="stopCanvasPan"
-        >
-          <div class="stage-surface" :style="{ filter: documentFilterStyle }">
-            <v-stage
-              ref="stageRef"
-              :config="stageConfig"
-              @click="handleStagePointer"
-              @tap="handleStagePointer"
-              @mousedown="startSelectionBox"
-              @mousemove="moveSelectionBox"
-              @mouseup="stopSelectionBox"
-            >
-              <v-layer>
-              <v-group :config="contentGroupConfig">
-                <v-rect
-                  v-if="!maskedBackgroundImage"
-                  :config="{
-                    name: 'canvas-background',
-                    x: 0,
-                    y: 0,
-                    width: editor.document.canvas.width,
-                    height: editor.document.canvas.height,
-                    fill: editor.document.canvas.backgroundVisible !== false ? editor.document.canvas.backgroundColor : 'rgba(0,0,0,0)',
-                  }"
-                />
-                <v-image
-                  v-if="maskedBackgroundImage && editor.document.canvas.backgroundVisible !== false"
-                  :config="{
-                    name: 'canvas-background',
-                    image: maskedBackgroundImage,
-                    x: 0,
-                    y: 0,
-                    width: editor.document.canvas.width,
-                    height: editor.document.canvas.height,
-                    listening: true,
-                  }"
-                />
-                <v-image
-                  v-if="!maskedBackgroundImage && backgroundImage && editor.document.canvas.backgroundVisible !== false"
-                  :config="{
-                    image: backgroundImage,
-                    x: 0,
-                    y: 0,
-                    width: editor.document.canvas.width,
-                    height: editor.document.canvas.height,
-                    listening: false,
-                  }"
-                />
-                <template v-for="layer in visibleCanvasLayers" :key="layer.id">
-                  <v-image
-                    v-if="maskedImageForLayer(layer)"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="maskedLayerConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                  <v-image
-                    v-else-if="!layerMaskActive(layer) && isImageLayer(layer) && imageForLayer(layer)"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="{ ...layerConfig(layer), image: imageForLayer(layer) }"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                  <v-text
-                    v-else-if="!layerMaskActive(layer) && isTextLayer(layer)"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="textConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                  <v-rect
-                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && ['rect', 'round-rect'].includes(layer.shape)"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="shapeConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                  <v-line
-                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="shapeConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                  <v-ellipse
-                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && layer.shape === 'ellipse'"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="shapeConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                  <v-shape
-                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && isCurveShape(layer.shape)"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="shapeConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                  <v-group
-                    v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && layer.shape === 'line'"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="shapeConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  >
-                    <v-rect :config="lineHitConfig(layer)" />
-                    <template v-if="layer.lineStyle === 'double'">
-                      <v-line :config="lineVisualConfig(layer, -lineDoubleOffset(layer))" />
-                      <v-line :config="lineVisualConfig(layer, lineDoubleOffset(layer))" />
-                    </template>
-                    <v-arrow v-else :config="lineVisualConfig(layer)" />
-                    <v-line
-                      v-if="manualArrowVisible(layer.lineStartArrow, layer)"
-                      :config="arrowLineConfig(layer.lineStartArrow, 'start', layer)"
-                    />
-                    <v-circle
-                      v-if="layer.lineStartArrow === 'dot'"
-                      :config="arrowDotConfig('start', layer)"
-                    />
-                    <v-line
-                      v-if="manualArrowVisible(layer.lineEndArrow, layer)"
-                      :config="arrowLineConfig(layer.lineEndArrow, 'end', layer)"
-                    />
-                    <v-circle
-                      v-if="layer.lineEndArrow === 'dot'"
-                      :config="arrowDotConfig('end', layer)"
-                    />
-                    <v-circle v-if="showLineHandle(layer, editor.selectedLayerIds)" :config="lineHandleConfig(layer)" />
-                  </v-group>
-                  <v-shape
-                    v-else-if="!layerMaskActive(layer) && isPaintLayer(layer)"
-                    :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
-                    :config="paintConfig(layer)"
-                    @click="selectCanvasLayer(layer.id, $event)"
-                    @tap="selectCanvasLayer(layer.id, $event)"
-                    @dragstart="onLayerDragStart(layer, $event)"
-                    @dragmove="onDragMove(layer, $event)"
-                    @dragend="onDragEnd(layer)"
-                    @transform="onTransform(layer, $event)"
-                    @transformend="onTransformEnd(layer)"
-                  />
-                </template>
-                <template
-                  v-for="layer in selectedCurveLayers"
-                  :key="`curve-controls-${layer.id}`"
-                >
-                  <v-line
-                    v-for="(guide, index) in curveGuideConfig(layer)"
-                    :key="`curve-guide-${layer.id}-${index}`"
-                    :config="curveGuideLineConfig(layer, guide)"
-                  />
-                  <v-circle
-                    v-for="key in curvePointKeys(layer)"
-                    :key="`curve-handle-${layer.id}-${key}`"
-                    :config="curveHandleConfig(layer, key)"
-                    @dragmove="moveCurvePoint(layer, key, $event)"
-                    @dragend="endCurvePointMove(layer, key)"
-                  />
-                </template>
-                <v-line
-                  v-if="draftStroke"
-                  :config="paintStrokeLineConfig(draftStroke)"
-                />
-                <v-image
-                  v-if="maskFeatureEnabled && activeMaskEditLayer?.mask && maskEditImage"
-                  :ref="setMaskEditNodeRef"
-                  :config="maskEditConfig(activeMaskEditLayer)"
-                  @dragstart="onMaskEditDragStart(activeMaskEditLayer)"
-                  @dragend="onMaskEditDragEnd(activeMaskEditLayer, $event)"
-                  @transformend="onMaskEditTransformEnd(activeMaskEditLayer, $event)"
-                />
-                <template v-for="guide in guideLines" :key="`${guide.orientation}-${guide.value}`">
-                  <v-line
-                    v-if="guide.orientation === 'vertical'"
-                    :config="{
-                      points: [guide.value, 0, guide.value, editor.document.canvas.height],
-                      stroke: '#0ea5e9',
-                      strokeWidth: 1 / stageScale,
-                      dash: [6 / stageScale, 4 / stageScale],
-                      listening: false,
-                    }"
-                  />
-                  <v-line
-                    v-else
-                    :config="{
-                      points: [0, guide.value, editor.document.canvas.width, guide.value],
-                      stroke: '#0ea5e9',
-                      strokeWidth: 1 / stageScale,
-                      dash: [6 / stageScale, 4 / stageScale],
-                      listening: false,
-                    }"
-                  />
-                </template>
-                <v-rect
-                  v-if="selectionBox.visible"
-                  :config="{
-                    x: selectionBox.x,
-                    y: selectionBox.y,
-                    width: selectionBox.width,
-                    height: selectionBox.height,
-                    fill: 'rgba(14, 165, 233, 0.12)',
-                    stroke: '#0ea5e9',
-                    strokeWidth: 1 / stageScale,
-                    dash: [4 / stageScale, 4 / stageScale],
-                    listening: false,
-                  }"
-                />
-                <v-transformer
-                  ref="transformerRef"
-                  :config="transformerConfig"
-                />
-              </v-group>
-              </v-layer>
-            </v-stage>
-          </div>
-        </div>
-      </section>
+      <CanvasWorkspace />
     </main>
     </ResizablePanel>
 

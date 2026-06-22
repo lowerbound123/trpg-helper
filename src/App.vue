@@ -826,24 +826,15 @@ async function addAssetToCanvas(asset: LibraryRecord) {
 
 function addFontTextToCanvas(font: LibraryRecord, position?: { x?: number; y?: number }) {
   if (fontDragStarted.value) return
-  logText('font-create-text', {
-    fontId: font.id,
-    name: font.name,
-    family: fontFamily(font),
-    position,
-  })
+  console.log('[font-drag] addFontTextToCanvas (click) — font:', font.name, 'family:', fontFamily(font))
   editor.applyOrCreateTextWithFont(font, position)
   void updateTransformer()
 }
 
 function createFontTextOnCanvas(font: LibraryRecord, position?: { x?: number; y?: number }) {
-  logText('font-drop-create-text', {
-    fontId: font.id,
-    name: font.name,
-    family: fontFamily(font),
-    position,
-  })
+  console.log('[font-drag] createFontTextOnCanvas — font:', font.name, 'family:', fontFamily(font), 'position:', position)
   editor.addText(font, position)
+  console.log('[font-drag] createFontTextOnCanvas — done, layers:', editor.document.layers.length)
   void updateTransformer()
 }
 
@@ -900,6 +891,7 @@ onMounted(async () => {
     // other element (Konva canvas, etc.) can interfere with the event.
     window.addEventListener('dragover', handleDocumentFontDragOver, { capture: true })
     window.addEventListener('drop', handleDocumentFontDrop, { capture: true })
+    console.log('[font-drag] window capture listeners registered for dragover + drop')
     resizeStageViewport()
     window.addEventListener('resize', resizeStageViewport)
     isBooting.value = false

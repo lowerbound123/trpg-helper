@@ -33,15 +33,18 @@ export function useEditorDragPayloads(options: {
     event.dataTransfer?.setData('application/x-handout-font-family', options.fontFamily(font))
     event.dataTransfer?.setData('text/plain', font.name)
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+    console.log('[font-drag] startFontDrag — id:', font.id, 'name:', font.name, 'dataTransfer.types:', event.dataTransfer?.types)
     options.logText('font-drag-start', {
       fontId: font.id,
       name: font.name,
       family: options.fontFamily(font),
+      types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
     })
   }
 
   function prepareFontDrag(font: LibraryRecord) {
     draggedFontId.value = font.id
+    console.log('[font-drag] prepareFontDrag — draggedFontId set to:', font.id)
     options.logText('font-drag-prepare', {
       fontId: font.id,
       name: font.name,

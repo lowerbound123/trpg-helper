@@ -354,6 +354,9 @@ export const useEditorStore = defineStore('editor', () => {
   function patchSelectedLayers(patch: LayerPatch) {
     const ids = selectedLayerIds.value
     if (!ids.length) return
+    if ('flipX' in patch || 'rotation' in patch) {
+      console.log('[rotation] patchSelectedLayers — ids:', ids, 'patch:', JSON.stringify(patch))
+    }
     commit((doc) => ids.reduce((next, id) => updateLayerWithMaskSync(next, id, patch), doc))
     const reason = dirtyReasonForLayerPatch(patch)
     ids.forEach((id) => markLayerDirty(id, reason))

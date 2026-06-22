@@ -75,8 +75,11 @@ export function useLayerDragTransform(options: {
   function onTransformEnd(layer: HandoutLayer) {
     const node = layerNodeRefs[layer.id]?.getNode()
     if (!node) return
-    const scaleX = Math.abs(node.scaleX())
-    const scaleY = Math.abs(node.scaleY())
+    const nodeScaleX = node.scaleX()
+    const nodeScaleY = node.scaleY()
+    console.log('[rotation] onTransformEnd START — layer.rotation:', layer.rotation, 'layer.flipX:', layer.flipX, 'node.scaleX:', nodeScaleX, 'node.scaleY:', nodeScaleY)
+    const scaleX = Math.abs(nodeScaleX)
+    const scaleY = Math.abs(nodeScaleY)
     const width = isShapeLayer(layer) && layer.shape === 'line'
       ? Math.max(12, Math.round(layer.width * scaleX))
       : Math.max(12, Math.round(node.width() * scaleX))
@@ -108,9 +111,12 @@ export function useLayerDragTransform(options: {
           // normalization (atan2 wrapping) never corrupts the value.
           const raw = layer.rotation - nodeRotation
           const delta = ((raw + 180) % 360 + 360) % 360 - 180
-          return Math.round(layer.rotation + delta)
+          const result = Math.round(layer.rotation + delta)
+          console.log('[rotation] onTransformEnd FLIPPED — layer.rotation:', layer.rotation, 'nodeRotation:', nodeRotation, 'raw:', raw, 'delta:', delta, 'result:', result)
+          return result
         })()
       : Math.round(nodeRotation)
+    console.log('[rotation] onTransformEnd PATCH — rotation:', rotation, 'position:', { x: position.x, y: position.y }, 'size:', { width, height })
     editor.patchLayer(layer.id, {
       x: position.x,
       y: position.y,
@@ -128,8 +134,11 @@ export function useLayerDragTransform(options: {
 
   function onTransform(layer: HandoutLayer, event: KonvaEvent) {
     if (isShapeLayer(layer) && isCurveShape(layer.shape)) curveControlRevision.value += 1
-    if (!event.evt?.shiftKey) return
     const node = layerNodeRefs[layer.id]?.getNode()
+    if (node) {
+      console.log('[rotation] onTransform LIVE — node.rotation:', node.rotation(), 'node.scaleX:', node.scaleX(), 'node.scaleY:', node.scaleY(), 'layer.rotation:', layer.rotation, 'flipX:', layer.flipX)
+    }
+    if (!event.evt?.shiftKey) return
     if (!node) return
     const snapped = Math.round(node.rotation() / 45) * 45
     if (Math.abs(snapped - node.rotation()) <= 22.5) node.rotation(snapped)

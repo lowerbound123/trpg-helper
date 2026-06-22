@@ -23,6 +23,7 @@ export function useTransformerSync(options: {
     await nextTick()
     const transformer = transformerRef.value?.getNode()
     if (!transformer) return
+    console.log('[rotation] updateTransformer — selectedLayerIds:', editor.selectedLayerIds, 'maskEditTarget:', editor.maskEditTarget)
     if (editor.maskEditTarget && activeTool.value === 'select') {
       const maskNode = maskEditNodeRef.value?.getNode()
       transformer.nodes(maskNode ? [maskNode] : [])

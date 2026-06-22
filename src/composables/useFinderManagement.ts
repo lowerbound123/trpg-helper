@@ -274,6 +274,12 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     return editor.resolveAsset(id)
   }
 
+  function fontRecordFromDragPath(path: string) {
+    if (kindFromFinderPath(path) !== 'font') return undefined
+    const id = idFromFinderPath('font', path)
+    return editor.resolveFont(id)
+  }
+
   function imageRecordFromFinderEntry(kind: 'background' | 'asset', entry?: DirEntry | null) {
     const record = recordFromFinderEntry(kind, entry)
     if (!record || !record.mediaType.startsWith('image/')) return undefined
@@ -518,6 +524,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
   return {
     finderDrivers,
     assetRecordFromDragPath,
+    fontRecordFromDragPath,
     foldersForKind,
     handleFinderFileDoubleClick,
     handleFinderPathChange,

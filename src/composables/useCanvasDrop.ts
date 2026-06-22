@@ -19,12 +19,13 @@ export function useCanvasDrop(options: {
   draggedAssetId: Ref<string>
   draggedShapeKind: Ref<ShapeKind | undefined>
   assetRecordFromDragPath: (path: string) => LibraryRecord | undefined
+  fontRecordFromDragPath: (path: string) => LibraryRecord | undefined
   createFontTextOnCanvas: (font: LibraryRecord, position?: { x?: number; y?: number }) => void
   addShapeToCanvas: (shape: ShapeKind, position?: { x?: number; y?: number }) => void
   logText: DebugLog
   logUpload: DebugLog
 }) {
-  const { editor, fontFamily, canvasPointFromClient, stageFrameRef, imageSize, updateTransformer, draggedFontId, draggedAssetId, draggedShapeKind, assetRecordFromDragPath, createFontTextOnCanvas, addShapeToCanvas, logText, logUpload } = options
+  const { editor, fontFamily, canvasPointFromClient, stageFrameRef, imageSize, updateTransformer, draggedFontId, draggedAssetId, draggedShapeKind, assetRecordFromDragPath, fontRecordFromDragPath, createFontTextOnCanvas, addShapeToCanvas, logText, logUpload } = options
 
   let lastFontDragOverLogAt = 0
 
@@ -58,6 +59,22 @@ export function useCanvasDrop(options: {
       createFontTextOnCanvas(font, point)
       draggedFontId.value = ''
       return
+    }
+
+    // Fallback: check VueFinder "items" drag data for font records
+    const itemsData = event.dataTransfer?.getData('items')
+    if (itemsData) {
+      try {
+        const paths = JSON.parse(itemsData) as string[]
+        const vueFinderFont = paths.map((path) => fontRecordFromDragPath(path)).find(Boolean)
+        if (vueFinderFont) {
+          console.log('[font-drag] handleCanvasDrop — resolved font from vuefinder items:', vueFinderFont.name)
+          createFontTextOnCanvas(vueFinderFont, point)
+          return
+        }
+      } catch (error) {
+        logUpload('failed to parse vuefinder drag items for font', { error, itemsData })
+      }
     }
 
     const shape = (event.dataTransfer?.getData('application/x-handout-shape') || draggedShapeKind.value) as ShapeKind | ''

@@ -458,6 +458,7 @@ const {
   imageRecordFromFinderEntry,
   projectFromFinderEntry,
   assetRecordFromDragPath,
+  fontRecordFromDragPath,
 } = useFinderManagement(editor, {
   addAssetToCanvas,
   createHandoutFromImageRecord,
@@ -488,6 +489,7 @@ const {
   draggedAssetId,
   draggedShapeKind,
   assetRecordFromDragPath,
+  fontRecordFromDragPath,
   createFontTextOnCanvas,
   addShapeToCanvas,
   logText,

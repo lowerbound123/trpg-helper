@@ -47,17 +47,11 @@ export function useTransformerSync(options: {
     transformer.nodes(selectedNodes)
     transformer.getLayer()?.batchDraw()
 
-    // Konva Transformer computes rotation from the bounding box, which
-    // is mirrored when scaleX=-1. For flipped nodes, sync the
-    // Transformer's rotation to the node's actual rotation so the handle
-    // follows the node's orientation (scaleX=-1 handles the visual flip).
-    for (const node of selectedNodes) {
-      const layer = editor.document.layers.find((l) => l.id === node.id())
-      if (layer?.flipX && node.rotation() !== transformer.rotation()) {
-        console.log('[rotation] updateTransformer SYNC — transformer.rotation was:', transformer.rotation(), '→ setting to node.rotation:', node.rotation())
-        transformer.rotation(node.rotation())
-      }
-    }
+    // NOTE: Do NOT call transformer.rotation(val) — it is a setter that
+    // ROTATES all attached nodes, which would corrupt their rotation values.
+    // The transformer.rotation() getter returns the computed bounding-box
+    // rotation, which differs from node.rotation for scaleX=-1 nodes.
+    // This is a Konva limitation — the handle appears mirrored due to flip.
 
     // Log each attached node's state and transformer bounding box
     for (const node of selectedNodes) {

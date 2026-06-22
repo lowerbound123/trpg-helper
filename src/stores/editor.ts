@@ -370,6 +370,11 @@ export const useEditorStore = defineStore('editor', () => {
   function toggleSelectedLayersFlipX() {
     const ids = selectedLayerIds.value
     if (!ids.length) return
+    const details = ids.map((id) => {
+      const layer = document.value.layers.find((l) => l.id === id)
+      return layer ? { id, oldFlipX: layer.flipX, oldRotation: layer.rotation } : null
+    })
+    console.log('[rotation] toggleSelectedLayersFlipX — layers:', JSON.stringify(details))
     commit((doc) =>
       ids.reduce((next, id) => {
         const layer = next.layers.find((l) => l.id === id)
@@ -378,6 +383,7 @@ export const useEditorStore = defineStore('editor', () => {
         // Negate rotation: scaleX=-1 reverses visual rotation direction.
         // (360 - rot) % 360 normalises to [0, 360).
         const newRotation = ((360 - layer.rotation) % 360 + 360) % 360
+        console.log('[rotation] toggleSelectedLayersFlipX — id:', id, 'flipX:', layer.flipX, '→', newFlipX, 'rotation:', layer.rotation, '→', newRotation)
         return updateLayerWithMaskSync(next, id, { flipX: newFlipX, rotation: newRotation })
       }, doc),
     )

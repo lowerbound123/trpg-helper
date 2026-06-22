@@ -34,12 +34,26 @@ export function useTransformerSync(options: {
     const selectedNodes = editor.selectedLayerIds
       .map((layerId) => layerNodeRefs[layerId]?.getNode())
       .filter((node): node is Konva.Node => Boolean(node))
+
+    // Log node state BEFORE detach/attach
+    for (const node of selectedNodes) {
+      console.log('[rotation] updateTransformer BEFORE — id:', node.id(), 'node.x:', node.x(), 'node.y:', node.y(), 'node.scaleX:', node.scaleX(), 'node.scaleY:', node.scaleY(), 'node.rotation:', node.rotation(), 'node.offsetX:', (node as any).offsetX?.())
+    }
+
     // Detach first to force full refresh of Transformer internal state,
     // then re-attach. This ensures handle positions are recomputed when
     // node properties like scaleX change (e.g. after flipX toggle).
     transformer.nodes([])
     transformer.nodes(selectedNodes)
     transformer.getLayer()?.batchDraw()
+
+    // Log each attached node's state and transformer bounding box
+    for (const node of selectedNodes) {
+      const layer = editor.document.layers.find((l) => l.id === node.id())
+      console.log('[rotation] updateTransformer AFTER — id:', node.id(), 'node.x:', node.x(), 'node.y:', node.y(), 'node.scaleX:', node.scaleX(), 'node.scaleY:', node.scaleY(), 'node.rotation:', node.rotation(), 'node.width:', node.width(), 'node.height:', node.height(), 'node.offsetX:', (node as any).offsetX?.(), 'model.flipX:', layer?.flipX, 'model.rotation:', layer?.rotation)
+    }
+    // Log transformer selection box
+    console.log('[rotation] updateTransformer — transformer.rotation:', transformer.rotation(), 'transformer.getClientRect:', JSON.stringify(transformer.getClientRect()))
   }
 
   return { updateTransformer }

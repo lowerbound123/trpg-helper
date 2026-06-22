@@ -12,6 +12,7 @@ export function useEditorDragPayloads(options: {
   const draggedAssetId = ref('')
   const draggedFontId = ref('')
   const draggedShapeKind = ref<ShapeKind>()
+  const fontDragStarted = ref(false)
 
   function startAssetDrag(asset: LibraryRecord, event: DragEvent) {
     draggedAssetId.value = asset.id
@@ -26,6 +27,7 @@ export function useEditorDragPayloads(options: {
 
   function startFontDrag(font: LibraryRecord, event: DragEvent) {
     draggedFontId.value = font.id
+    fontDragStarted.value = true
     event.dataTransfer?.setData('application/x-handout-font', font.id)
     event.dataTransfer?.setData('application/x-handout-font-name', font.name)
     event.dataTransfer?.setData('application/x-handout-font-family', options.fontFamily(font))
@@ -51,7 +53,8 @@ export function useEditorDragPayloads(options: {
     window.setTimeout(() => {
       options.logText('font-drag-clear', { draggedFontId: draggedFontId.value })
       draggedFontId.value = ''
-    }, 0)
+      fontDragStarted.value = false
+    }, 50)
   }
 
   function startShapeDrag(shape: ShapeKind, event: DragEvent) {
@@ -69,6 +72,7 @@ export function useEditorDragPayloads(options: {
     draggedAssetId,
     draggedFontId,
     draggedShapeKind,
+    fontDragStarted,
     startAssetDrag,
     clearAssetDrag,
     startFontDrag,

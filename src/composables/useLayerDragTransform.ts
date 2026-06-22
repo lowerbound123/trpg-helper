@@ -100,12 +100,16 @@ export function useLayerDragTransform(options: {
     node.scaleY(1)
     node.width(width)
     node.height(height)
+    const nodeRotation = node.rotation()
+    const rotation = layer.flipX
+      ? Math.round(2 * layer.rotation - nodeRotation)
+      : Math.round(nodeRotation)
     editor.patchLayer(layer.id, {
       x: position.x,
       y: position.y,
       width,
       height,
-      rotation: Math.round(node.rotation()),
+      rotation,
     })
     logBackgroundRender('after-layer-transform', {
       layerId: layer.id,

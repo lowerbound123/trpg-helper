@@ -13,6 +13,7 @@ import {
   flattenLayersToImage,
   moveLayer,
   moveLayerGroup,
+  moveLayerInGroupAware,
   moveLayerOutOfGroup,
   normalizeHandoutDocument,
   removeLayer,
@@ -450,7 +451,7 @@ export const useEditorStore = defineStore('editor', () => {
   function moveSelectedLayer(delta: number) {
     const layer = selectedLayer.value
     if (!layer) return
-    commit((doc) => moveLayer(doc, layer.id, layer.zIndex + delta))
+    commit((doc) => moveLayerInGroupAware(doc, layer.id, delta))
     markLayerDirty(layer.id, 'transform-changed')
   }
 

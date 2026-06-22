@@ -111,6 +111,7 @@ const {
   draggedAssetId,
   draggedFontId,
   draggedShapeKind,
+  fontDragStarted,
   startAssetDrag,
   clearAssetDrag,
   startFontDrag,
@@ -822,6 +823,7 @@ async function addAssetToCanvas(asset: LibraryRecord) {
 }
 
 function addFontTextToCanvas(font: LibraryRecord, position?: { x?: number; y?: number }) {
+  if (fontDragStarted.value) return
   logText('font-create-text', {
     fontId: font.id,
     name: font.name,

@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue'
-import type { ComputedRef, Reactive } from 'vue'
+import type { ComputedRef, Reactive, Ref } from 'vue'
 import type Konva from 'konva'
 
 import type { HandoutLayer, ShapeLayer } from '@/lib/handout'
@@ -20,25 +20,25 @@ export function useLayerDragTransform(options: {
   stageScale: ComputedRef<number>
   isShapeLayer: (layer: HandoutLayer) => layer is ShapeLayer
   selectCanvasLayer: (layerId: string, event?: KonvaEvent) => void
-  updateTransformer: () => void
   autoTextLayerHeight: (layer: import('@/lib/handout').TextLayer, node: Konva.Text) => number
   refreshLayerEffectCacheAfterUpdate: (layerId: string) => Promise<void>
   logBackgroundRender: DebugLog
   logShape: DebugLog
   logSnap: DebugLog
+  curveControlRevision: Ref<number>
 }) {
   const {
     editor,
     layerNodeRefs,
     stageScale,
-    isShapeLayer,
-    selectCanvasLayer,
-    updateTransformer,
-    autoTextLayerHeight,
+  isShapeLayer,
+  selectCanvasLayer,
+  autoTextLayerHeight,
     refreshLayerEffectCacheAfterUpdate,
     logBackgroundRender,
     logShape,
     logSnap,
+    curveControlRevision,
   } = options
 
   const guideLines = ref<GuideLine[]>([])
@@ -116,9 +116,7 @@ export function useLayerDragTransform(options: {
   }
 
   function onTransform(layer: HandoutLayer, event: KonvaEvent) {
-    if (isShapeLayer(layer) && isCurveShape(layer.shape)) {
-      void updateTransformer
-    }
+    if (isShapeLayer(layer) && isCurveShape(layer.shape)) curveControlRevision.value += 1
     if (!event.evt?.shiftKey) return
     const node = layerNodeRefs[layer.id]?.getNode()
     if (!node) return
@@ -262,6 +260,7 @@ export function useLayerDragTransform(options: {
       return
     }
 
+    if (isShapeLayer(layer) && isCurveShape(layer.shape)) curveControlRevision.value += 1
     logEllipseDrag('ellipse-drag-move-before-snap', layer, node)
     const snap = calculateSnapGuides({
       movingLayer: snapLayerFromNode(layer, node),

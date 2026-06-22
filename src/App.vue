@@ -342,6 +342,7 @@ const {
   stopPaintStroke,
 })
 const {
+  curveControlRevision,
   curvePointKeys,
   curveHandleConfig,
   curveGuideConfig,
@@ -366,12 +367,12 @@ const {
   stageScale,
   isShapeLayer,
   selectCanvasLayer,
-  updateTransformer,
   autoTextLayerHeight,
   refreshLayerEffectCacheAfterUpdate,
   logBackgroundRender,
   logShape,
   logSnap,
+  curveControlRevision,
 })
 const {
   isFlatteningLayers,

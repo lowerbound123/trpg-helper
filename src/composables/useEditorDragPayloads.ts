@@ -42,16 +42,6 @@ export function useEditorDragPayloads(options: {
     })
   }
 
-  function prepareFontDrag(font: LibraryRecord) {
-    draggedFontId.value = font.id
-    console.log('[font-drag] prepareFontDrag — draggedFontId set to:', font.id)
-    options.logText('font-drag-prepare', {
-      fontId: font.id,
-      name: font.name,
-      family: options.fontFamily(font),
-    })
-  }
-
   function clearFontDrag() {
     window.setTimeout(() => {
       options.logText('font-drag-clear', { draggedFontId: draggedFontId.value })
@@ -79,7 +69,6 @@ export function useEditorDragPayloads(options: {
     startAssetDrag,
     clearAssetDrag,
     startFontDrag,
-    prepareFontDrag,
     clearFontDrag,
     startShapeDrag,
     clearShapeDrag,

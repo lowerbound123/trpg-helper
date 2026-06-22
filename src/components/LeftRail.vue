@@ -42,7 +42,6 @@ const addShapeToCanvas = ctx.addShapeToCanvas as (shape: string) => void
 const startAssetDrag = ctx.startAssetDrag as (asset: LibraryRecord, event: DragEvent) => void
 const clearAssetDrag = ctx.clearAssetDrag as () => void
 const startFontDrag = ctx.startFontDrag as (font: LibraryRecord, event: DragEvent) => void
-const prepareFontDrag = ctx.prepareFontDrag as (font: LibraryRecord) => void
 const clearFontDrag = ctx.clearFontDrag as () => void
 const startShapeDrag = ctx.startShapeDrag as (shape: string, event: DragEvent) => void
 const clearShapeDrag = ctx.clearShapeDrag as () => void
@@ -155,7 +154,6 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
             class="font-row"
             type="button"
             draggable="true"
-            @pointerdown="prepareFontDrag(font)"
             @click="addFontTextToCanvas(font)"
             @dragstart="startFontDrag(font, $event)"
             @dragend="clearFontDrag"

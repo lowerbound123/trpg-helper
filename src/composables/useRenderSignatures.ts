@@ -166,7 +166,7 @@ export function useRenderSignatures(options: {
   const selectedLayerTransformSignature = computed(() => {
     const layer = editor.selectedLayer
     return layer
-      ? [layer.id, layer.x, layer.y, layer.width, layer.height, layer.rotation, layer.visible, layer.locked].join(':')
+      ? [layer.id, layer.x, layer.y, layer.width, layer.height, layer.rotation, layer.visible, layer.locked, layer.flipX].join(':')
       : ''
   })
 

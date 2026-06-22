@@ -794,6 +794,47 @@ describe('font text layer creation (drag-to-canvas path)', () => {
   })
 })
 
+describe('flip-aware rotation compensation', () => {
+  /**
+   * Pure extraction of the rotation formula used in onTransformEnd.
+   * For flipped layers (scaleX=-1), the Konva Transformer reports rotation
+   * in mirrored coordinates where the delta sign is inverted.
+   */
+  function compensateFlippedRotation(
+    oldRotation: number,
+    nodeRotation: number,
+    flipX: boolean,
+  ): number {
+    if (!flipX) return Math.round(nodeRotation)
+    const raw = oldRotation - nodeRotation
+    const delta = ((raw + 180) % 360 + 360) % 360 - 180
+    return Math.round(oldRotation + delta)
+  }
+
+  it('non-flipped: rotation = rounded node rotation', () => {
+    expect(compensateFlippedRotation(0, 30.2, false)).toBe(30)
+    expect(compensateFlippedRotation(45, 75.8, false)).toBe(76)
+  })
+
+  it('flipped +30° from 0: mirrors delta sign', () => {
+    // Node reports -30 in mirrored coords
+    expect(compensateFlippedRotation(0, -30, true)).toBe(30)
+  })
+
+  it('flipped +30° from 45: recovers 75', () => {
+    expect(compensateFlippedRotation(45, 15, true)).toBe(75)
+  })
+
+  it('flipped -45° from 0: recovers -45', () => {
+    expect(compensateFlippedRotation(0, 45, true)).toBe(-45)
+  })
+
+  it('flipped: delta clamps to [-180,180] to survive node normalization', () => {
+    // Even if Konva normalizes -200 to 160 (atan2 wrapping), result stays sane
+    expect(compensateFlippedRotation(0, 160, true)).toBe(-160)
+  })
+})
+
 describe('export helpers', () => {
   it('creates safe timestamped png file names', () => {
     expect(downloadFileName('Case File: Alpha.png', new Date(2026, 5, 18, 7, 8, 9))).toBe(

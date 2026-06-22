@@ -102,7 +102,14 @@ export function useLayerDragTransform(options: {
     node.height(height)
     const nodeRotation = node.rotation()
     const rotation = layer.flipX
-      ? Math.round(2 * layer.rotation - nodeRotation)
+      ? (() => {
+          // In mirrored coords (scaleX=-1), the Transformer negates the
+          // rotation delta. Clamp delta to [-180,180] so Konva angle
+          // normalization (atan2 wrapping) never corrupts the value.
+          const raw = layer.rotation - nodeRotation
+          const delta = ((raw + 180) % 360 + 360) % 360 - 180
+          return Math.round(layer.rotation + delta)
+        })()
       : Math.round(nodeRotation)
     editor.patchLayer(layer.id, {
       x: position.x,

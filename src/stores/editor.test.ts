@@ -24,6 +24,20 @@ describe('editor multi-selection state', () => {
     expect(editor.document.layers.map((layer) => layer.rotation)).toEqual([15, 15])
   })
 
+  it('keeps the existing rotation compensation when flipping selected layers horizontally', () => {
+    const editor = useEditorStore()
+    editor.addText()
+    const layerId = editor.selectedLayerId!
+    editor.patchSelectedLayer({ rotation: 30 })
+
+    editor.toggleSelectedLayersFlipX()
+
+    expect(editor.document.layers.find((layer) => layer.id === layerId)).toMatchObject({
+      flipX: true,
+      rotation: 330,
+    })
+  })
+
   it('deletes all selected layers and clears selection', () => {
     const editor = useEditorStore()
     editor.addText()

@@ -200,6 +200,7 @@ export function useRenderSignatures(options: {
 
   const transformerConfig = computed(() => ({
     rotateEnabled: true,
+    useSingleNodeRotation: false,
     ignoreStroke: true,
     keepRatio: false,
     shiftBehavior: 'none',

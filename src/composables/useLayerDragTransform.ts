@@ -207,13 +207,18 @@ export function useLayerDragTransform(options: {
     }
   }
 
+  function nodeXForModelX(layer: HandoutLayer, x: number) {
+    if (isShapeLayer(layer) && layer.shape === 'ellipse') return x + layer.width / 2
+    return layer.flipX ? x + layer.width : x
+  }
+
   function applySnappedNodePosition(layer: HandoutLayer, node: Konva.Node, axis: 'x' | 'y', value: number) {
     if (isShapeLayer(layer) && layer.shape === 'ellipse') {
-      if (axis === 'x') node.x(value + layer.width / 2)
+      if (axis === 'x') node.x(nodeXForModelX(layer, value))
       else node.y(value + layer.height / 2)
       return
     }
-    if (axis === 'x') node.x(layer.flipX ? value + layer.width / 2 : value)
+    if (axis === 'x') node.x(nodeXForModelX(layer, value))
     else node.y(value)
   }
 
@@ -279,7 +284,7 @@ export function useLayerDragTransform(options: {
         const selectedNode = layerNodeRefs[id]?.getNode()
         const origin = multiDragState.positions[id]
         if (!selectedLayer || !selectedNode || !origin) continue
-        selectedNode.x(selectedLayer.flipX ? origin.x + dx + selectedLayer.width / 2 : origin.x + dx)
+        selectedNode.x(nodeXForModelX(selectedLayer, origin.x + dx))
         selectedNode.y(origin.y + dy)
       }
       guideLines.value = []

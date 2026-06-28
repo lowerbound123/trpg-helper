@@ -13,7 +13,7 @@ export function setLayerMask(
   layerId: string,
   mask: LayerMask,
 ): HandoutDocument {
-  return updateLayer(document, layerId, { mask: normalizeMask(mask, document.canvas) } as LayerPatch)
+  return updateLayer(document, layerId, { mask: normalizeMask(mask) } as LayerPatch)
 }
 
 export function setLayerMaskEnabled(
@@ -69,7 +69,7 @@ export function transferLayerMask(
     previewUpdatedAt: null,
     cache: null,
     updatedAt,
-  }, document.canvas)!
+  })!
   return touch({
     ...document,
     layers: document.layers.map((layer) => {
@@ -101,6 +101,6 @@ export function copyLayerMask(
     previewUpdatedAt: null,
     cache: null,
     updatedAt,
-  }, document.canvas)!
+  })!
   return updateLayer(document, targetLayerId, { mask: nextMask } as LayerPatch)
 }

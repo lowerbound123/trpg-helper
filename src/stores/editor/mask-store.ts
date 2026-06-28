@@ -3,6 +3,8 @@ import { ref } from 'vue'
 
 import { appendDebugLog, deleteProjectMask, readProjectFileDataUrl, saveProjectMask, saveProjectMaskCache, type ProjectTarget } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
+import { maskTransformFromLayer } from '@/lib/mask-geometry'
+import { createMaskTileStore } from '@/lib/mask-tiles'
 import {
   clearBackgroundMask,
   clearLayerMask,
@@ -22,7 +24,7 @@ import {
   type PaintStroke,
 } from '@/lib/handout'
 import type { DirtyReason } from '@/lib/handout/dirty'
-import { createSolidMaskDataUrl, drawMaskStroke } from '@/lib/mask'
+import { createSolidMaskDataUrl, drawMaskStrokes } from '@/lib/mask'
 import type { CommandHistory } from '@/lib/history'
 
 export function createMaskStore(deps: {
@@ -54,20 +56,18 @@ export function createMaskStore(deps: {
     if (!appConfiguration.mask.enabled) return
     const layer = deps.document.value.layers.find((item) => item.id === layerId)
     if (!layer) return
-    const mask = newMask({ layerId })
+    const mask = newMask({ layerId, width: layer.width, height: layer.height, matrix: maskTransformFromLayer(layer) })
     void appendDebugLog('mask', 'add-layer-mask-start', {
       layerId,
       maskId: mask.id,
       width: mask.width,
       height: mask.height,
     })
-    const startedAt = performance.now()
-    maskDataUrls.value[mask.id] = createSolidMaskDataUrl(mask.width, mask.height)
     void appendDebugLog('mask', 'add-layer-mask-dataurl-created', {
       layerId,
       maskId: mask.id,
-      dataUrlLength: maskDataUrls.value[mask.id]?.length || 0,
-      durationMs: Math.round(performance.now() - startedAt),
+      dataUrlLength: 0,
+      durationMs: 0,
     })
     deps.commit((doc) => setLayerMask(doc, layerId, mask))
   }
@@ -90,7 +90,6 @@ export function createMaskStore(deps: {
   function addBackgroundMask() {
     if (!appConfiguration.mask.enabled) return
     const mask = newMask()
-    maskDataUrls.value[mask.id] = createSolidMaskDataUrl(mask.width, mask.height)
     deps.commit((doc) => setBackgroundMask(doc, mask))
   }
 
@@ -193,7 +192,6 @@ export function createMaskStore(deps: {
     const layer = deps.selectedLayer.value
     if (!layer?.mask) return
     const updatedAt = new Date().toISOString()
-    maskDataUrls.value[layer.mask.id] = createSolidMaskDataUrl(layer.mask.width, layer.mask.height)
     deps.commit((doc) => clearLayerMask(doc, layer.id, updatedAt))
   }
 
@@ -202,7 +200,6 @@ export function createMaskStore(deps: {
     const mask = deps.document.value.canvas.backgroundMask
     if (!mask) return
     const updatedAt = new Date().toISOString()
-    maskDataUrls.value[mask.id] = createSolidMaskDataUrl(mask.width, mask.height)
     deps.commit((doc) => clearBackgroundMask(doc, updatedAt))
   }
 
@@ -263,20 +260,7 @@ export function createMaskStore(deps: {
       ? deps.document.value.canvas.backgroundMask
       : deps.document.value.layers.find((item) => item.mask?.id === maskId)?.mask
     if (!currentMask) return
-    const current = await loadMaskDataUrl(currentMask)
-    const nextDataUrl = await drawMaskStroke(current, currentMask.width, currentMask.height, stroke)
-    maskDataUrls.value[currentMask.id] = nextDataUrl
-    const nextMask = {
-      ...currentMask,
-      path: currentMask.path || currentMask.highResPath || `masks/${currentMask.id}.png`,
-      highResPath: currentMask.highResPath || currentMask.path || `masks/${currentMask.id}.png`,
-      cache: null,
-      previewPath: null,
-      previewUpdatedAt: null,
-      sourceVersion: currentMask.sourceVersion + 1,
-      version: currentMask.version + 1,
-      updatedAt: new Date().toISOString(),
-    }
+    const nextMask = createMaskTileStore(currentMask).applyStroke(stroke)
     queueMaskPreviewFilesForDeletion(currentMask)
     if (deps.document.value.canvas.backgroundMask?.id === currentMask.id) {
       deps.commit((doc) => setBackgroundMask(doc, nextMask))
@@ -300,11 +284,16 @@ export function createMaskStore(deps: {
   async function loadMaskDataUrl(mask: LayerMask) {
     if (!appConfiguration.mask.enabled) return createSolidMaskDataUrl(mask.width, mask.height)
     const existing = maskDataUrls.value[mask.id]
-    if (existing) return existing
+    if (existing) {
+      return mask.strokes.length
+        ? drawMaskStrokes(existing, mask.width, mask.height, mask.strokes)
+        : existing
+    }
     if (mask.path) {
       try {
         const dataUrl = await readProjectFileDataUrl(deps.projectTarget(), mask.path, 'image/png')
-        maskDataUrls.value[mask.id] = dataUrl
+        if (!mask.strokes.length) maskDataUrls.value[mask.id] = dataUrl
+        else return drawMaskStrokes(dataUrl, mask.width, mask.height, mask.strokes)
         return dataUrl
       } catch (error) {
         void appendDebugLog('mask', 'load-mask-failed', {
@@ -315,7 +304,8 @@ export function createMaskStore(deps: {
       }
     }
     const fallback = createSolidMaskDataUrl(mask.width, mask.height)
-    maskDataUrls.value[mask.id] = fallback
+    if (!mask.strokes.length) maskDataUrls.value[mask.id] = fallback
+    else return drawMaskStrokes(fallback, mask.width, mask.height, mask.strokes)
     return fallback
   }
 
@@ -328,7 +318,10 @@ export function createMaskStore(deps: {
     }
     let nextDocument = deps.document.value
     const saveOne = async (mask: LayerMask) => {
-      const dataUrl = maskDataUrls.value[mask.id]
+      const baseDataUrl = maskDataUrls.value[mask.id] || (mask.path ? await loadMaskDataUrl(mask) : createSolidMaskDataUrl(mask.width, mask.height))
+      const dataUrl = mask.strokes.length
+        ? await drawMaskStrokes(baseDataUrl, mask.width, mask.height, mask.strokes)
+        : baseDataUrl
       if (!dataUrl) return mask
       const path = await saveProjectMask(target, mask.id, dataUrl)
       const updatedAt = new Date().toISOString()
@@ -336,6 +329,7 @@ export function createMaskStore(deps: {
         ...mask,
         path,
         highResPath: path,
+        strokes: [],
         previewPath: null,
         previewUpdatedAt: null,
         cache: null,

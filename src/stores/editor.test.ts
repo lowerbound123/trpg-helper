@@ -2,6 +2,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useEditorStore } from './editor'
+import { maskTransformFromLayer, matrixNearlyEqual } from '@/lib/mask-geometry'
 
 describe('editor multi-selection state', () => {
   beforeEach(() => {
@@ -36,6 +37,50 @@ describe('editor multi-selection state', () => {
       flipX: true,
       rotation: 330,
     })
+  })
+
+  it('syncs selected layer transform changes into the layer mask matrix', () => {
+    const editor = useEditorStore()
+    editor.addText()
+    const layerId = editor.selectedLayerId!
+    editor.addMaskToLayer(layerId)
+    const before = editor.document.layers.find((layer) => layer.id === layerId)!
+    expect(before.mask?.width).toBe(before.width)
+    expect(before.mask?.height).toBe(before.height)
+    editor.patchSelectedLayer({
+      x: before.x + 40,
+      y: before.y + 20,
+      rotation: before.rotation + 30,
+    })
+
+    const after = editor.document.layers.find((layer) => layer.id === layerId)!
+
+    expect(after.mask).toBeTruthy()
+    expect(matrixNearlyEqual(after.mask!.matrix, maskTransformFromLayer(after))).toBe(true)
+  })
+
+  it('records mask brush strokes as dirty tiles instead of replacing the whole mask image', async () => {
+    const editor = useEditorStore()
+    editor.addText()
+    const layerId = editor.selectedLayerId!
+    editor.addMaskToLayer(layerId)
+    const layer = editor.document.layers.find((item) => item.id === layerId)!
+
+    await editor.paintMask(layer.mask!, {
+      id: 'mask-stroke-1',
+      points: [10, 10, 20, 20],
+      strokeWidth: 8,
+      color: '#000000',
+      tension: 0,
+      mode: 'eraser',
+      eraserOpacity: 1,
+    })
+
+    const updated = editor.document.layers.find((item) => item.id === layerId)!
+    expect(updated.mask?.strokes.map((stroke) => stroke.id)).toEqual(['mask-stroke-1'])
+    expect(Object.keys(updated.mask?.tiles ?? {})).toEqual(['0:0'])
+    expect(updated.mask?.version).toBe(2)
+    expect(editor.maskDataUrls[updated.mask!.id]).toBeUndefined()
   })
 
   it('deletes all selected layers and clears selection', () => {

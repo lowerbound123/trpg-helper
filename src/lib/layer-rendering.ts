@@ -26,9 +26,6 @@ export function layerKonvaConfig(layer: HandoutLayer) {
     globalCompositeOperation: layer.blendMode,
     ...konvaEffectConfig(layer.effects),
   }
-  if (layer.flipX) {
-    console.log('[rotation] layerKonvaConfig FLIPPED — id:', layer.id, 'modelX:', layer.x, 'modelRotation:', layer.rotation, '→ konvaX:', config.x, 'konvaScaleX:', config.scaleX, 'konvaOffsetX:', config.offsetX, 'konvaRotation:', config.rotation)
-  }
   return config
 }
 

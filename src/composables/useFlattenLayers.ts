@@ -4,6 +4,7 @@ import { confirm } from '@tauri-apps/plugin-dialog'
 import { saveProjectAsset, type LibraryRecord, type LibraryIndex } from '@/lib/backend'
 import { serializableLogData } from '@/lib/debug-log'
 import type { FlattenedLayerBounds, HandoutDocument, HandoutLayer } from '@/lib/handout'
+import { matrixMultiply, matrixTranslate } from '@/lib/mask-geometry'
 import { dataUrlByteSize, renderHandoutToDataUrl } from '@/lib/render'
 import { isImageLayer, useEditorStore } from '@/stores/editor'
 
@@ -87,6 +88,7 @@ export function useFlattenLayers(options: {
       mask: cloned.mask
         ? {
             ...cloned.mask,
+            matrix: matrixMultiply(matrixTranslate(-bounds.x, -bounds.y), cloned.mask.matrix),
             x: cloned.mask.x - bounds.x,
             y: cloned.mask.y - bounds.y,
           }

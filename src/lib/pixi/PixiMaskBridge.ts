@@ -1,5 +1,7 @@
 import { Application, Container, Sprite, Texture } from 'pixi.js'
 
+import { appendDebugLog } from '@/lib/backend'
+
 export type ComposeMaskPreviewInput = {
   layerId: string
   maskId: string
@@ -36,9 +38,12 @@ function asHtmlCanvas(canvasLike: unknown) {
   return canvas
 }
 
-let sharedAppPromise: Promise<Application> | undefined
+type RendererPreference = 'webgpu' | 'webgl' | 'canvas'
 
-async function getSharedApp(width: number, height: number) {
+const sharedApps = new Map<string, Promise<Application>>()
+
+async function getSharedApp(width: number, height: number, key: string, preference: RendererPreference[]) {
+  let sharedAppPromise = sharedApps.get(key)
   if (!sharedAppPromise) {
     const app = new Application()
     sharedAppPromise = app.init({
@@ -47,17 +52,20 @@ async function getSharedApp(width: number, height: number) {
       backgroundAlpha: 0,
       antialias: false,
       autoStart: false,
-      // PixiJS v8 supports forcing the renderer preference during Application
-      // init. Canvas avoids WebGL/WebView readback SecurityError in Tauri.
-      preference: ['canvas'],
+      preference,
     }).then(() => app)
+    sharedApps.set(key, sharedAppPromise)
   }
   const app = await sharedAppPromise
   app.renderer.resize(width, height)
   return app
 }
 
-export async function composeMaskPreview(input: ComposeMaskPreviewInput): Promise<ComposeMaskPreviewResult> {
+async function composeMaskPreviewWithRenderer(
+  input: ComposeMaskPreviewInput,
+  rendererKey: string,
+  preference: RendererPreference[],
+): Promise<ComposeMaskPreviewResult> {
   const totalStartedAt = now()
   const loadStartedAt = now()
   const width = Math.max(1, Math.round(input.sourceCanvas.width))
@@ -65,7 +73,7 @@ export async function composeMaskPreview(input: ComposeMaskPreviewInput): Promis
   const loadMs = now() - loadStartedAt
 
   const renderStartedAt = now()
-  const app = await getSharedApp(width, height)
+  const app = await getSharedApp(width, height, rendererKey, preference)
   const stage = new Container()
   const sourceTexture = Texture.from(input.sourceCanvas)
   const maskTexture = Texture.from(input.localMaskCanvas)
@@ -105,5 +113,19 @@ export async function composeMaskPreview(input: ComposeMaskPreviewInput): Promis
       extract: Math.round(extractMs),
       total: Math.round(now() - totalStartedAt),
     },
+  }
+}
+
+export async function composeMaskPreview(input: ComposeMaskPreviewInput): Promise<ComposeMaskPreviewResult> {
+  try {
+    return await composeMaskPreviewWithRenderer(input, 'gpu', ['webgpu', 'webgl', 'canvas'])
+  } catch (error) {
+    sharedApps.delete('gpu')
+    void appendDebugLog('mask', 'pixi-mask-compose-gpu-fallback', {
+      layerId: input.layerId,
+      maskId: input.maskId,
+      error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+    })
+    return composeMaskPreviewWithRenderer(input, 'canvas', ['canvas'])
   }
 }

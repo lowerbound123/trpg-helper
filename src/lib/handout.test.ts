@@ -31,6 +31,7 @@ import {
   updateLayer,
 } from './handout'
 import { createHistory } from './history'
+import { matrixFromComponents, matrixNearlyEqual } from './mask-geometry'
 import { dataUrlByteSize, downloadFileName, previewPixelRatio } from './render'
 
 describe('handout document model', () => {
@@ -326,6 +327,35 @@ describe('handout document model', () => {
       rotation: 0,
       flipX: false,
     })
+  })
+
+  it('migrates legacy mask transform fields into the affine matrix', () => {
+    const legacy = addImageLayer(createDefaultHandout('Legacy Transform Mask'), { assetId: 'asset-1' }) as any
+    legacy.layers[0].mask = {
+      id: 'legacy-mask-transform',
+      enabled: true,
+      path: 'masks/legacy-mask-transform.png',
+      width: 120,
+      height: 90,
+      x: 10,
+      y: 20,
+      scaleX: 2,
+      scaleY: 3,
+      rotation: 30,
+      flipX: true,
+      updatedAt: '2026-06-21T00:00:00.000Z',
+    }
+
+    const normalized = normalizeHandoutDocument(legacy)
+    const mask = normalized.layers[0].mask!
+
+    expect(matrixNearlyEqual(mask.matrix, matrixFromComponents({
+      x: 10 + normalized.canvas.width * 2,
+      y: 20,
+      rotation: 30,
+      scaleX: -2,
+      scaleY: 3,
+    }))).toBe(true)
   })
 
   it('transfers and copies masks between layers', () => {

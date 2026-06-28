@@ -3,7 +3,7 @@ import Konva from 'konva'
 import { appendDebugLog, readProjectFileDataUrl, type LibraryIndex } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
 import type { HandoutLayer, LayerMask } from '@/lib/handout'
-import { applyLayerMaskToCanvas, createLayerLocalMaskCanvas, downsampleDataUrl, loadImageFromDataUrl } from '@/lib/mask'
+import { applyLayerMaskToCanvas, createLayerLocalMaskCanvas, createSolidMaskDataUrl, downsampleDataUrl, drawMaskStrokes, loadImageFromDataUrl } from '@/lib/mask'
 
 import { createLayerNode } from './nodes'
 import { localLayer, maskedImageConfig } from './shared'
@@ -11,11 +11,12 @@ import type { ImageCache, RenderMaskOptions } from './types'
 
 async function loadMaskImage(mask: LayerMask, options?: RenderMaskOptions) {
   const inMemory = options?.maskDataUrls?.[mask.id]
-  const maskPath = mask.highResPath || mask.path
+  const maskPath = mask.path
   let dataUrl = inMemory || (maskPath
     ? await readProjectFileDataUrl(options?.projectTarget ?? {}, maskPath, 'image/png')
     : '')
-  if (!dataUrl) return undefined
+  if (!dataUrl) dataUrl = createSolidMaskDataUrl(mask.width, mask.height, mask.defaultAlpha)
+  if (mask.strokes.length) dataUrl = await drawMaskStrokes(dataUrl, mask.width, mask.height, mask.strokes)
   if (options?.maxMaskEdge) dataUrl = await downsampleDataUrl(dataUrl, options.maxMaskEdge)
   return loadImageFromDataUrl(dataUrl)
 }

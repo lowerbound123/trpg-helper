@@ -1,4 +1,5 @@
 import type { HandoutLayer, LayerMask, PaintStroke } from './handout'
+import { documentPointToMaskLocal, matrixApplyToPoint } from './mask-geometry'
 
 export function createSolidMaskDataUrl(width: number, height: number, value = 255) {
   if (typeof document === 'undefined') return ''
@@ -48,6 +49,19 @@ export function drawMaskStroke(dataUrl: string, width: number, height: number, s
   })
 }
 
+export async function drawMaskStrokes(
+  dataUrl: string,
+  width: number,
+  height: number,
+  strokes: PaintStroke[],
+) {
+  let current = dataUrl || createSolidMaskDataUrl(width, height)
+  for (const stroke of strokes) {
+    current = await drawMaskStroke(current, width, height, stroke)
+  }
+  return current
+}
+
 export function applyGrayMaskToCanvas(source: HTMLCanvasElement, mask: HTMLImageElement) {
   const output = document.createElement('canvas')
   output.width = source.width
@@ -95,28 +109,11 @@ export function layerLocalPointFromDocument(layer: HandoutLayer, x: number, y: n
 }
 
 export function maskDocumentPoint(mask: LayerMask, x: number, y: number) {
-  const localX = mask.flipX ? mask.width - x : x
-  const scaledX = localX * (mask.scaleX || 1)
-  const scaledY = y * (mask.scaleY || 1)
-  const radians = ((mask.rotation || 0) * Math.PI) / 180
-  return {
-    x: mask.x + scaledX * Math.cos(radians) - scaledY * Math.sin(radians),
-    y: mask.y + scaledX * Math.sin(radians) + scaledY * Math.cos(radians),
-  }
+  return matrixApplyToPoint(mask.matrix, { x, y })
 }
 
 export function maskLocalPoint(mask: LayerMask, x: number, y: number) {
-  const radians = -((mask.rotation || 0) * Math.PI) / 180
-  const dx = x - mask.x
-  const dy = y - mask.y
-  const rotatedX = dx * Math.cos(radians) - dy * Math.sin(radians)
-  const rotatedY = dx * Math.sin(radians) + dy * Math.cos(radians)
-  const scaledX = rotatedX / (mask.scaleX || 1)
-  const scaledY = rotatedY / (mask.scaleY || 1)
-  return {
-    x: mask.flipX ? mask.width - scaledX : scaledX,
-    y: scaledY,
-  }
+  return documentPointToMaskLocal(mask, { x, y })
 }
 
 export function imageToAlphaMaskCanvas(image: HTMLImageElement) {

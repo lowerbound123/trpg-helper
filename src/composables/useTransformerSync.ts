@@ -3,6 +3,7 @@ import type { Reactive, Ref } from 'vue'
 import type Konva from 'konva'
 
 import { useEditorStore } from '@/stores/editor'
+import { matrixDecompose } from '@/lib/mask-geometry'
 
 type EditorStore = ReturnType<typeof useEditorStore>
 type NodeRef = { getNode: () => Konva.Node }
@@ -45,14 +46,14 @@ export function useTransformerSync(options: {
   function activeLayerMaskRotation() {
     const target = editor.maskEditTarget
     if (!target || target.kind !== 'layer') return undefined
-    return editor.document.layers.find((layer) => layer.id === target.layerId)?.mask?.rotation
+    const mask = editor.document.layers.find((layer) => layer.id === target.layerId)?.mask
+    return mask ? matrixDecompose(mask.matrix).rotation : undefined
   }
 
   async function updateTransformer() {
     await nextTick()
     const transformer = transformerRef.value?.getNode()
     if (!transformer) return
-    console.log('[rotation] updateTransformer — selectedLayerIds:', editor.selectedLayerIds, 'maskEditTarget:', editor.maskEditTarget)
     if (editor.maskEditTarget && activeTool.value === 'select') {
       const maskNode = maskEditNodeRef.value?.getNode()
       transformer.nodes([])
@@ -66,11 +67,6 @@ export function useTransformerSync(options: {
     const selectedNodes = editor.selectedLayerIds
       .map((layerId) => layerNodeRefs[layerId]?.getNode())
       .filter((node): node is Konva.Node => Boolean(node))
-
-    // Log node state BEFORE detach/attach
-    for (const node of selectedNodes) {
-      console.log('[rotation] updateTransformer BEFORE — id:', node.id(), 'node.x:', node.x(), 'node.y:', node.y(), 'node.scaleX:', node.scaleX(), 'node.scaleY:', node.scaleY(), 'node.rotation:', node.rotation(), 'node.offsetX:', (node as any).offsetX?.())
-    }
 
     // Detach first to force full refresh of Transformer internal state,
     // then re-attach. This ensures handle positions are recomputed when
@@ -89,13 +85,6 @@ export function useTransformerSync(options: {
       maskRotation: undefined,
     }))
 
-    // Log each attached node's state and transformer bounding box
-    for (const node of selectedNodes) {
-      const layer = editor.document.layers.find((l) => l.id === node.id())
-      console.log('[rotation] updateTransformer AFTER — id:', node.id(), 'node.x:', node.x(), 'node.y:', node.y(), 'node.scaleX:', node.scaleX(), 'node.scaleY:', node.scaleY(), 'node.rotation:', node.rotation(), 'node.width:', node.width(), 'node.height:', node.height(), 'node.offsetX:', (node as any).offsetX?.(), 'model.flipX:', layer?.flipX, 'model.rotation:', layer?.rotation)
-    }
-    // Log transformer selection box
-    console.log('[rotation] updateTransformer — transformer.rotation:', transformer.rotation(), 'transformer.getClientRect:', JSON.stringify(transformer.getClientRect()))
   }
 
   return { updateTransformer }

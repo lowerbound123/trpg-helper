@@ -109,16 +109,29 @@ export function useRenderSignatures(options: {
 
   const layerMaskRenderSignature = computed(() =>
     editor.document.layers
-      .map((layer) => [
-        layer.id,
-        layer.mask?.enabled,
-        layer.mask?.id,
-        layer.mask?.path,
-        layer.mask?.updatedAt,
-        editor.maskDataUrls[layer.mask?.id || '']?.length || 0,
-        maskZoomBucket.value,
-        JSON.stringify(layer),
-      ].join(':'))
+      .map((layer) => {
+        const mask = layer.mask
+        return [
+          layer.id,
+          layer.type,
+          layer.visible,
+          layer.opacity,
+          layer.blendMode,
+          layer.x,
+          layer.y,
+          layer.width,
+          layer.height,
+          layer.rotation,
+          layer.flipX,
+          mask?.enabled,
+          mask?.id,
+          mask?.version,
+          mask?.updatedAt,
+          mask?.matrix.join(','),
+          Object.keys(mask?.tiles ?? {}).join(','),
+          maskZoomBucket.value,
+        ].join(':')
+      })
       .join('|'),
   )
 
@@ -130,9 +143,10 @@ export function useRenderSignatures(options: {
     editor.document.canvas.backgroundAssetId,
     editor.document.canvas.backgroundMask?.enabled,
     editor.document.canvas.backgroundMask?.id,
-    editor.document.canvas.backgroundMask?.path,
+    editor.document.canvas.backgroundMask?.version,
     editor.document.canvas.backgroundMask?.updatedAt,
-    editor.maskDataUrls[editor.document.canvas.backgroundMask?.id || '']?.length || 0,
+    editor.document.canvas.backgroundMask?.matrix.join(','),
+    Object.keys(editor.document.canvas.backgroundMask?.tiles ?? {}).join(','),
     maskZoomBucket.value,
   ].join(':'))
 

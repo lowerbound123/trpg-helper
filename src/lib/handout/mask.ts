@@ -1,4 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
+import { matrixFromComponents } from '../mask-geometry'
+import type { AffineMatrix } from '../mask-geometry'
+import type { PaintStroke } from './paint'
 
 type CanvasSize = {
   width: number
@@ -9,10 +12,15 @@ export type LayerMask = {
   id: string
   layerId?: string
   enabled: boolean
-  path: string
+  path: string | null
   highResPath: string
   width: number
   height: number
+  matrix: AffineMatrix
+  tileSize: number
+  defaultAlpha: number
+  tiles: Record<string, MaskTileMeta>
+  strokes: PaintStroke[]
   x: number
   y: number
   scaleX: number
@@ -26,6 +34,12 @@ export type LayerMask = {
   sourceVersion: number
   version: number
   opacity?: number
+  updatedAt: string
+}
+
+export type MaskTileMeta = {
+  path?: string
+  version: number
   updatedAt: string
 }
 
@@ -47,10 +61,15 @@ export function createCanvasLayerMask(
     id,
     layerId: input.layerId,
     enabled: input.enabled ?? true,
-    path: input.path ?? highResPath,
+    path: input.path ?? null,
     highResPath,
-    width: Math.max(1, Math.round(canvas.width)),
-    height: Math.max(1, Math.round(canvas.height)),
+    width: Math.max(1, Math.round(input.width ?? canvas.width)),
+    height: Math.max(1, Math.round(input.height ?? canvas.height)),
+    matrix: input.matrix ?? [1, 0, 0, 1, 0, 0],
+    tileSize: input.tileSize ?? 512,
+    defaultAlpha: input.defaultAlpha ?? 255,
+    tiles: input.tiles ?? {},
+    strokes: input.strokes ?? [],
     x: input.x ?? 0,
     y: input.y ?? 0,
     scaleX: input.scaleX ?? 1,
@@ -82,10 +101,15 @@ export function normalizeMask(
     id,
     layerId: mask.layerId,
     enabled: mask.enabled ?? true,
-    path: mask.path ?? highResPath,
+    path: mask.path ?? null,
     highResPath,
     width,
     height,
+    matrix: normalizeMatrix(mask, width),
+    tileSize: Math.max(64, Math.round(mask.tileSize ?? 512)),
+    defaultAlpha: Math.max(0, Math.min(255, Math.round(mask.defaultAlpha ?? 255))),
+    tiles: normalizeTiles(mask.tiles),
+    strokes: mask.strokes ?? [],
     x: mask.x ?? 0,
     y: mask.y ?? 0,
     scaleX: mask.scaleX ?? 1,
@@ -101,6 +125,38 @@ export function normalizeMask(
     opacity: mask.opacity,
     updatedAt: mask.updatedAt || new Date().toISOString(),
   }
+}
+
+function normalizeMatrix(mask: Partial<LayerMask>, width: number): AffineMatrix {
+  const matrix = mask.matrix
+  const values = Array.isArray(matrix) ? matrix : []
+  if (values.length) {
+    return [0, 1, 2, 3, 4, 5].map((index) => {
+      const value = Number(values[index])
+      return Number.isFinite(value) ? value : index === 0 || index === 3 ? 1 : 0
+    }) as AffineMatrix
+  }
+  const scaleX = Math.abs(mask.scaleX ?? 1)
+  const scaleY = mask.scaleY ?? 1
+  return matrixFromComponents({
+    x: mask.flipX ? (mask.x ?? 0) + width * scaleX : mask.x ?? 0,
+    y: mask.y ?? 0,
+    rotation: mask.rotation ?? 0,
+    scaleX: mask.flipX ? -scaleX : scaleX,
+    scaleY,
+  })
+}
+
+function normalizeTiles(tiles: LayerMask['tiles'] | undefined): LayerMask['tiles'] {
+  if (!tiles) return {}
+  return Object.fromEntries(Object.entries(tiles).map(([key, tile]) => [
+    key,
+    {
+      path: tile.path,
+      version: tile.version ?? 1,
+      updatedAt: tile.updatedAt || new Date().toISOString(),
+    },
+  ]))
 }
 
 function normalizeMaskCache(

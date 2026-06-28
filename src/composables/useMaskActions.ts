@@ -4,6 +4,7 @@ import type Konva from 'konva'
 
 import { appendDebugLog } from '@/lib/backend'
 import type { HandoutLayer } from '@/lib/handout'
+import { matrixDecompose, matrixFromComponents } from '@/lib/mask-geometry'
 import { useEditorStore } from '@/stores/editor'
 
 type EditorStore = ReturnType<typeof useEditorStore>
@@ -125,15 +126,16 @@ export function useMaskActions(options: {
     if (!maskFeatureEnabled) return {}
     const mask = layer.mask
     const canDragMask = activeTool.value === 'select'
+    const transform = mask ? matrixDecompose(mask.matrix) : undefined
     return {
       image: maskEditImage.value,
-      x: mask?.flipX ? (mask.x + mask.width * mask.scaleX) : mask?.x,
-      y: mask?.y,
+      x: transform?.x,
+      y: transform?.y,
       width: mask?.width,
       height: mask?.height,
-      scaleX: mask?.flipX ? -mask.scaleX : mask?.scaleX,
-      scaleY: mask?.scaleY,
-      rotation: mask?.rotation,
+      scaleX: transform?.scaleX,
+      scaleY: transform?.scaleY,
+      rotation: transform?.rotation,
       opacity: isDraggingMask.value ? 0.42 : 0,
       draggable: canDragMask,
       listening: canDragMask,
@@ -151,8 +153,16 @@ export function useMaskActions(options: {
   function onMaskEditDragEnd(layer: HandoutLayer, event: KonvaEvent) {
     if (!maskFeatureEnabled || !layer.mask) return
     const node = event.target
+    const transform = matrixDecompose(layer.mask.matrix)
     editor.patchLayerMask(layer.id, {
-      x: layer.mask.flipX ? node.x() - layer.mask.width * layer.mask.scaleX : node.x(),
+      matrix: matrixFromComponents({
+        x: node.x(),
+        y: node.y(),
+        rotation: transform.rotation,
+        scaleX: transform.scaleX,
+        scaleY: transform.scaleY,
+      }),
+      x: node.x(),
       y: node.y(),
     })
     isDraggingMask.value = false
@@ -168,7 +178,14 @@ export function useMaskActions(options: {
     const scaleX = node.scaleX()
     const scaleY = node.scaleY()
     editor.patchLayerMask(layer.id, {
-      x: scaleX < 0 ? node.x() - layer.mask.width * Math.abs(scaleX) : node.x(),
+      matrix: matrixFromComponents({
+        x: node.x(),
+        y: node.y(),
+        rotation: node.rotation(),
+        scaleX,
+        scaleY,
+      }),
+      x: node.x(),
       y: node.y(),
       scaleX: Math.abs(scaleX),
       scaleY: Math.abs(scaleY),

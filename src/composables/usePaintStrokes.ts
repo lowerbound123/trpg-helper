@@ -4,6 +4,7 @@ import type Konva from 'konva'
 
 import type { HandoutLayer, PaintLayer, PaintStroke, StrokePoint } from '@/lib/handout'
 import { strokePointsToFlat } from '@/lib/handout'
+import { documentPointToMaskLocal } from '@/lib/mask-geometry'
 import { isPaintLayer, useEditorStore } from '@/stores/editor'
 
 type EditorStore = ReturnType<typeof useEditorStore>
@@ -44,17 +45,11 @@ export function usePaintStrokes(options: {
   }
 
   function maskLocalPoint(mask: NonNullable<HandoutLayer['mask']>, point: StrokePoint): StrokePoint {
-    const radians = -((mask.rotation || 0) * Math.PI) / 180
-    const dx = point.x - mask.x
-    const dy = point.y - mask.y
-    const rotatedX = dx * Math.cos(radians) - dy * Math.sin(radians)
-    const rotatedY = dx * Math.sin(radians) + dy * Math.cos(radians)
-    const scaledX = rotatedX / (mask.scaleX || 1)
-    const scaledY = rotatedY / (mask.scaleY || 1)
+    const local = documentPointToMaskLocal(mask, point)
     return {
       ...point,
-      x: mask.flipX ? mask.width - scaledX : scaledX,
-      y: scaledY,
+      x: local.x,
+      y: local.y,
     }
   }
 

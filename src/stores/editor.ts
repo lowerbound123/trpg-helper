@@ -35,6 +35,7 @@ import {
   type TextLayer,
 } from '@/lib/handout'
 import { setLayerMask } from '@/lib/handout'
+import { syncMaskWithLayerDelta } from '@/lib/mask-geometry'
 import { createDirtyFlags, markLayerDirty as markDirtyFlag, markProjectPreviewDirty as markProjectDirtyFlag, type DirtyReason } from '@/lib/handout/dirty'
 import { createHistory } from '@/lib/history'
 import { appendDebugLog, emptyLibrary, fontRecordFamily, type LibraryIndex, type LibraryRecord } from '@/lib/backend'
@@ -196,18 +197,14 @@ export const useEditorStore = defineStore('editor', () => {
     if (!layer.mask || maskStore.maskEditTarget.value?.kind === 'layer' && maskStore.maskEditTarget.value.layerId === layerId) return next
     const nextLayer = next.layers.find((item) => item.id === layerId)
     if (!nextLayer?.mask) return next
-    const dx = (nextLayer.x ?? layer.x) - layer.x
-    const dy = (nextLayer.y ?? layer.y) - layer.y
-    const widthRatio = layer.width ? nextLayer.width / layer.width : 1
-    const heightRatio = layer.height ? nextLayer.height / layer.height : 1
     const syncedMask = {
-      ...nextLayer.mask,
-      x: nextLayer.mask.x + dx,
-      y: nextLayer.mask.y + dy,
-      scaleX: nextLayer.mask.scaleX * (Number.isFinite(widthRatio) ? widthRatio : 1),
-      scaleY: nextLayer.mask.scaleY * (Number.isFinite(heightRatio) ? heightRatio : 1),
-      rotation: nextLayer.mask.rotation + (nextLayer.rotation - layer.rotation),
-      flipX: nextLayer.flipX === layer.flipX ? nextLayer.mask.flipX : !nextLayer.mask.flipX,
+      ...syncMaskWithLayerDelta(layer, nextLayer, nextLayer.mask),
+      x: nextLayer.x,
+      y: nextLayer.y,
+      scaleX: nextLayer.width / Math.max(1, nextLayer.mask.width),
+      scaleY: nextLayer.height / Math.max(1, nextLayer.mask.height),
+      rotation: nextLayer.rotation,
+      flipX: nextLayer.flipX,
       updatedAt: new Date().toISOString(),
     }
     return setLayerMask(next, layerId, syncedMask)
@@ -354,9 +351,6 @@ export const useEditorStore = defineStore('editor', () => {
   function patchSelectedLayers(patch: LayerPatch) {
     const ids = selectedLayerIds.value
     if (!ids.length) return
-    if ('flipX' in patch || 'rotation' in patch) {
-      console.log('[rotation] patchSelectedLayers — ids:', ids, 'patch:', JSON.stringify(patch))
-    }
     commit((doc) => ids.reduce((next, id) => updateLayerWithMaskSync(next, id, patch), doc))
     const reason = dirtyReasonForLayerPatch(patch)
     ids.forEach((id) => markLayerDirty(id, reason))
@@ -370,11 +364,6 @@ export const useEditorStore = defineStore('editor', () => {
   function toggleSelectedLayersFlipX() {
     const ids = selectedLayerIds.value
     if (!ids.length) return
-    const details = ids.map((id) => {
-      const layer = document.value.layers.find((l) => l.id === id)
-      return layer ? { id, oldFlipX: layer.flipX, oldRotation: layer.rotation } : null
-    })
-    console.log('[rotation] toggleSelectedLayersFlipX — layers:', JSON.stringify(details))
     commit((doc) =>
       ids.reduce((next, id) => {
         const layer = next.layers.find((l) => l.id === id)
@@ -401,7 +390,6 @@ export const useEditorStore = defineStore('editor', () => {
           newX = Math.round(layer.x + layer.width - layer.width * Math.cos(targetRad) + layer.height * Math.sin(targetRad))
         }
 
-        console.log('[rotation] toggleSelectedLayersFlipX — id:', id, 'flipX:', layer.flipX, '→', newFlipX, 'rotation:', layer.rotation, '→', newRotation, 'x:', layer.x, '→', newX, '(delta:', (newX - layer.x), ')')
         return updateLayerWithMaskSync(next, id, { flipX: newFlipX, rotation: newRotation, x: newX })
       }, doc),
     )

@@ -10,7 +10,6 @@ export function fontFamily(font: LibraryRecord) {
 }
 
 export function logText(message: string, data?: Record<string, unknown>) {
-  console.debug(`[text] ${message}`, data)
   void appendDebugLog('text', message, data)
 }
 

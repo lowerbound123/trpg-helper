@@ -8,6 +8,7 @@ export type RenderMaskOptions = {
   masksEnabled?: boolean
   projectTarget?: ProjectFileTarget
   maskDataUrls?: Record<string, string>
+  maskRenderMode?: 'preview-runtime' | 'export-deterministic'
   maxMaskEdge?: number
   maxCompositeEdge?: number
   usePixiMaskPreview?: boolean

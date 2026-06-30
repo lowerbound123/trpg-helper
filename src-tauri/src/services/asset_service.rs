@@ -172,7 +172,7 @@ pub(crate) fn ensure_font_metadata(index: &mut LibraryIndex) -> bool {
                 record.font_family = Some(font_family.clone());
                 record.updated_at = Utc::now();
                 changed = true;
-                let _ = write_debug_log(&format!(
+                let _ = write_debug_log("text", &format!(
                     "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repaired\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"fontFamily\":\"{}\"}}}}",
                     Utc::now().to_rfc3339(),
                     record.id.replace('"', "\\\""),
@@ -181,7 +181,7 @@ pub(crate) fn ensure_font_metadata(index: &mut LibraryIndex) -> bool {
                 ));
             }
             None => {
-                let _ = write_debug_log(&format!(
+                let _ = write_debug_log("text", &format!(
                     "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repair-failed\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"path\":\"{}\"}}}}",
                     Utc::now().to_rfc3339(),
                     record.id.replace('"', "\\\""),
@@ -215,7 +215,7 @@ pub(crate) fn import_record(
         match write_webp_thumbnail(app, &id, &data) {
             Ok(path) => Some(path.to_string_lossy().to_string()),
             Err(error) => {
-                let _ = write_debug_log(&format!(
+                let _ = write_debug_log("thumbnail", &format!(
                     "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to generate import thumbnail\",\"data\":{{\"id\":\"{}\",\"fileName\":\"{}\",\"error\":\"{}\"}}}}",
                     Utc::now().to_rfc3339(),
                     id,
@@ -230,7 +230,7 @@ pub(crate) fn import_record(
     };
     let font_family = if bucket == "fonts" {
         let extracted = extract_font_family_from_bytes(&data);
-        let _ = write_debug_log(&format!(
+        let _ = write_debug_log("text", &format!(
             "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-import\",\"data\":{{\"fileName\":\"{}\",\"fontFamily\":{}}}}}",
             Utc::now().to_rfc3339(),
             file_name.replace('"', "\\\""),

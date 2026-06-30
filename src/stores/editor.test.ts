@@ -65,6 +65,7 @@ describe('editor multi-selection state', () => {
     const layerId = editor.selectedLayerId!
     editor.addMaskToLayer(layerId)
     const layer = editor.document.layers.find((item) => item.id === layerId)!
+    const beforePulse = editor.maskChangePulse
 
     await editor.paintMask(layer.mask!, {
       id: 'mask-stroke-1',
@@ -81,6 +82,14 @@ describe('editor multi-selection state', () => {
     expect(Object.keys(updated.mask?.tiles ?? {})).toEqual(['0:0'])
     expect(updated.mask?.version).toBe(2)
     expect(editor.maskDataUrls[updated.mask!.id]).toBeUndefined()
+    expect(editor.maskChangePulse).toMatchObject({
+      kind: 'layer',
+      layerId,
+      maskId: updated.mask!.id,
+      version: 2,
+      reason: 'stroke',
+    })
+    expect(editor.maskChangePulse.id).toBeGreaterThan(beforePulse.id)
   })
 
   it('deletes all selected layers and clears selection', () => {

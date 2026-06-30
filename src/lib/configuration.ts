@@ -103,7 +103,7 @@ export type AppConfiguration = {
 export const appConfiguration = {
   paths: {
     dataDir: stringValue('paths', 'data_dir', './data'),
-    logFile: stringValue('paths', 'log_file', './log.txt'),
+    logFile: stringValue('paths', 'log_file', './logs/app.log'),
   },
   uploads: {
     maxFileSize: stringValue('uploads', 'max_file_size', '100mb'),

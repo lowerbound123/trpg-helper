@@ -1,14 +1,15 @@
 import { ref, reactive } from 'vue'
 
 import {
-  exportImageBlobToDownloads,
   openManagedProject,
+  writeEncodedImageBlobToDownloads,
   type LibraryRecord,
   type ProjectSummary,
 } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
-import { exportExtension, exportQualityValue, type ExportFormat } from '@/lib/export-options'
-import type { HandoutDocument } from '@/lib/handout'
+import { exportExtension, exportMimeType, exportQualityValue, type ExportFormat } from '@/lib/export-options'
+import type { HandoutDocument, LayerMask } from '@/lib/handout'
+import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
 import { downloadFileName, renderHandoutToBlob } from '@/lib/render'
 import { isImageLayer, useEditorStore } from '@/stores/editor'
 import { useExportProgress } from './useExportProgress'
@@ -47,6 +48,25 @@ export function useHandoutExport(options: {
         .map((layer) => options.editor.resolveAsset(layer.assetId) || options.editor.resolveBackground(layer.assetId)),
     ].filter(Boolean) as LibraryRecord[]
     await Promise.allSettled(records.map((record) => options.loadImage(record)))
+  }
+
+  function enabledDocumentMasks(document: HandoutDocument) {
+    return [
+      document.canvas.backgroundMask,
+      ...document.layers.map((layer) => layer.mask),
+    ].filter((mask): mask is LayerMask => Boolean(mask?.enabled))
+  }
+
+  async function currentMaterializedMaskDataUrls(document: HandoutDocument) {
+    const maskDataUrls = { ...options.editor.maskDataUrls }
+    await Promise.all(enabledDocumentMasks(document).map(async (mask) => {
+      const runtimeDataUrl = editorMaskGpuRuntime.hasCurrentMask(mask)
+        ? editorMaskGpuRuntime.materializeMaskDataUrl(mask)
+        : ''
+      const dataUrl = runtimeDataUrl || await options.editor.loadMaskDataUrl(mask)
+      if (dataUrl) maskDataUrls[mask.id] = dataUrl
+    }))
+    return maskDataUrls
   }
 
   async function exportCurrentImage() {
@@ -89,20 +109,24 @@ export function useHandoutExport(options: {
       exportLog.value = 'Rendering export image...'
       await setExportProgress(42)
       const renderStartedAt = performance.now()
+      const maskDataUrls = await currentMaterializedMaskDataUrls(options.editor.document)
+      const mimeType = exportMimeType(exportFormat.value)
+      const quality = exportQualityValue(exportFormat.value, exportQuality.value)
       const blob = await renderHandoutToBlob(
         options.editor.document,
         options.editor.library,
         exportScale.value,
         options.imageElements,
-        'image/png',
-        undefined,
+        mimeType,
+        quality,
         {
           projectTarget: {
             projectId: options.editor.currentProjectId,
             projectDir: options.editor.projectDir || undefined,
           },
           masksEnabled: appConfiguration.mask.enabled,
-          maskDataUrls: options.editor.maskDataUrls,
+          maskDataUrls,
+          maskRenderMode: 'export-deterministic',
         },
       )
       const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
@@ -110,11 +134,9 @@ export function useHandoutExport(options: {
       exportLog.value = `Writing ${exportFormat.value.toUpperCase()} to Downloads...`
       await setExportProgress(86)
       const writeStartedAt = performance.now()
-      const path = await exportImageBlobToDownloads(
+      const path = await writeEncodedImageBlobToDownloads(
         downloadFileName(options.editor.document.title, new Date(), exportExtension(exportFormat.value)),
         blob,
-        exportFormat.value,
-        exportQualityValue(exportFormat.value, exportQuality.value) ? exportQuality.value : undefined,
       )
       const writeMs = Math.round(performance.now() - writeStartedAt)
       lastCurrentExport.value = { signature, path }
@@ -167,6 +189,7 @@ export function useHandoutExport(options: {
       const blob = await renderHandoutToBlob(payload.document, options.editor.library, 1, options.imageElements, 'image/png', undefined, {
         projectTarget: { projectId: project.id },
         masksEnabled: appConfiguration.mask.enabled,
+        maskRenderMode: 'export-deterministic',
       })
       const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
       options.logExport('export handout render complete', {
@@ -178,7 +201,7 @@ export function useHandoutExport(options: {
         bytes: blob.size,
       })
       const writeStartedAt = performance.now()
-      const path = await exportImageBlobToDownloads(downloadFileName(payload.document.title), blob, 'png')
+      const path = await writeEncodedImageBlobToDownloads(downloadFileName(payload.document.title), blob)
       const writeMs = Math.round(performance.now() - writeStartedAt)
       lastHandoutExports.set(project.id, { signature, path })
       exportLog.value = `Exported image to ${path}`

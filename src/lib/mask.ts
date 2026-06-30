@@ -1,5 +1,7 @@
 import type { HandoutLayer, LayerMask, PaintStroke } from './handout'
+import { appendDebugLog } from './backend'
 import { documentPointToMaskLocal, matrixApplyToPoint } from './mask-geometry'
+import { appendSpeedLog } from './speed-log'
 
 export function createSolidMaskDataUrl(width: number, height: number, value = 255) {
   if (typeof document === 'undefined') return ''
@@ -159,6 +161,11 @@ export function createLayerLocalMaskCanvas(
   const context = output.getContext('2d')
   if (!context) return output
 
+  const defaultAlpha = Math.max(0, Math.min(255, Math.round(mask.defaultAlpha)))
+  context.globalCompositeOperation = 'source-over'
+  context.fillStyle = `rgba(255,255,255,${defaultAlpha / 255})`
+  context.fillRect(0, 0, output.width, output.height)
+
   const origin = maskPointToLayerOutput(layer, mask, 0, 0, sourceScale)
   const xAxis = maskPointToLayerOutput(layer, mask, 1, 0, sourceScale)
   const yAxis = maskPointToLayerOutput(layer, mask, 0, 1, sourceScale)
@@ -170,6 +177,7 @@ export function createLayerLocalMaskCanvas(
     origin.x,
     origin.y,
   )
+  context.clearRect(0, 0, mask.width, mask.height)
   context.drawImage(alphaMask, 0, 0, mask.width, mask.height)
   context.setTransform(1, 0, 0, 1, 0, 0)
   return output
@@ -216,11 +224,13 @@ export async function downsampleDataUrl(dataUrl: string, maxEdge: number) {
   canvas.height = Math.max(1, Math.round(image.height * scale))
   canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
   const result = canvas.toDataURL('image/png')
-  console.debug('[mask] downsampleDataUrl', {
+  const payload = {
     source: { width: image.width, height: image.height },
     target: { width: canvas.width, height: canvas.height },
     maxEdge,
     durationMs: Math.round(performance.now() - startedAt),
-  })
+  }
+  void appendDebugLog('mask', 'downsample-data-url', payload)
+  appendSpeedLog('mask-downsample-data-url', payload)
   return result
 }

@@ -13,7 +13,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     watch: {
-      ignored: ['**/data/**', '**/log.txt', '**/src-tauri/target/**'],
+      ignored: ['**/data/**', '**/logs/**', '**/src-tauri/target/**'],
     },
   },
   resolve: {

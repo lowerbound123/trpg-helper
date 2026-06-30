@@ -5,6 +5,7 @@ import { filterRecords } from '@/composables/useFinderManagement'
 import { hasVisibleEffects } from '@/lib/effects'
 import type { HandoutLayer, LayerGroup, ShapeLayer } from '@/lib/handout'
 import { isCurveShape } from '@/lib/handout'
+import { maskLayerCompositeSignature } from '@/lib/mask-runtime'
 import { isTextLayer, useEditorStore } from '@/stores/editor'
 
 type EditorStore = ReturnType<typeof useEditorStore>
@@ -109,29 +110,7 @@ export function useRenderSignatures(options: {
 
   const layerMaskRenderSignature = computed(() =>
     editor.document.layers
-      .map((layer) => {
-        const mask = layer.mask
-        return [
-          layer.id,
-          layer.type,
-          layer.visible,
-          layer.opacity,
-          layer.blendMode,
-          layer.x,
-          layer.y,
-          layer.width,
-          layer.height,
-          layer.rotation,
-          layer.flipX,
-          mask?.enabled,
-          mask?.id,
-          mask?.version,
-          mask?.updatedAt,
-          mask?.matrix.join(','),
-          Object.keys(mask?.tiles ?? {}).join(','),
-          maskZoomBucket.value,
-        ].join(':')
-      })
+      .map((layer) => maskLayerCompositeSignature(layer, maskZoomBucket.value))
       .join('|'),
   )
 

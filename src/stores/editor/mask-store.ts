@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import { appendDebugLog, deleteProjectMask, readProjectFileDataUrl, saveProjectMask, saveProjectMaskCache, type ProjectTarget } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
 import { maskTransformFromLayer } from '@/lib/mask-geometry'
+import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
 import { createMaskTileStore } from '@/lib/mask-tiles'
 import {
   clearBackgroundMask,
@@ -27,6 +28,15 @@ import type { DirtyReason } from '@/lib/handout/dirty'
 import { createSolidMaskDataUrl, drawMaskStrokes } from '@/lib/mask'
 import type { CommandHistory } from '@/lib/history'
 
+export type MaskChangePulse = {
+  id: number
+  kind: 'layer' | 'background'
+  maskId: string
+  layerId?: string
+  version: number
+  reason: string
+}
+
 export function createMaskStore(deps: {
   document: ComputedRef<HandoutDocument>
   commit: (mutator: (document: HandoutDocument) => HandoutDocument, options?: { merge?: boolean }) => void
@@ -39,7 +49,21 @@ export function createMaskStore(deps: {
   const maskDataUrls = ref<Record<string, string>>({})
   const deletedMaskPaths = ref<string[]>([])
   const maskEditTarget = ref<{ kind: 'layer'; layerId: string } | { kind: 'background' }>()
+  const maskChangePulse = ref<MaskChangePulse>({
+    id: 0,
+    kind: 'layer',
+    maskId: '',
+    version: 0,
+    reason: 'init',
+  })
   const maskPaintQueues = new Map<string, Promise<void>>()
+
+  function emitMaskChangePulse(input: Omit<MaskChangePulse, 'id'>) {
+    maskChangePulse.value = {
+      ...input,
+      id: maskChangePulse.value.id + 1,
+    }
+  }
 
   function newMask(input: Partial<LayerMask> = {}): LayerMask {
     const id = input.id || crypto.randomUUID()
@@ -70,6 +94,7 @@ export function createMaskStore(deps: {
       durationMs: 0,
     })
     deps.commit((doc) => setLayerMask(doc, layerId, mask))
+    emitMaskChangePulse({ kind: 'layer', layerId, maskId: mask.id, version: mask.version, reason: 'add' })
   }
 
   function editLayerMask(layerId: string) {
@@ -91,6 +116,7 @@ export function createMaskStore(deps: {
     if (!appConfiguration.mask.enabled) return
     const mask = newMask()
     deps.commit((doc) => setBackgroundMask(doc, mask))
+    emitMaskChangePulse({ kind: 'background', maskId: mask.id, version: mask.version, reason: 'add' })
   }
 
   function editBackgroundMask() {
@@ -108,18 +134,23 @@ export function createMaskStore(deps: {
     const layer = deps.selectedLayer.value
     if (!layer?.mask) return
     deps.commit((doc) => setLayerMaskEnabled(doc, layer.id, enabled))
+    emitMaskChangePulse({ kind: 'layer', layerId: layer.id, maskId: layer.mask.id, version: layer.mask.version, reason: 'enabled' })
   }
 
   function patchLayerMask(layerId: string, patch: Partial<LayerMask>) {
     if (!appConfiguration.mask.enabled) return
     const layer = deps.document.value.layers.find((item) => item.id === layerId)
     if (!layer?.mask) return
-    deps.commit((doc) => setLayerMask(doc, layerId, {
+    const nextMask = {
       ...layer.mask!,
       ...patch,
       updatedAt: patch.updatedAt ?? new Date().toISOString(),
+    }
+    deps.commit((doc) => setLayerMask(doc, layerId, {
+      ...nextMask,
     }))
     deps.markLayerDirty(layerId, 'mask-changed')
+    emitMaskChangePulse({ kind: 'layer', layerId, maskId: layer.mask.id, version: nextMask.version, reason: 'patch' })
   }
 
   function setMaskCacheMeta(maskId: string, cache: MaskCacheMeta) {
@@ -161,6 +192,7 @@ export function createMaskStore(deps: {
     const mask = deps.document.value.canvas.backgroundMask
     if (!mask) return
     deps.commit((doc) => setBackgroundMask(doc, { ...mask, enabled }))
+    emitMaskChangePulse({ kind: 'background', maskId: mask.id, version: mask.version, reason: 'enabled' })
   }
 
   function queueMaskFilesForDeletion(mask?: LayerMask | null) {
@@ -193,6 +225,7 @@ export function createMaskStore(deps: {
     if (!layer?.mask) return
     const updatedAt = new Date().toISOString()
     deps.commit((doc) => clearLayerMask(doc, layer.id, updatedAt))
+    emitMaskChangePulse({ kind: 'layer', layerId: layer.id, maskId: layer.mask.id, version: layer.mask.version + 1, reason: 'clear' })
   }
 
   function clearCanvasBackgroundMask() {
@@ -201,6 +234,7 @@ export function createMaskStore(deps: {
     if (!mask) return
     const updatedAt = new Date().toISOString()
     deps.commit((doc) => clearBackgroundMask(doc, updatedAt))
+    emitMaskChangePulse({ kind: 'background', maskId: mask.id, version: mask.version + 1, reason: 'clear' })
   }
 
   function deleteSelectedLayerMask() {
@@ -211,6 +245,7 @@ export function createMaskStore(deps: {
     delete maskDataUrls.value[layer.mask.id]
     if (maskEditTarget.value?.kind === 'layer' && maskEditTarget.value.layerId === layer.id) exitMaskEdit()
     deps.commit((doc) => deleteLayerMask(doc, layer.id))
+    emitMaskChangePulse({ kind: 'layer', layerId: layer.id, maskId: layer.mask.id, version: layer.mask.version, reason: 'delete' })
   }
 
   function deleteLayerMaskById(layerId: string) {
@@ -221,6 +256,7 @@ export function createMaskStore(deps: {
     delete maskDataUrls.value[layer.mask.id]
     if (maskEditTarget.value?.kind === 'layer' && maskEditTarget.value.layerId === layer.id) exitMaskEdit()
     deps.commit((doc) => deleteLayerMask(doc, layer.id))
+    emitMaskChangePulse({ kind: 'layer', layerId, maskId: layer.mask.id, version: layer.mask.version, reason: 'delete' })
   }
 
   function deleteCanvasBackgroundMask() {
@@ -231,6 +267,7 @@ export function createMaskStore(deps: {
     delete maskDataUrls.value[mask.id]
     if (maskEditTarget.value?.kind === 'background') exitMaskEdit()
     deps.commit((doc) => deleteBackgroundMask(doc))
+    emitMaskChangePulse({ kind: 'background', maskId: mask.id, version: mask.version, reason: 'delete' })
   }
 
   async function moveOrCopyLayerMask(sourceLayerId: string, targetLayerId: string, copy = false) {
@@ -245,10 +282,12 @@ export function createMaskStore(deps: {
       const nextMaskId = crypto.randomUUID()
       maskDataUrls.value[nextMaskId] = sourceDataUrl
       deps.commit((doc) => copyLayerMask(doc, sourceLayerId, targetLayerId, nextMaskId))
+      emitMaskChangePulse({ kind: 'layer', layerId: targetLayerId, maskId: nextMaskId, version: source.mask.version, reason: 'copy' })
       return
     }
     maskDataUrls.value[source.mask.id] = sourceDataUrl
     deps.commit((doc) => transferLayerMask(doc, sourceLayerId, targetLayerId))
+    emitMaskChangePulse({ kind: 'layer', layerId: targetLayerId, maskId: source.mask.id, version: source.mask.version, reason: 'move' })
     if (maskEditTarget.value?.kind === 'layer' && maskEditTarget.value.layerId === sourceLayerId) {
       maskEditTarget.value = { kind: 'layer', layerId: targetLayerId }
     }
@@ -261,15 +300,18 @@ export function createMaskStore(deps: {
       : deps.document.value.layers.find((item) => item.mask?.id === maskId)?.mask
     if (!currentMask) return
     const nextMask = createMaskTileStore(currentMask).applyStroke(stroke)
+    editorMaskGpuRuntime.syncStrokeApplied(currentMask, stroke, nextMask.version)
     queueMaskPreviewFilesForDeletion(currentMask)
     if (deps.document.value.canvas.backgroundMask?.id === currentMask.id) {
       deps.commit((doc) => setBackgroundMask(doc, nextMask))
+      emitMaskChangePulse({ kind: 'background', maskId: nextMask.id, version: nextMask.version, reason: 'stroke' })
       return
     }
     const layer = deps.document.value.layers.find((item) => item.mask?.id === currentMask.id)
     if (layer) {
       deps.commit((doc) => setLayerMask(doc, layer.id, nextMask))
       deps.markLayerDirty(layer.id, 'mask-changed')
+      emitMaskChangePulse({ kind: 'layer', layerId: layer.id, maskId: nextMask.id, version: nextMask.version, reason: 'stroke' })
     }
   }
 
@@ -363,6 +405,7 @@ export function createMaskStore(deps: {
     maskDataUrls,
     deletedMaskPaths,
     maskEditTarget,
+    maskChangePulse,
     addMaskToLayer,
     editLayerMask,
     addMaskToSelectedLayer,

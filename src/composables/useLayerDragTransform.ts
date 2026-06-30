@@ -14,6 +14,11 @@ type LayerNodeRefs = Reactive<Record<string, NodeRef | undefined>>
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 type DebugLog = (message: string, data?: Record<string, unknown>) => void
 
+export function normalizeRotationDegrees(rotation: number) {
+  const normalized = ((Math.round(rotation) % 360) + 360) % 360
+  return normalized === 360 || Object.is(normalized, -0) ? 0 : normalized
+}
+
 export function useLayerDragTransform(options: {
   editor: EditorStore
   layerNodeRefs: LayerNodeRefs
@@ -109,8 +114,7 @@ export function useLayerDragTransform(options: {
 
     // Step 2: Convert from screen-space rotation to model rotation.
     // For flipX (scaleX=-1), the visual rotation direction is reversed.
-    const rawRotation = Math.round(layer.flipX ? -nodeRotation : nodeRotation)
-    const rotation = rawRotation === 0 ? 0 : rawRotation // normalize -0
+    const rotation = normalizeRotationDegrees(layer.flipX ? -nodeRotation : nodeRotation)
 
     // Reset node to model state AFTER reading rotation
     node.scaleX(layer.flipX ? -1 : 1)

@@ -47,6 +47,7 @@ const draggedShapeKind = ctx.draggedShapeKind as Ref<any>
 const visibleCanvasLayers = ctx.visibleCanvasLayers as any[]
 const selectedCurveLayers = ctx.selectedCurveLayers as any[]
 const draftStroke = ctx.draftStroke as Ref<any>
+const brushCursor = ctx.brushCursor as { visible: boolean; x: number; y: number; diameter: number; mode: 'brush' | 'eraser' }
 const selectionBox = ctx.selectionBox as { visible: boolean; x: number; y: number; width: number; height: number }
 const guideLines = ctx.guideLines as Ref<any[]>
 const maskedBackgroundImage = ctx.maskedBackgroundImage as Ref<any>
@@ -59,6 +60,8 @@ const handleCanvasWheel = ctx.handleCanvasWheel as (event: WheelEvent) => void
 const startCanvasPan = ctx.startCanvasPan as (event: PointerEvent) => void
 const moveCanvasPan = ctx.moveCanvasPan as (event: PointerEvent) => void
 const stopCanvasPan = ctx.stopCanvasPan as () => void
+const updateBrushCursorFromPointer = ctx.updateBrushCursorFromPointer as (event: PointerEvent) => void
+const hideBrushCursor = ctx.hideBrushCursor as () => void
 const handleStagePointer = ctx.handleStagePointer as (event: KonvaEvent) => void
 const startSelectionBox = ctx.startSelectionBox as (event: KonvaEvent) => void
 const moveSelectionBox = ctx.moveSelectionBox as (event: KonvaEvent) => void
@@ -86,7 +89,6 @@ const curvePointKeys = ctx.curvePointKeys as (layer: any) => string[]
 const moveCurvePoint = ctx.moveCurvePoint as (layer: any, key: string, event: KonvaEvent) => void
 const endCurvePointMove = ctx.endCurvePointMove as (layer: any, key: string) => void
 const maskedImageForLayer = ctx.maskedImageForLayer as (layer: any) => any
-const layerMaskActive = ctx.layerMaskActive as (layer: any) => boolean
 const imageForLayer = ctx.imageForLayer as (layer: any) => any
 const isShapeLayer = ctx.isShapeLayer as (layer: any) => boolean
 const zoomIn = ctx.zoomIn as () => void
@@ -94,6 +96,25 @@ const zoomOut = ctx.zoomOut as () => void
 const fitEditorCanvas = ctx.fitEditorCanvas as (reason?: string) => void
 
 void stageFrameRef; void stageRef; void transformerRef
+
+function handleStageFramePointerDown(event: PointerEvent) {
+  startCanvasPan(event)
+  updateBrushCursorFromPointer(event)
+}
+
+function handleStageFramePointerMove(event: PointerEvent) {
+  moveCanvasPan(event)
+  updateBrushCursorFromPointer(event)
+}
+
+function handleStageFramePointerLeave() {
+  stopCanvasPan()
+  hideBrushCursor()
+}
+
+function handleStageFramePointerUp() {
+  stopCanvasPan()
+}
 </script>
 
 <template>
@@ -125,10 +146,10 @@ void stageFrameRef; void stageRef; void transformerRef
       @dragover.capture="handleCanvasDragOver"
       @drop.capture="handleCanvasDrop"
       @wheel.prevent="handleCanvasWheel"
-      @pointerdown="startCanvasPan"
-      @pointermove="moveCanvasPan"
-      @pointerup="stopCanvasPan"
-      @pointerleave="stopCanvasPan"
+      @pointerdown="handleStageFramePointerDown"
+      @pointermove="handleStageFramePointerMove"
+      @pointerup="handleStageFramePointerUp"
+      @pointerleave="handleStageFramePointerLeave"
     >
       <div class="stage-surface" :style="{ filter: documentFilterStyle }">
         <v-stage
@@ -190,7 +211,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-image
-                  v-else-if="!layerMaskActive(layer) && isImageLayer(layer) && imageForLayer(layer)"
+                  v-else-if="isImageLayer(layer) && imageForLayer(layer)"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="{ ...layerConfig(layer), image: imageForLayer(layer) }"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -202,7 +223,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-text
-                  v-else-if="!layerMaskActive(layer) && isTextLayer(layer)"
+                  v-else-if="isTextLayer(layer)"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="textConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -214,7 +235,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-rect
-                  v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && ['rect', 'round-rect'].includes(layer.shape)"
+                  v-else-if="isShapeLayer(layer) && ['rect', 'round-rect'].includes(layer.shape)"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="shapeConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -226,7 +247,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-line
-                  v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)"
+                  v-else-if="isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="shapeConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -238,7 +259,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-ellipse
-                  v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && layer.shape === 'ellipse'"
+                  v-else-if="isShapeLayer(layer) && layer.shape === 'ellipse'"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="shapeConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -250,7 +271,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-shape
-                  v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && isCurveShape(layer.shape)"
+                  v-else-if="isShapeLayer(layer) && isCurveShape(layer.shape)"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="shapeConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -262,7 +283,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-group
-                  v-else-if="!layerMaskActive(layer) && isShapeLayer(layer) && layer.shape === 'line'"
+                  v-else-if="isShapeLayer(layer) && layer.shape === 'line'"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="shapeConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -298,7 +319,7 @@ void stageFrameRef; void stageRef; void transformerRef
                   <v-circle v-if="showLineHandle(layer, editor.selectedLayerIds)" :config="lineHandleConfig(layer)" />
                 </v-group>
                 <v-shape
-                  v-else-if="!layerMaskActive(layer) && isPaintLayer(layer)"
+                  v-else-if="isPaintLayer(layer)"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="paintConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -383,6 +404,16 @@ void stageFrameRef; void stageRef; void transformerRef
           </v-layer>
         </v-stage>
       </div>
+      <div
+        v-if="brushCursor.visible"
+        class="brush-cursor-ring"
+        :class="`brush-cursor-ring-${brushCursor.mode}`"
+        :style="{
+          width: `${brushCursor.diameter}px`,
+          height: `${brushCursor.diameter}px`,
+          transform: `translate(${brushCursor.x - brushCursor.diameter / 2}px, ${brushCursor.y - brushCursor.diameter / 2}px)`,
+        }"
+      />
     </div>
   </section>
 </template>

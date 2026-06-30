@@ -1,10 +1,6 @@
 //! Export command boundary.
 
-use std::{
-    fs,
-    path::PathBuf,
-    time::Instant,
-};
+use std::{fs, path::PathBuf, time::Instant};
 
 use tauri::{AppHandle, Manager};
 
@@ -82,6 +78,27 @@ pub fn export_image_bytes_to_downloads(
 }
 
 #[tauri::command]
+pub fn write_encoded_image_bytes_to_downloads(
+    app: AppHandle,
+    file_name: String,
+    data: Vec<u8>,
+) -> CommandResult<String> {
+    let clean_name = normalize_encoded_export_file_name(&clean_file_name(&file_name));
+    let downloads = app
+        .path()
+        .download_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&downloads)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    let path = downloads.join(clean_name);
+    fs::write(&path, data)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub fn export_image_file_to_downloads(
     app: AppHandle,
     file_name: String,
@@ -129,4 +146,17 @@ pub fn export_image_file_to_downloads(
         started_at.elapsed().as_millis()
     );
     Ok(path.to_string_lossy().to_string())
+}
+
+fn normalize_encoded_export_file_name(file_name: &str) -> String {
+    let lower_name = file_name.to_ascii_lowercase();
+    if lower_name.ends_with(".png")
+        || lower_name.ends_with(".jpg")
+        || lower_name.ends_with(".jpeg")
+        || lower_name.ends_with(".webp")
+    {
+        file_name.to_string()
+    } else {
+        format!("{file_name}.png")
+    }
 }

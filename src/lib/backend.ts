@@ -71,14 +71,27 @@ function isTauriRuntime() {
 }
 
 const HIGH_FREQUENCY_LOG_PATTERN = /(drag|pointer|wheel|resize|mousemove|pan|zoom|snap)/i
+const RENDER_LOG_SCOPES = new Set(['render', 'export', 'thumbnail', 'background-render', 'handout-preview', 'flat'])
 
 function shouldAppendDebugLog(scope: string, message: string) {
   if (!appConfiguration.debug.fileLogEnabled) return false
+  if (scope === 'speed') return appConfiguration.debug.renderPerfLogEnabled
   if (HIGH_FREQUENCY_LOG_PATTERN.test(`${scope}:${message}`)) return false
-  if (/^(render|mask|export|thumbnail|background-render|text)$/.test(scope)) {
+  if (scope === 'mask' || scope === 'text' || RENDER_LOG_SCOPES.has(scope)) {
     return appConfiguration.debug.renderPerfLogEnabled
   }
   return true
+}
+
+export function logFileNameForScope(scope: string) {
+  const normalized = scope.trim().toLowerCase()
+  if (!/^[a-z0-9-]+$/.test(normalized)) return 'app.log'
+  if (normalized === 'speed') return 'speed.log'
+  if (normalized === 'mask') return 'mask.log'
+  if (normalized === 'text') return 'text.log'
+  if (RENDER_LOG_SCOPES.has(normalized)) return 'render.log'
+  if (normalized === 'upload') return 'upload.log'
+  return 'app.log'
 }
 
 export function fileUrl(path?: string | null): string {
@@ -424,6 +437,35 @@ export async function exportImageBlobToDownloads(
   return invoke<string>('export_image_file_to_downloads', { fileName, stagingPath, format, quality: boundedQuality })
 }
 
+export async function writeEncodedImageBlobToDownloads(
+  fileName: string,
+  blob: Blob,
+): Promise<string> {
+  if (!isTauriRuntime()) {
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = fileName || 'handout.png'
+    link.click()
+    URL.revokeObjectURL(link.href)
+    return fileName
+  }
+  const arrayStartedAt = performance.now()
+  const data = Array.from(new Uint8Array(await blob.arrayBuffer()))
+  void appendDebugLog('speed', 'export-encoded-blob-array-buffer', {
+    fileName,
+    bytes: data.length,
+    durationMs: Math.round(performance.now() - arrayStartedAt),
+  })
+  const writeStartedAt = performance.now()
+  const path = await invoke<string>('write_encoded_image_bytes_to_downloads', { fileName, data })
+  void appendDebugLog('speed', 'export-encoded-downloads-write', {
+    fileName,
+    bytes: data.length,
+    durationMs: Math.round(performance.now() - writeStartedAt),
+  })
+  return path
+}
+
 export async function saveProjectPreview(projectId: string, dataUrl: string): Promise<string> {
   if (!isTauriRuntime()) return dataUrl
   return invoke<string>('save_project_preview', { projectId, dataUrl })
@@ -441,5 +483,5 @@ export async function appendDebugLog(scope: string, message: string, data?: unkn
     console.debug(line)
     return line
   }
-  return invoke<string>('append_debug_log', { line })
+  return invoke<string>('append_debug_log', { scope, line })
 }

@@ -882,6 +882,7 @@ textarea {
 }
 
 .stage-frame {
+  position: relative;
   display: grid;
   flex: 1;
   min-height: 0;
@@ -915,11 +916,27 @@ textarea {
 }
 
 .stage-frame-drawing {
-  cursor: crosshair;
+  cursor: none;
 }
 
 .stage-surface {
   will-change: filter;
+}
+
+.brush-cursor-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  box-sizing: border-box;
+  border: 1.5px dashed hsl(222 31% 11% / 0.8);
+  border-radius: 999px;
+  pointer-events: none;
+  will-change: transform, width, height;
+}
+
+.brush-cursor-ring-eraser {
+  border-color: hsl(0 84% 60% / 0.86);
 }
 
 .konvajs-content {

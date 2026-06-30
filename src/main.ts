@@ -4,6 +4,7 @@ import VueKonva from 'vue-konva'
 import VueFinderPlugin from 'vuefinder'
 import './style.css'
 import App from './App.vue'
+import { appendDebugLog } from './lib/backend'
 
 const app = createApp(App)
 
@@ -13,7 +14,7 @@ app.config.warnHandler = (msg, _instance, _trace) => {
   if (typeof msg === 'string' && msg.includes('Extraneous non-emits event listeners') && msg.includes('transform')) {
     return
   }
-  console.warn(msg)
+  void appendDebugLog('app', 'vue-warning', { message: String(msg) })
 }
 
 app.use(createPinia()).use(VueKonva).use(VueFinderPlugin, { i18n: {}, locale: 'zhCN' }).mount('#app')

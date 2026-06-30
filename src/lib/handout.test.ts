@@ -839,7 +839,7 @@ describe('flip-aware rotation compensation', () => {
     if (nodeScaleY < 0) nodeRotation = 180 - nodeRotation
     // Step 2: flipX (scaleX=-1) reverses visual rotation direction
     const result = Math.round(flipX ? -nodeRotation : nodeRotation)
-    return result === 0 ? 0 : result // normalize -0 to 0
+    return ((result % 360) + 360) % 360
   }
 
   it('non-flipped: rotation = rounded node rotation', () => {
@@ -851,12 +851,12 @@ describe('flip-aware rotation compensation', () => {
     // Node rotation in mirrored coords → model rotation is negated
     expect(computeNodeRotation(0, true)).toBe(0)
     expect(computeNodeRotation(-30, true)).toBe(30)
-    expect(computeNodeRotation(45, true)).toBe(-45)
+    expect(computeNodeRotation(45, true)).toBe(315)
   })
 
   it('flipped, scaleY=-1: undo Transformer Y-flip before negating', () => {
-    // Transformer changed scaleY=-1,rot=164: normalize 180-164=16, then flip: -16
-    expect(computeNodeRotation(164, true, -1)).toBe(-16)
+    // Transformer changed scaleY=-1,rot=164: normalize 180-164=16, then flip to 344.
+    expect(computeNodeRotation(164, true, -1)).toBe(344)
     // Transformer at 180 → 0 after normalization, then 0
     expect(computeNodeRotation(180, true, -1)).toBe(0)
   })

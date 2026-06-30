@@ -23,6 +23,7 @@ import { useLayerRenderConfigs } from '@/composables/useLayerRenderConfigs'
 import { useRenderSignatures } from '@/composables/useRenderSignatures'
 import { useMaskComposition } from '@/composables/useMaskComposition'
 import { usePaintStrokes } from '@/composables/usePaintStrokes'
+import { useBrushCursor } from '@/composables/useBrushCursor'
 import { useCurveEditing } from '@/composables/useCurveEditing'
 import { useSelectionBox } from '@/composables/useSelectionBox'
 import { useLayerDragTransform } from '@/composables/useLayerDragTransform'
@@ -60,7 +61,9 @@ const transformerRef = ref<{ getNode: () => Konva.Transformer }>()
 const maskEditNodeRef = ref<NodeRef>()
 const layerNodeRefs = reactive<Record<string, NodeRef | undefined>>({})
 const maskedLayerImages = shallowReactive<Record<string, HTMLCanvasElement | undefined>>({})
-const maskEditImage = ref<HTMLImageElement>()
+const maskedLayerRenderRevisions = shallowReactive<Record<string, number>>({})
+const maskEditImage = ref<CanvasImageSource>()
+const maskEditImageRevision = ref(0)
 const maskPreviewUrls = shallowReactive<Record<string, string | undefined>>({})
 const draggedMaskLayerId = ref('')
 const isDraggingMask = ref(false)
@@ -167,13 +170,12 @@ const {
 })
 const maskCompositionRefreshHolder = {
   refreshMaskPreviewUrls: () => {},
-  scheduleMaskCompositeRefresh: (_reason: string) => {},
+  scheduleMaskCompositeRefresh: (_reason: string, _options?: any) => {},
 }
 const {
   maskPreviewCacheDataUrls,
   maskProxyMaxEdge,
   waitForIdleTask,
-  loadMaskPreviewCacheDataUrl,
 } = useMaskPreviewCache({
   editor,
   stageScale,
@@ -216,6 +218,12 @@ const canvasLayers = computed(() => [...editor.document.layers].sort((a, b) => a
 const visibleCanvasLayers = computed(() =>
   canvasLayers.value.filter((layer) => isLayerEffectivelyVisible(editor.document, layer)),
 )
+function requestMaskedLayerDraw(layerId: string) {
+  void nextTick(() => {
+    const node = layerNodeRefs[layerId]?.getNode()
+    node?.getLayer()?.batchDraw()
+  })
+}
 const activeMaskEditLayer = computed(() => {
   if (!maskFeatureEnabled) return undefined
   const target = editor.maskEditTarget
@@ -244,6 +252,7 @@ const {
   imageElements,
   previewUrl,
   maskedLayerImages,
+  maskedLayerRenderRevisions,
   maskPreviewUrls,
   maskPreviewCacheDataUrls,
   maskFeatureEnabled,
@@ -303,17 +312,20 @@ const {
   stageScale,
   editorMaskPreviewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
   maskProxyMaxEdge,
-  loadMaskPreviewCacheDataUrl,
   activeMaskEditLayer,
   logCanvasLayerRenderState,
   maskedLayerImages,
+  maskedLayerRenderRevisions,
+  requestMaskedLayerDraw,
   maskPreviewUrls,
   maskEditImage,
+  maskEditImageRevision,
 })
 maskCompositionRefreshHolder.refreshMaskPreviewUrls = refreshMaskPreviewUrls
 maskCompositionRefreshHolder.scheduleMaskCompositeRefresh = scheduleMaskCompositeRefresh
 const {
   draftStroke,
+  activePaintDefaults,
   startPaintStroke,
   movePaintStroke,
   stopPaintStroke,
@@ -323,6 +335,17 @@ const {
   maskFeatureEnabled,
   canvasPointFromClient,
   updateTransformer,
+})
+const {
+  brushCursor,
+  updateBrushCursorFromPointer,
+  hideBrushCursor,
+} = useBrushCursor({
+  activeTool,
+  stageFrameRef,
+  stageScale,
+  brushSize: () => activePaintDefaults().width,
+  isPanning: computed(() => panState.active),
 })
 const {
   selectionBox,
@@ -519,8 +542,8 @@ const {
   maskEditNodeRef,
   activeTool,
   maskEditImage,
+  maskEditImageRevision,
   maskProxyMaxEdge,
-  scheduleMaskCompositeRefresh,
   updateTransformer,
   draggedMaskLayerId,
   isDraggingMask,
@@ -655,11 +678,13 @@ provide('canvas-context', {
   visibleCanvasLayers,
   selectedCurveLayers,
   draftStroke,
+  brushCursor,
   selectionBox,
   guideLines,
   maskedBackgroundImage,
   backgroundImage,
   maskEditImage,
+  maskEditImageRevision,
   activeMaskEditLayer,
   handleCanvasDragOver,
   handleCanvasDrop,
@@ -667,6 +692,8 @@ provide('canvas-context', {
   startCanvasPan,
   moveCanvasPan,
   stopCanvasPan,
+  updateBrushCursorFromPointer,
+  hideBrushCursor,
   handleStagePointer,
   startSelectionBox,
   moveSelectionBox,
@@ -826,15 +853,15 @@ async function addAssetToCanvas(asset: LibraryRecord) {
 
 function addFontTextToCanvas(font: LibraryRecord, position?: { x?: number; y?: number }) {
   if (fontDragStarted.value) return
-  console.log('[font-drag] addFontTextToCanvas (click) — font:', font.name, 'family:', fontFamily(font))
+  logText('add-font-text-to-canvas-click', { fontId: font.id, fontName: font.name, fontFamily: fontFamily(font) })
   editor.applyOrCreateTextWithFont(font, position)
   void updateTransformer()
 }
 
 function createFontTextOnCanvas(font: LibraryRecord, position?: { x?: number; y?: number }) {
-  console.log('[font-drag] createFontTextOnCanvas — font:', font.name, 'family:', fontFamily(font), 'position:', position)
+  logText('create-font-text-on-canvas', { fontId: font.id, fontName: font.name, fontFamily: fontFamily(font), position })
   editor.addText(font, position)
-  console.log('[font-drag] createFontTextOnCanvas — done, layers:', editor.document.layers.length)
+  logText('create-font-text-on-canvas-complete', { layerCount: editor.document.layers.length })
   void updateTransformer()
 }
 
@@ -891,7 +918,7 @@ onMounted(async () => {
     // other element (Konva canvas, etc.) can interfere with the event.
     window.addEventListener('dragover', handleDocumentFontDragOver, { capture: true })
     window.addEventListener('drop', handleDocumentFontDrop, { capture: true })
-    console.log('[font-drag] window capture listeners registered for dragover + drop')
+    logText('font-drag-window-listeners-registered')
     resizeStageViewport()
     window.addEventListener('resize', resizeStageViewport)
     isBooting.value = false
@@ -936,7 +963,22 @@ watch(textLayerRenderSignature, () => {
 watch(layerEffectsSignature, (nextSignature, previousSignature) => {
   scheduleLayerEffectCacheRefresh(changedEffectLayerIds(nextSignature, previousSignature))
 })
+let maskSignatureHandledByPulse = ''
+watch(() => editor.maskChangePulse, (pulse) => {
+  if (!pulse?.id) return
+  maskSignatureHandledByPulse = layerMaskRenderSignature.value
+  const maskIds = pulse.maskId ? [pulse.maskId] : undefined
+  const layerIds = pulse.layerId ? [pulse.layerId] : undefined
+  scheduleMaskCompositeRefresh(`mask-pulse:${pulse.reason}`, {
+    layerIds,
+    maskIds,
+    immediate: true,
+  })
+  void refreshMaskPreviewUrls(maskIds ? { maskIds } : undefined)
+  void refreshMaskEditImage()
+}, { flush: 'post' })
 watch(layerMaskRenderSignature, () => {
+  if (layerMaskRenderSignature.value === maskSignatureHandledByPulse) return
   scheduleMaskCompositeRefresh('layer-mask-signature')
   void refreshMaskPreviewUrls()
   void refreshMaskEditImage()

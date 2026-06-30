@@ -8,6 +8,9 @@ export type ComposeMaskPreviewInput = {
   sourceCanvas: HTMLCanvasElement
   localMaskCanvas: HTMLCanvasElement
   sourceVersion: number
+  maskVersion?: number
+  maskMatrixKey?: string
+  compositeRunId?: number
 }
 
 export type ComposeMaskPreviewResult = {
@@ -75,8 +78,10 @@ async function composeMaskPreviewWithRenderer(
   const renderStartedAt = now()
   const app = await getSharedApp(width, height, rendererKey, preference)
   const stage = new Container()
-  const sourceTexture = Texture.from(input.sourceCanvas)
-  const maskTexture = Texture.from(input.localMaskCanvas)
+  const sourceTexture = Texture.from(input.sourceCanvas, true)
+  const maskTexture = Texture.from(input.localMaskCanvas, true)
+  sourceTexture.source.update()
+  maskTexture.source.update()
   const source = new Sprite(sourceTexture)
   const mask = new Sprite(maskTexture)
   source.width = width
@@ -99,8 +104,8 @@ async function composeMaskPreviewWithRenderer(
 
   source.mask = null
   stage.destroy({ children: true })
-  sourceTexture.destroy(true)
-  maskTexture.destroy(true)
+  sourceTexture.destroy(false)
+  maskTexture.destroy(false)
 
   return {
     canvas,
@@ -118,6 +123,14 @@ async function composeMaskPreviewWithRenderer(
 
 export async function composeMaskPreview(input: ComposeMaskPreviewInput): Promise<ComposeMaskPreviewResult> {
   try {
+    void appendDebugLog('mask', 'pixi-mask-compose-start', {
+      layerId: input.layerId,
+      maskId: input.maskId,
+      maskVersion: input.maskVersion,
+      maskMatrixKey: input.maskMatrixKey,
+      compositeRunId: input.compositeRunId,
+      sourceVersion: input.sourceVersion,
+    })
     return await composeMaskPreviewWithRenderer(input, 'gpu', ['webgpu', 'webgl', 'canvas'])
   } catch (error) {
     sharedApps.delete('gpu')

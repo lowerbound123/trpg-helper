@@ -34,7 +34,7 @@ pub fn repair_missing_thumbnails(app: AppHandle) -> CommandResult<LibraryIndex> 
         match ensure_record_thumbnail(&app, record) {
             Ok(record_changed) => changed |= record_changed,
             Err(error) => {
-                let _ = write_debug_log(&format!(
+                let _ = write_debug_log("thumbnail", &format!(
                     "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to repair thumbnail\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"error\":\"{}\"}}}}",
                     Utc::now().to_rfc3339(),
                     record.id.replace('"', "\\\""),
@@ -285,8 +285,8 @@ pub fn save_font_preview(
 }
 
 #[tauri::command]
-pub fn append_debug_log(line: String) -> CommandResult<String> {
-    write_debug_log(&line)
+pub fn append_debug_log(scope: String, line: String) -> CommandResult<String> {
+    write_debug_log(&scope, &line)
 }
 
 #[tauri::command]

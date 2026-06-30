@@ -7,9 +7,7 @@ mod types;
 // mask_commands.rs) that reference these via `crate::` paths.
 pub(crate) use errors::{AppError, CommandResult};
 pub(crate) use services::path_service::clean_file_name;
-pub(crate) use services::path_service::{
-    decode_data_url, encode_data_url, remove_file_if_exists,
-};
+pub(crate) use services::path_service::{decode_data_url, encode_data_url, remove_file_if_exists};
 pub(crate) use services::project_service::{resolve_project_root, safe_project_relative_path};
 // Re-exports used by `run()` setup hook.
 pub(crate) use services::asset_service::ensure_library;
@@ -19,7 +17,7 @@ pub(crate) use services::path_service::reset_debug_log;
 use commands::asset_commands::*;
 use commands::export_commands::{
     export_image, export_image_bytes_to_downloads, export_image_file_to_downloads,
-    export_image_to_downloads,
+    export_image_to_downloads, write_encoded_image_bytes_to_downloads,
 };
 use commands::mask_commands::{
     delete_project_mask, read_project_file_data_url, save_project_mask, save_project_mask_cache,
@@ -82,6 +80,7 @@ pub fn run() {
             save_project_mask,
             save_project_mask_cache,
             save_project_preview,
+            write_encoded_image_bytes_to_downloads,
             write_configuration
         ])
         .run(tauri::generate_context!())

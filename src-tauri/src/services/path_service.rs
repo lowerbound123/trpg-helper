@@ -161,8 +161,25 @@ pub(crate) fn encode_data_url(path: &Path, media_type: &str) -> Result<String, A
     ))
 }
 
-pub(crate) fn write_debug_log(line: &str) -> CommandResult<String> {
-    let path = project_root().map_err(String::from)?.join("log.txt");
+pub(crate) fn debug_log_file_name(scope: &str) -> &'static str {
+    match scope {
+        "speed" => "speed.log",
+        "mask" => "mask.log",
+        "text" => "text.log",
+        "render" | "export" | "thumbnail" | "background-render" | "handout-preview" | "flat" => {
+            "render.log"
+        }
+        "upload" => "upload.log",
+        _ => "app.log",
+    }
+}
+
+pub(crate) fn write_debug_log(scope: &str, line: &str) -> CommandResult<String> {
+    let logs_dir = project_root().map_err(String::from)?.join("logs");
+    fs::create_dir_all(&logs_dir)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    let path = logs_dir.join(debug_log_file_name(scope));
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -176,7 +193,10 @@ pub(crate) fn write_debug_log(line: &str) -> CommandResult<String> {
 }
 
 pub(crate) fn reset_debug_log() {
-    if let Ok(path) = project_root().map(|root| root.join("log.txt")) {
-        let _ = fs::write(path, "");
+    if let Ok(path) = project_root().map(|root| root.join("logs")) {
+        let _ = fs::create_dir_all(&path);
+        for file_name in ["app.log", "mask.log", "render.log", "speed.log", "text.log", "upload.log"] {
+            let _ = fs::write(path.join(file_name), "");
+        }
     }
 }

@@ -20,6 +20,7 @@ export function useLayerRenderConfigs(options: {
   imageElements: ImageCache
   previewUrl: (record: LibraryRecord) => string | undefined
   maskedLayerImages: MaskedImageMap
+  maskedLayerRenderRevisions: Record<string, number | undefined>
   maskPreviewUrls: MaskPreviewUrlMap
   maskPreviewCacheDataUrls: MaskPreviewUrlMap
   maskFeatureEnabled: boolean
@@ -31,6 +32,7 @@ export function useLayerRenderConfigs(options: {
     imageElements,
     previewUrl,
     maskedLayerImages,
+    maskedLayerRenderRevisions,
     maskPreviewUrls,
     maskPreviewCacheDataUrls,
     maskFeatureEnabled,
@@ -76,9 +78,7 @@ export function useLayerRenderConfigs(options: {
     const activeMask = layerMaskActive(layer)
     const branch = masked
       ? 'masked-image'
-      : activeMask
-        ? 'masked-waiting'
-        : isImageLayer(layer) && rawImage
+      : isImageLayer(layer) && rawImage
           ? 'raw-image'
           : isTextLayer(layer)
             ? 'raw-text'
@@ -86,7 +86,9 @@ export function useLayerRenderConfigs(options: {
               ? `raw-shape:${layer.shape}`
               : isPaintLayer(layer)
                 ? 'raw-paint'
-                : 'none'
+                : activeMask
+                  ? 'raw-unavailable'
+                  : 'none'
     return {
       id: layer.id,
       name: layer.name,
@@ -207,6 +209,7 @@ export function useLayerRenderConfigs(options: {
     return {
       ...layerConfig(layer),
       image: maskedImageForLayer(layer),
+      maskRenderRevision: maskedLayerRenderRevisions[layer.id] ?? 0,
       listening: !isPaintLayer(layer) || selectedPaint,
       draggable: (!isPaintLayer(layer) || selectedPaint) && activeTool.value === 'select' && !layer.locked,
     }

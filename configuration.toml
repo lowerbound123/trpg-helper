@@ -3,7 +3,7 @@
 
 [paths]
 data_dir = "./data"
-log_file = "./log.txt"
+log_file = "./logs/app.log"
 
 [uploads]
 max_file_size = "100mb"

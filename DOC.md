@@ -88,7 +88,7 @@
 
 ### 开发流程
 
-- **浏览器端**：`pnpm dev` → Vite HMR（忽略 `data/`、`log.txt`、`src-tauri/target/`）
+- **浏览器端**：`pnpm dev` → Vite HMR（忽略 `data/`、`logs/`、`src-tauri/target/`）
 - **桌面端**：`pnpm tauri dev` → 自动执行 `pnpm dev` 启动 Vite，原生窗口加载 `http://localhost:5173`
 - **生产打包**：`pnpm tauri build` → 先 `pnpm build` 构建前端，再 Tauri 打包 `dist/` 为桌面应用
 
@@ -201,14 +201,14 @@ handout-generator/
 |---|---|---|
 | `package.json` | 项目元数据、依赖、脚本 | `type: module`；devEngines 强制 pnpm 11.8.0；脚本见第 3 节 |
 | `pnpm-workspace.yaml` | pnpm 工作区配置 | `allowBuilds.vue-demi: false`；`storeDir: .pnpm-store` |
-| `vite.config.ts` | Vite 构建配置 | `vue()` + `tailwindcss()` 插件；端口 5173 strictPort；`@` → `./src` 别名；忽略 `data/`、`log.txt`、`src-tauri/target/` |
+| `vite.config.ts` | Vite 构建配置 | `vue()` + `tailwindcss()` 插件；端口 5173 strictPort；`@` → `./src` 别名；忽略 `data/`、`logs/`、`src-tauri/target/` |
 | `tsconfig.json` | 根 TS 配置 | 项目引用模式，引用 `tsconfig.app.json` 与 `tsconfig.node.json`；`@/*` → `./src/*` |
 | `tsconfig.app.json` | 应用 TS 配置 | 继承 `@vue/tsconfig/tsconfig.dom.json`；`types: ["vite/client"]`；严格 lint 选项 |
 | `tsconfig.node.json` | Node 端 TS 配置 | `target: es2023`；bundler 模式；仅含 `vite.config.ts` |
 | `components.json` | shadcn-vue CLI 配置 | `style: "new-york"`；`font: "inter"`；`iconLibrary: "lucide"`；别名映射 |
 | `configuration.toml` | 应用运行时配置 | 见下表 |
 | `index.html` | Vite HTML 入口 | `<div id="app">`；入口 `/src/main.ts`；favicon `/favicon.svg` |
-| `.gitignore` | Git 忽略规则 | `node_modules`、`.pnpm-store`、`dist`、`data`、`src-tauri/target`、`log.txt` 等 |
+| `.gitignore` | Git 忽略规则 | `node_modules`、`.pnpm-store`、`dist`、`data`、`logs`、`src-tauri/target` 等 |
 | `.vscode/extensions.json` | 推荐 VS Code 扩展 | `Vue.volar` |
 
 ### `configuration.toml` 配置项
@@ -216,7 +216,7 @@ handout-generator/
 | 段 | 键 | 默认值 | 说明 |
 |---|---|---|---|
 | `[paths]` | `data_dir` | `./data` | 数据目录 |
-| | `log_file` | `./log.txt` | 日志文件 |
+| | `log_file` | `./logs/app.log` | 默认应用日志文件 |
 | `[uploads]` | `max_file_size` | `100mb` | 上传文件大小上限 |
 | `[previews]` | `thumbnail_max_edge_px` | `256` | 缩略图最大边长 |
 | | `thumbnail_quality` | `80` | 缩略图质量 |
@@ -588,7 +588,7 @@ data/
 ```
 
 **根目录运行时文件**：
-- `log.txt` — 调试日志（启动时清空，由 `append_debug_log` 追加）
+- `logs/*.log` — 调试日志（启动时清空默认日志文件，由 `append_debug_log` 按 scope 追加；渲染耗时在 `logs/speed.log`）
 - `configuration.toml` — 应用配置（由 `read/write_configuration` 读写）
 
 ---
@@ -666,7 +666,7 @@ data/
 | 命令 | 用途 |
 |---|---|
 | `read_file_data_url` | 读取任意文件为 data URL |
-| `append_debug_log` | 追加调试日志 |
+| `append_debug_log(scope, line)` | 按 scope 追加调试日志到 `logs/*.log` |
 | `read_configuration` | 读取 configuration.toml |
 | `write_configuration` | 写入 configuration.toml |
 

@@ -50,7 +50,6 @@ function fontFamily(font?: LibraryRecord) {
 }
 
 function logText(message: string, data?: Record<string, unknown>) {
-  console.debug(`[text] ${message}`, data)
   void appendDebugLog('text', message, data)
 }
 
@@ -636,6 +635,7 @@ export const useEditorStore = defineStore('editor', () => {
     // 转发 mask store
     maskDataUrls: maskStore.maskDataUrls,
     maskEditTarget: maskStore.maskEditTarget,
+    maskChangePulse: maskStore.maskChangePulse,
     addMaskToLayer: maskStore.addMaskToLayer,
     addMaskToSelectedLayer: maskStore.addMaskToSelectedLayer,
     addBackgroundMask: maskStore.addBackgroundMask,

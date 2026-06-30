@@ -7,7 +7,7 @@ import { createDefaultHandout, addImageLayer, type HandoutLayer, type ShapeLayer
 import { layerPositionFromNode } from '@/lib/layer-rendering'
 import { useEditorStore } from '@/stores/editor'
 
-import { useLayerDragTransform } from './useLayerDragTransform'
+import { normalizeRotationDegrees, useLayerDragTransform } from './useLayerDragTransform'
 
 function createDragTransform() {
   return useLayerDragTransform({
@@ -51,5 +51,13 @@ describe('layer drag transform helpers', () => {
 
     expect(layerPositionFromNode(layer, node).x).toBe(42)
     expect(node.x()).toBe(142)
+  })
+
+  it('normalizes flipped transform rotations into the 0..359 model range', () => {
+    expect(normalizeRotationDegrees(45)).toBe(45)
+    expect(normalizeRotationDegrees(-45)).toBe(315)
+    expect(normalizeRotationDegrees(-16)).toBe(344)
+    expect(normalizeRotationDegrees(-0)).toBe(0)
+    expect(normalizeRotationDegrees(390)).toBe(30)
   })
 })

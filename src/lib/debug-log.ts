@@ -24,7 +24,6 @@ export function serializableLogData(data?: Record<string, unknown>) {
 
 export function writeDebugLog(scope: string, message: string, data?: Record<string, unknown>) {
   const payload = serializableLogData(data)
-  console.debug(`[${scope}] ${message}`, payload)
   if (!shouldWriteFileLog(scope, message)) return
   void appendDebugLog(scope, message, payload)
 }

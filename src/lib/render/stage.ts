@@ -5,6 +5,7 @@ import { hasVisibleEffects, konvaEffectConfig } from '@/lib/effects'
 import type { HandoutDocument } from '@/lib/handout'
 import { isLayerEffectivelyVisible } from '@/lib/handout'
 import { applyGrayMaskToCanvas } from '@/lib/mask'
+import { appendSpeedLog } from '@/lib/speed-log'
 
 import { loadImage, resolveImageRecord } from './image-loading'
 import { loadMaskImage, maskedLayerImageNode } from './mask-composition'
@@ -19,9 +20,19 @@ export async function renderHandoutToDataUrl(
   quality?: number,
   options?: RenderMaskOptions,
 ) {
+  const startedAt = performance.now()
   const { stage, destroy } = await renderHandoutStage(document, library, cache, options)
   try {
-    return compressedStageDataUrl(stage, mimeType, Math.max(0.1, Number(scale) || 1), quality)
+    const pixelRatio = Math.max(0.1, Number(scale) || 1)
+    const dataUrl = compressedStageDataUrl(stage, mimeType, pixelRatio, quality)
+    appendSpeedLog('handout-render-data-url', {
+      canvasWidth: document.canvas.width,
+      canvasHeight: document.canvas.height,
+      mimeType,
+      pixelRatio,
+      durationMs: Math.round(performance.now() - startedAt),
+    })
+    return dataUrl
   } finally {
     destroy()
   }
@@ -36,12 +47,23 @@ export async function renderHandoutToBlob(
   quality?: number,
   options?: RenderMaskOptions,
 ) {
+  const startedAt = performance.now()
   const { stage, destroy } = await renderHandoutStage(document, library, cache, options)
   try {
+    const pixelRatio = Math.max(0.1, Number(scale) || 1)
     const canvas = stage.toCanvas({
-      pixelRatio: Math.max(0.1, Number(scale) || 1),
+      pixelRatio,
     })
-    return canvasToBlob(canvas, mimeType, quality)
+    const blob = await canvasToBlob(canvas, mimeType, quality)
+    appendSpeedLog('handout-render-blob', {
+      canvasWidth: document.canvas.width,
+      canvasHeight: document.canvas.height,
+      mimeType,
+      pixelRatio,
+      bytes: blob.size,
+      durationMs: Math.round(performance.now() - startedAt),
+    })
+    return blob
   } finally {
     destroy()
   }

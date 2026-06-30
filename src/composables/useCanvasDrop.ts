@@ -44,7 +44,6 @@ export function useCanvasDrop(options: {
     const fontId = event.dataTransfer?.getData('application/x-handout-font') || draggedFontId.value
     const fontName = event.dataTransfer?.getData('application/x-handout-font-name') || event.dataTransfer?.getData('text/plain') || ''
     const fontFamilyName = event.dataTransfer?.getData('application/x-handout-font-family') || ''
-    console.log('[font-drag] handleCanvasDrop — fontId:', fontId, 'draggedFontId:', draggedFontId.value, 'fontName:', fontName, 'fontFamilyName:', fontFamilyName, 'types:', event.dataTransfer ? Array.from(event.dataTransfer.types) : [])
     logText('canvas-drop', {
       fontId, fontName, fontFamilyName,
       draggedFontId: draggedFontId.value,
@@ -53,9 +52,8 @@ export function useCanvasDrop(options: {
     })
     const font = editor.resolveFont(fontId)
       || editor.library.fonts.find((item) => item.name === fontName || fontFamily(item) === fontName || fontFamily(item) === fontFamilyName)
-    console.log('[font-drag] handleCanvasDrop — resolved font:', font ? font.name : 'NULL')
+    logText('canvas-drop-font-resolved', { resolved: Boolean(font), fontId: font?.id, fontName: font?.name })
     if (font) {
-      console.log('[font-drag] handleCanvasDrop — calling createFontTextOnCanvas')
       createFontTextOnCanvas(font, point)
       draggedFontId.value = ''
       return
@@ -68,7 +66,7 @@ export function useCanvasDrop(options: {
         const paths = JSON.parse(itemsData) as string[]
         const vueFinderFont = paths.map((path) => fontRecordFromDragPath(path)).find(Boolean)
         if (vueFinderFont) {
-          console.log('[font-drag] handleCanvasDrop — resolved font from vuefinder items:', vueFinderFont.name)
+          logText('canvas-drop-vuefinder-font-resolved', { fontId: vueFinderFont.id, fontName: vueFinderFont.name })
           createFontTextOnCanvas(vueFinderFont, point)
           return
         }
@@ -111,7 +109,7 @@ export function useCanvasDrop(options: {
 
   function handleDocumentFontDragOver(event: DragEvent) {
     if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) {
-      if (draggedFontId.value) console.log('[font-drag] handleDocumentFontDragOver — outside stage frame, client:', event.clientX, event.clientY)
+      if (draggedFontId.value) logText('font-document-dragover-outside-stage', { client: { x: event.clientX, y: event.clientY } })
       return
     }
     event.preventDefault()
@@ -119,7 +117,6 @@ export function useCanvasDrop(options: {
     const now = window.performance.now()
     if (now - lastFontDragOverLogAt > 300) {
       lastFontDragOverLogAt = now
-      console.log('[font-drag] handleDocumentFontDragOver — draggedFontId:', draggedFontId.value, 'types:', event.dataTransfer?.types)
       logText('font-document-dragover', {
         draggedFontId: draggedFontId.value,
         types: event.dataTransfer ? Array.from(event.dataTransfer.types) : [],
@@ -130,11 +127,9 @@ export function useCanvasDrop(options: {
   }
 
   function handleDocumentFontDrop(event: DragEvent) {
-    console.log('[font-drag] handleDocumentFontDrop FIRED — draggedFontId:', draggedFontId.value, 'insideStage:', pointInsideStageFrame(event.clientX, event.clientY), 'client:', event.clientX, event.clientY)
     if (!draggedFontId.value || !pointInsideStageFrame(event.clientX, event.clientY)) return
     event.preventDefault()
     const font = editor.resolveFont(draggedFontId.value)
-    console.log('[font-drag] handleDocumentFontDrop — resolved font:', font ? font.name : 'NULL')
     logText('font-document-drop', {
       draggedFontId: draggedFontId.value,
       resolved: Boolean(font),
@@ -142,7 +137,6 @@ export function useCanvasDrop(options: {
       canvas: canvasPointFromClient(event.clientX, event.clientY),
     })
     if (!font) return
-    console.log('[font-drag] handleDocumentFontDrop — calling createFontTextOnCanvas')
     createFontTextOnCanvas(font, canvasPointFromClient(event.clientX, event.clientY))
     draggedFontId.value = ''
   }

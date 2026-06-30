@@ -13,6 +13,11 @@ type EditorTool = 'select' | 'brush' | 'eraser'
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 type MaskPreviewUrlMap = Record<string, string | undefined>
 
+function normalizeRotationDegrees(rotation: number) {
+  const normalized = ((rotation % 360) + 360) % 360
+  return Object.is(normalized, -0) ? 0 : normalized
+}
+
 export function useMaskActions(options: {
   editor: EditorStore
   maskFeatureEnabled: boolean
@@ -24,9 +29,9 @@ export function useMaskActions(options: {
   layerName: (layer: HandoutLayer) => string
   maskEditNodeRef: Ref<NodeRef | undefined>
   activeTool: Ref<EditorTool>
-  maskEditImage: Ref<HTMLImageElement | undefined>
+  maskEditImage: Ref<CanvasImageSource | undefined>
+  maskEditImageRevision: Ref<number>
   maskProxyMaxEdge: () => number
-  scheduleMaskCompositeRefresh: (reason: string) => void
   updateTransformer: () => void
   draggedMaskLayerId: Ref<string>
   isDraggingMask: Ref<boolean>
@@ -34,8 +39,8 @@ export function useMaskActions(options: {
   const {
     editor, maskFeatureEnabled, selectedMaskControlLayers, selectedMaskControlDeletes,
     refreshMaskPreviewUrls, maskPreviewUrls, maskPreviewCacheDataUrls,
-    layerName, maskEditNodeRef, activeTool, maskEditImage, maskProxyMaxEdge,
-    scheduleMaskCompositeRefresh, updateTransformer,
+    layerName, maskEditNodeRef, activeTool, maskEditImage, maskEditImageRevision, maskProxyMaxEdge,
+    updateTransformer,
     draggedMaskLayerId, isDraggingMask,
   } = options
 
@@ -89,9 +94,10 @@ export function useMaskActions(options: {
     if (!maskFeatureEnabled) return
     event.stopPropagation()
     if (!layer.mask) return
-    editor.patchLayer(layer.id, {
-      mask: { ...layer.mask, enabled: !layer.mask.enabled, updatedAt: new Date().toISOString() },
-    } as Partial<HandoutLayer>)
+    editor.patchLayerMask(layer.id, {
+      enabled: !layer.mask.enabled,
+      updatedAt: new Date().toISOString(),
+    })
   }
 
   function startMaskDrag(layer: HandoutLayer, event: DragEvent) {
@@ -129,6 +135,7 @@ export function useMaskActions(options: {
     const transform = mask ? matrixDecompose(mask.matrix) : undefined
     return {
       image: maskEditImage.value,
+      maskRenderRevision: maskEditImageRevision.value,
       x: transform?.x,
       y: transform?.y,
       width: mask?.width,
@@ -136,7 +143,7 @@ export function useMaskActions(options: {
       scaleX: transform?.scaleX,
       scaleY: transform?.scaleY,
       rotation: transform?.rotation,
-      opacity: isDraggingMask.value ? 0.42 : 0,
+      opacity: isDraggingMask.value ? 0.58 : 0.26,
       draggable: canDragMask,
       listening: canDragMask,
     }
@@ -153,23 +160,24 @@ export function useMaskActions(options: {
   function onMaskEditDragEnd(layer: HandoutLayer, event: KonvaEvent) {
     if (!maskFeatureEnabled || !layer.mask) return
     const node = event.target
+    const x = node.x()
+    const y = node.y()
     const transform = matrixDecompose(layer.mask.matrix)
+    isDraggingMask.value = false
     editor.patchLayerMask(layer.id, {
       matrix: matrixFromComponents({
-        x: node.x(),
-        y: node.y(),
+        x,
+        y,
         rotation: transform.rotation,
         scaleX: transform.scaleX,
         scaleY: transform.scaleY,
       }),
-      x: node.x(),
-      y: node.y(),
+      x,
+      y,
     })
-    isDraggingMask.value = false
     void appendDebugLog('mask', 'mask-edit-drag-end', {
-      layerId: layer.id, maskId: layer.mask.id, x: node.x(), y: node.y(),
+      layerId: layer.id, maskId: layer.mask.id, x, y,
     })
-    scheduleMaskCompositeRefresh('mask-edit-drag-end')
   }
 
   function onMaskEditTransformEnd(layer: HandoutLayer, event: KonvaEvent) {
@@ -177,11 +185,13 @@ export function useMaskActions(options: {
     const node = event.target
     const scaleX = node.scaleX()
     const scaleY = node.scaleY()
+    const rotation = normalizeRotationDegrees(node.rotation())
+    isDraggingMask.value = false
     editor.patchLayerMask(layer.id, {
       matrix: matrixFromComponents({
         x: node.x(),
         y: node.y(),
-        rotation: node.rotation(),
+        rotation,
         scaleX,
         scaleY,
       }),
@@ -189,10 +199,9 @@ export function useMaskActions(options: {
       y: node.y(),
       scaleX: Math.abs(scaleX),
       scaleY: Math.abs(scaleY),
-      rotation: node.rotation(),
+      rotation,
       flipX: scaleX < 0,
     })
-    scheduleMaskCompositeRefresh('mask-edit-transform-end')
     void updateTransformer()
   }
 

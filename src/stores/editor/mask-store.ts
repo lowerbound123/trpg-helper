@@ -6,7 +6,7 @@ import { appConfiguration } from '@/lib/configuration'
 import { maskTransformFromLayer } from '@/lib/mask-geometry'
 import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
 import { createMaskTileStore } from '@/lib/mask-tiles'
-import { maskShapeGrayValue, maskStrokeStrength, maskStrokeTargetValue } from '@/lib/mask-shapes'
+import { maskShapeGrayValue, maskShapeStrength, maskStrokeStrength, maskStrokeTargetValue } from '@/lib/mask-shapes'
 import {
   clearBackgroundMask,
   clearLayerMask,
@@ -316,7 +316,6 @@ export function createMaskStore(deps: {
       source: 'opacity',
       brushOpacity: stroke.opacity ?? null,
       eraserOpacity: stroke.eraserOpacity ?? null,
-      paintValue: maskStrokeTargetValue(stroke),
       targetValue: maskStrokeTargetValue(stroke),
       strength: maskStrokeStrength(stroke),
       strokeWidth: stroke.strokeWidth,
@@ -361,8 +360,9 @@ export function createMaskStore(deps: {
       shapeId: shape.id,
       shape: shape.shape,
       source: 'opacity',
-      opacity: maskShapeGrayValue(shape) / 255,
-      paintValue: maskShapeGrayValue(shape),
+      targetValue: 255,
+      strength: maskShapeStrength(shape),
+      strengthValue: maskShapeGrayValue(shape),
       value: maskShapeGrayValue(shape),
       bounds: { x: shape.x, y: shape.y, width: shape.width, height: shape.height },
       strokeWidth: shape.strokeWidth,

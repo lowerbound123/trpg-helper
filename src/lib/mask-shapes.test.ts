@@ -113,31 +113,45 @@ describe('mask shape operations', () => {
       get globalCompositeOperation() {
         return 'source-over'
       },
+      set globalAlpha(value: number) {
+        calls.push(`alpha:${value}`)
+      },
+      get globalAlpha() {
+        return 1
+      },
     } as unknown as CanvasRenderingContext2D
 
-    drawMaskShapeToContext(context, shape({ value: 0 }))
+    drawMaskShapeToContext(context, shape({ value: 128 }))
 
     expect(calls).toContain('composite:source-over')
-    expect(calls).toContain('fillStyle:rgb(0,0,0)')
-    expect(calls).toContain('strokeStyle:rgb(0,0,0)')
+    expect(calls).toContain('alpha:0.5019607843137255')
+    expect(calls).toContain('fillStyle:rgb(255,255,255)')
+    expect(calls).toContain('strokeStyle:rgb(255,255,255)')
     expect(calls).toContain('rect:128:256:300:180')
     expect(calls).toContain('fill')
     expect(calls).toContain('stroke')
   })
 
-  it('uses opacity as the mask target value instead of cumulative strength', () => {
-    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0 }))).toBe(0)
-    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0.4, color: '#ffffff' }))).toBe(102)
-    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 1, color: '#000000' }))).toBe(255)
-    expect(maskStrokeStrength(stroke({ mode: 'brush', opacity: 0.1 }))).toBe(1)
+  it('uses opacity as cumulative strength toward black or white', () => {
+    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0, color: '#000000' }))).toBe(255)
+    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0.5, color: '#000000' }))).toBe(255)
+    expect(maskStrokeStrength(stroke({ mode: 'brush', opacity: 0 }))).toBe(0)
+    expect(maskStrokeStrength(stroke({ mode: 'brush', opacity: 0.5 }))).toBe(0.5)
 
-    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 1 }))).toBe(0)
-    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0.4 }))).toBe(153)
-    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0 }))).toBe(255)
-    expect(maskStrokeStrength(stroke({ mode: 'eraser', eraserOpacity: 0.1 }))).toBe(1)
+    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0 }))).toBe(0)
+    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0.5 }))).toBe(0)
+    expect(maskStrokeStrength(stroke({ mode: 'eraser', eraserOpacity: 0 }))).toBe(0)
+    expect(maskStrokeStrength(stroke({ mode: 'eraser', eraserOpacity: 0.5 }))).toBe(0.5)
 
-    expect(composeMaskGrayPixel(255, 102, 1)).toBe(102)
-    expect(composeMaskGrayPixel(0, 153, 1)).toBe(153)
+    const firstErase = composeMaskGrayPixel(255, 0, 0.5)
+    const secondErase = composeMaskGrayPixel(firstErase, 0, 0.5)
+    expect(firstErase).toBe(128)
+    expect(secondErase).toBe(64)
+
+    const firstBrush = composeMaskGrayPixel(0, 255, 0.5)
+    const secondBrush = composeMaskGrayPixel(firstBrush, 255, 0.5)
+    expect(firstBrush).toBe(128)
+    expect(secondBrush).toBe(192)
   })
 
   it('creates a mask-local polygon operation from document-space polygon points', () => {

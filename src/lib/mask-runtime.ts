@@ -5,6 +5,7 @@ import {
   drawMaskOperationToContext,
   maskEditOperations,
   maskShapeContentKey,
+  maskStrokeStrength,
   maskStrokeTargetValue,
   normalizeMaskCanvasToSingleChannel,
 } from './mask-shapes'
@@ -141,6 +142,7 @@ export class MaskGpuRuntime {
       strokeId: stroke.id,
       mode: stroke.mode,
       targetValue: maskStrokeTargetValue(stroke),
+      strength: maskStrokeStrength(stroke),
       pointCount: Math.floor((stroke.points?.length ?? 0) / 2),
       nextVersion,
       revision: state.revision,

@@ -83,15 +83,15 @@ function stroke(input: Partial<PaintStroke>): PaintStroke {
 }
 
 describe('mask runtime semantics', () => {
-  it('uses brush and eraser opacity as single-channel mask target values', () => {
+  it('uses brush and eraser opacity as cumulative mask strength', () => {
     expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 1, color: '#000000' }))).toBe(255)
-    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0.4, color: '#ffffff' }))).toBe(102)
-    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0 }))).toBe(0)
+    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0.4, color: '#ffffff' }))).toBe(255)
+    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0 }))).toBe(255)
     expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 1 }))).toBe(0)
-    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0.4 }))).toBe(153)
-    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0 }))).toBe(255)
-    expect(maskStrokeStrength(stroke({ mode: 'brush', opacity: 0.5 }))).toBe(1)
-    expect(maskStrokeStrength(stroke({ mode: 'eraser', eraserOpacity: 0.5 }))).toBe(1)
+    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0.4 }))).toBe(0)
+    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0 }))).toBe(0)
+    expect(maskStrokeStrength(stroke({ mode: 'brush', opacity: 0.5 }))).toBe(0.5)
+    expect(maskStrokeStrength(stroke({ mode: 'eraser', eraserOpacity: 0.5 }))).toBe(0.5)
   })
 
   it('does not change the layer composite signature for document-space layer transforms', () => {

@@ -29,18 +29,18 @@ export function maskBrushValueFromOpacity(opacity?: number) {
   return clampByte(clampUnit(opacity ?? 1) * 255)
 }
 
-export function maskEraserValueFromOpacity(eraserOpacity?: number) {
-  return clampByte((1 - clampUnit(eraserOpacity ?? 1)) * 255)
+export function maskStrokeTargetValue(stroke: { mode?: string }) {
+  return stroke.mode === 'eraser' ? 0 : 255
 }
 
-export function maskStrokeTargetValue(stroke: { mode?: string; opacity?: number; eraserOpacity?: number }) {
+export function maskStrokeStrength(stroke: { mode?: string; opacity?: number; eraserOpacity?: number }) {
   return stroke.mode === 'eraser'
-    ? maskEraserValueFromOpacity(stroke.eraserOpacity)
-    : maskBrushValueFromOpacity(stroke.opacity)
+    ? clampUnit(stroke.eraserOpacity ?? 1)
+    : clampUnit(stroke.opacity ?? 1)
 }
 
-export function maskStrokeStrength(_stroke: { mode?: string; opacity?: number; eraserOpacity?: number }) {
-  return 1
+export function maskShapeStrength(shape: { value?: number }) {
+  return clampUnit(maskShapeGrayValue(shape) / 255)
 }
 
 export function maskShapeContentKey(shape: MaskShapeOperation) {
@@ -162,12 +162,11 @@ export function createMaskPolygonOperationFromDocumentInput(
 }
 
 export function drawMaskShapeToContext(context: CanvasRenderingContext2D, shape: MaskShapeOperation) {
-  const gray = maskShapeGrayValue(shape)
   context.save()
   context.globalCompositeOperation = 'source-over'
-  context.globalAlpha = 1
-  context.fillStyle = `rgb(${gray},${gray},${gray})`
-  context.strokeStyle = `rgb(${gray},${gray},${gray})`
+  context.globalAlpha = maskShapeStrength(shape)
+  context.fillStyle = 'rgb(255,255,255)'
+  context.strokeStyle = 'rgb(255,255,255)'
   context.lineWidth = Math.max(0, shape.strokeWidth)
   context.lineCap = 'round'
   context.lineJoin = 'round'

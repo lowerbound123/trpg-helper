@@ -943,12 +943,12 @@ function addShapeToActiveMask(shape: ShapeKind, position?: { x?: number; y?: num
   if (!local) return false
   const brushOpacity = activeMaskBrushOpacity()
   const eraserOpacity = activeMaskEraserOpacity()
-  const paintValue = maskBrushValueFromOpacity(brushOpacity)
+  const strengthValue = maskBrushValueFromOpacity(brushOpacity)
   const operation = createMaskShapeOperation({
     shape,
     x: local.x,
     y: local.y,
-    value: paintValue,
+    value: strengthValue,
   })
   void appendDebugLog('mask', 'shape-add-active-mask', {
     maskId: mask.id,
@@ -957,7 +957,9 @@ function addShapeToActiveMask(shape: ShapeKind, position?: { x?: number; y?: num
     source: 'opacity',
     brushOpacity,
     eraserOpacity,
-    paintValue,
+    targetValue: 255,
+    strength: strengthValue / 255,
+    strengthValue,
     value: operation.value,
     documentPosition: position,
     localPosition: local,
@@ -972,16 +974,18 @@ function addPolygonToActiveMask(input: NewShapeLayerInput) {
   if (!mask || input.shape !== 'polygon' || !input.polygonPoints?.length) return false
   const brushOpacity = activeMaskBrushOpacity()
   const eraserOpacity = activeMaskEraserOpacity()
-  const paintValue = maskBrushValueFromOpacity(brushOpacity)
-  const operation = createMaskPolygonOperationFromDocumentInput(input, mask, paintValue)
+  const strengthValue = maskBrushValueFromOpacity(brushOpacity)
+  const operation = createMaskPolygonOperationFromDocumentInput(input, mask, strengthValue)
   void appendDebugLog('mask', 'polygon-add-active-mask', {
     maskId: mask.id,
     target: editor.maskEditTarget,
     source: 'opacity',
     brushOpacity,
     eraserOpacity,
-    paintValue,
-    value: paintValue,
+    targetValue: 255,
+    strength: strengthValue / 255,
+    strengthValue,
+    value: strengthValue,
     input: polygonInputLogData(input),
     operation: operation ? maskShapeLogData(operation) : null,
   })

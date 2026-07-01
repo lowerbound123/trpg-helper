@@ -1,7 +1,7 @@
 import { reactive, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 
-type EditorTool = 'select' | 'brush' | 'eraser'
+import type { EditorTool } from '@/lib/editor-tools'
 
 export type BrushCursorState = {
   visible: boolean

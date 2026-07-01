@@ -70,7 +70,7 @@ export function shapeNode(layer: ShapeLayer) {
     return group
   }
 
-  if (['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)) {
+  if (['diamond', 'hexagon-h', 'hexagon-v', 'polygon'].includes(layer.shape)) {
     return new Konva.Line({
       ...config,
       points: polygonPoints(layer),

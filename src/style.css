@@ -403,6 +403,10 @@ body,
   align-items: center;
 }
 
+[data-slot='button-group'].finder-status-actions {
+  gap: 0;
+}
+
 button,
 input,
 textarea {
@@ -501,6 +505,10 @@ textarea {
 .danger-row {
   display: flex;
   gap: 8px;
+}
+
+[data-slot='button-group'].layer-actions {
+  gap: 0;
 }
 
 .layer-actions-bottom {
@@ -847,6 +855,10 @@ textarea {
   gap: 8px;
 }
 
+[data-slot='button-group'].topbar-actions {
+  gap: 0;
+}
+
 .tool-actions {
   flex-wrap: wrap;
 }
@@ -917,6 +929,10 @@ textarea {
 
 .stage-frame-drawing {
   cursor: none;
+}
+
+.stage-frame-polygon {
+  cursor: crosshair;
 }
 
 .stage-surface {

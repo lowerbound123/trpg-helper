@@ -163,14 +163,20 @@ export function paintKonvaConfig(layer: PaintLayer, base: PaintBaseConfig) {
   }
 }
 
-export function paintStrokeLineConfig(stroke: PaintStroke) {
+export function paintStrokeLineConfig(stroke: PaintStroke, options: { minOpacity?: number } = {}) {
   const kind = stroke.brushKind ?? 'pixel'
   const points = (stroke.points && stroke.points.length >= 2) ? stroke.points : [0, 0]
+  const rawOpacity = stroke.mode === 'eraser'
+    ? stroke.eraserOpacity ?? 1
+    : stroke.opacity ?? brushDefaults[kind].opacity
+  const opacity = options.minOpacity === undefined
+    ? rawOpacity
+    : Math.max(rawOpacity, clampUnit(options.minOpacity))
   return {
     points,
     stroke: stroke.mode === 'eraser' ? 'rgba(255,255,255,0.9)' : stroke.color,
     strokeWidth: Math.max(1, stroke.strokeWidth * brushDefaults[kind].widthMultiplier),
-    opacity: stroke.mode === 'eraser' ? stroke.eraserOpacity : stroke.opacity,
+    opacity,
     tension: kind === 'pixel' ? 0 : stroke.tension,
     lineCap: brushDefaults[kind].lineCap,
     lineJoin: brushDefaults[kind].lineJoin,
@@ -178,4 +184,8 @@ export function paintStrokeLineConfig(stroke: PaintStroke) {
     shadowBlur: stroke.mode === 'eraser' ? 0 : brushDefaults[kind].shadowBlur ?? 0,
     listening: false,
   }
+}
+
+function clampUnit(value: number) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 }

@@ -28,6 +28,7 @@ import {
   type ImageLayer,
   type LayerEffects,
   type LayerPatch,
+  type NewShapeLayerInput,
   type PaintLayer,
   type PaintStroke,
   type ShapeKind,
@@ -286,6 +287,12 @@ export const useEditorStore = defineStore('editor', () => {
 
   function addShape(shape: ShapeKind, position?: { x?: number; y?: number }) {
     commit((doc) => addShapeLayer(doc, { shape, x: position?.x ?? 180, y: position?.y ?? 160 }))
+    selectedLayerId.value = document.value.layers.at(-1)?.id
+    selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
+  }
+
+  function addPolygon(input: NewShapeLayerInput) {
+    commit((doc) => addShapeLayer(doc, input))
     selectedLayerId.value = document.value.layers.at(-1)?.id
     selectedLayerIds.value = selectedLayerId.value ? [selectedLayerId.value] : []
   }
@@ -574,6 +581,7 @@ export const useEditorStore = defineStore('editor', () => {
     addLayerFromAssetAt,
     addLayerToGroupAt,
     addPaint,
+    addPolygon,
     addShape,
     addText,
     appendStrokeToPaintLayer,
@@ -653,6 +661,7 @@ export const useEditorStore = defineStore('editor', () => {
     deleteLayerMaskById: maskStore.deleteLayerMaskById,
     deleteCanvasBackgroundMask: maskStore.deleteCanvasBackgroundMask,
     moveOrCopyLayerMask: maskStore.moveOrCopyLayerMask,
+    addMaskShape: maskStore.addMaskShape,
     paintMask: maskStore.paintMask,
     loadMaskDataUrl: maskStore.loadMaskDataUrl,
     // 转发 project store

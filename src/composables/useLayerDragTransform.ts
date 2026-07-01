@@ -5,6 +5,7 @@ import type Konva from 'konva'
 import type { HandoutLayer, ShapeLayer } from '@/lib/handout'
 import { isCurveShape } from '@/lib/handout'
 import { layerPositionFromNode } from '@/lib/layer-rendering'
+import { resizePolygonLayerGeometry } from '@/lib/polygon-creation'
 import { calculateSnapGuides, SNAP_THRESHOLD_SCREEN_PX, type GuideLine, type SnapLayer } from '@/lib/snapping'
 import { isTextLayer, useEditorStore } from '@/stores/editor'
 
@@ -84,12 +85,15 @@ export function useLayerDragTransform(options: {
     const nodeScaleY = node.scaleY()
     const scaleX = Math.abs(nodeScaleX)
     const scaleY = Math.abs(nodeScaleY)
-    const width = isShapeLayer(layer) && layer.shape === 'line'
+    const polygonGeometry = isShapeLayer(layer) && layer.shape === 'polygon'
+      ? resizePolygonLayerGeometry(layer, scaleX, scaleY)
+      : undefined
+    const width = polygonGeometry?.width ?? (isShapeLayer(layer) && layer.shape === 'line'
       ? Math.max(12, Math.round(layer.width * scaleX))
-      : Math.max(12, Math.round(node.width() * scaleX))
-    let height = isShapeLayer(layer) && layer.shape === 'line'
+      : Math.max(12, Math.round(node.width() * scaleX)))
+    let height = polygonGeometry?.height ?? (isShapeLayer(layer) && layer.shape === 'line'
       ? Math.max(12, Math.round(layer.height * scaleY))
-      : Math.max(12, Math.round(node.height() * scaleY))
+      : Math.max(12, Math.round(node.height() * scaleY)))
     if (isTextLayer(layer)) {
       node.width(width)
       node.scaleX(1)
@@ -127,6 +131,7 @@ export function useLayerDragTransform(options: {
       width,
       height,
       rotation,
+      ...(polygonGeometry ? { polygonPoints: polygonGeometry.polygonPoints } : {}),
     })
     logBackgroundRender('after-layer-transform', {
       layerId: layer.id,

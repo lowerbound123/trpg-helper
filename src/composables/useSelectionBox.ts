@@ -3,12 +3,12 @@ import type { ComputedRef, Ref } from 'vue'
 import type Konva from 'konva'
 
 import { containsRect } from '@/lib/selection'
+import { isPaintEditorTool, type EditorTool } from '@/lib/editor-tools'
 import type { HandoutLayer } from '@/lib/handout'
 import { isLayerEffectivelyVisible } from '@/lib/handout'
 import { useEditorStore } from '@/stores/editor'
 
 type EditorStore = ReturnType<typeof useEditorStore>
-type EditorTool = 'select' | 'brush' | 'eraser'
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 type SelectionBox = { visible: boolean; startX: number; startY: number; x: number; y: number; width: number; height: number }
 type StageRef = Ref<{ getNode: () => Konva.Stage } | undefined>
@@ -23,8 +23,9 @@ export function useSelectionBox(options: {
   startPaintStroke: (event: KonvaEvent) => boolean
   movePaintStroke: (event: KonvaEvent) => boolean
   stopPaintStroke: () => boolean
+  handlePolygonPointerDown: (event: KonvaEvent) => boolean
 }) {
-  const { editor, activeTool, stageRef, stageScale, canvasPointFromClient, updateTransformer, startPaintStroke, movePaintStroke, stopPaintStroke } = options
+  const { editor, activeTool, stageRef, stageScale, canvasPointFromClient, updateTransformer, startPaintStroke, movePaintStroke, stopPaintStroke, handlePolygonPointerDown } = options
 
   const selectionBox = reactive<SelectionBox>({ visible: false, startX: 0, startY: 0, x: 0, y: 0, width: 0, height: 0 })
   let suppressNextStageClick = false
@@ -52,8 +53,12 @@ export function useSelectionBox(options: {
   }
 
   function startSelectionBox(event: KonvaEvent) {
-    if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
+    if (isPaintEditorTool(activeTool.value)) {
       startPaintStroke(event)
+      return
+    }
+    if (activeTool.value === 'polygon') {
+      handlePolygonPointerDown(event)
       return
     }
     if (activeTool.value !== 'select') return
@@ -66,10 +71,11 @@ export function useSelectionBox(options: {
   }
 
   function moveSelectionBox(event: KonvaEvent) {
-    if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
+    if (isPaintEditorTool(activeTool.value)) {
       movePaintStroke(event)
       return
     }
+    if (activeTool.value === 'polygon') return
     if (!selectionBox.visible || !event.evt) return
     const point = canvasPointFromClient(event.evt.clientX, event.evt.clientY)
     updateSelectionBox({ x: selectionBox.startX, y: selectionBox.startY }, point)
@@ -80,10 +86,11 @@ export function useSelectionBox(options: {
   }
 
   function stopSelectionBox() {
-    if (activeTool.value === 'brush' || activeTool.value === 'eraser') {
+    if (isPaintEditorTool(activeTool.value)) {
       stopPaintStroke()
       return
     }
+    if (activeTool.value === 'polygon') return
     if (!selectionBox.visible) return
     const hasArea = selectionBox.width > 3 / stageScale.value || selectionBox.height > 3 / stageScale.value
     if (hasArea) {

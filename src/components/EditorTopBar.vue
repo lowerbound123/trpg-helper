@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Brush, Eraser, MousePointer2, Redo2, Save, Undo2 } from '@lucide/vue'
+import { Brush, Eraser, MousePointer2, Redo2, Save, Spline, Undo2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { ButtonGroup } from '@/components/ui/button-group'
 import { Separator } from '@/components/ui/separator'
-
-type EditorTool = 'select' | 'brush' | 'eraser'
+import type { EditorTool } from '@/lib/editor-tools'
 
 defineProps<{
   activeTool: EditorTool
@@ -28,7 +28,7 @@ defineEmits<{
       </Button>
     </div>
     <Separator orientation="vertical" />
-    <div class="topbar-actions tool-actions">
+    <ButtonGroup class="topbar-actions tool-actions" aria-label="Editor tools">
       <Button size="sm" variant="outline" :data-active="activeTool === 'select'" @click="$emit('set-tool', 'select')">
         <MousePointer2 data-icon="inline-start" />
         Select
@@ -41,9 +41,13 @@ defineEmits<{
         <Eraser data-icon="inline-start" />
         Eraser
       </Button>
-    </div>
+      <Button size="sm" variant="outline" :data-active="activeTool === 'polygon'" @click="$emit('set-tool', 'polygon')">
+        <Spline data-icon="inline-start" />
+        Polygon
+      </Button>
+    </ButtonGroup>
     <Separator orientation="vertical" />
-    <div class="topbar-actions">
+    <ButtonGroup class="topbar-actions" aria-label="History actions">
       <Button variant="outline" :disabled="!canUndo" @click="$emit('undo')">
         <Undo2 data-icon="inline-start" />
         Undo
@@ -52,6 +56,6 @@ defineEmits<{
         <Redo2 data-icon="inline-start" />
         Redo
       </Button>
-    </div>
+    </ButtonGroup>
   </header>
 </template>

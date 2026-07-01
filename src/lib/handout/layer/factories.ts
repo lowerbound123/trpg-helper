@@ -5,6 +5,7 @@ import type { HandoutDocument } from '../document'
 import { touch } from '../document'
 import { normalizePaintStroke } from '../paint'
 import type { PaintStroke } from '../paint'
+import { defaultPolygonPoints, normalizePolygonPoints } from '../../polygon-creation'
 
 import { nextLayerName, normalizeZIndex } from './shared'
 import type {
@@ -83,6 +84,7 @@ export function shapeDefaults(layer: HandoutLayer): Partial<ShapeLayer> {
     lineArrowSize: layer.lineArrowSize ?? 1,
     lineStyle: layer.lineStyle ?? 'solid',
     curvePoints: isCurveShape(layer.shape) ? normalizeCurvePoints(layer) : layer.curvePoints,
+    polygonPoints: layer.shape === 'polygon' ? normalizePolygonPoints(layer) : layer.polygonPoints,
   }
 }
 
@@ -233,6 +235,7 @@ export function addShapeLayer(document: HandoutDocument, input: NewShapeLayerInp
     lineArrowSize: input.lineArrowSize ?? 1,
     lineStyle: input.lineStyle ?? 'solid',
     curvePoints: input.curvePoints ?? defaultCurvePoints(input.shape, width, height),
+    polygonPoints: input.shape === 'polygon' ? input.polygonPoints ?? defaultPolygonPoints(width, height) : undefined,
     rotation: 0,
     flipX: false,
     opacity: 1,

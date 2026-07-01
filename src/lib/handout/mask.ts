@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { matrixFromComponents } from '../mask-geometry'
 import type { AffineMatrix } from '../mask-geometry'
+import type { CanvasPoint, CurvePoints, ShapeKind } from './layer'
 import type { PaintStroke } from './paint'
 
 type CanvasSize = {
@@ -21,6 +22,8 @@ export type LayerMask = {
   defaultAlpha: number
   tiles: Record<string, MaskTileMeta>
   strokes: PaintStroke[]
+  shapes: MaskShapeOperation[]
+  operations: MaskEditOperation[]
   x: number
   y: number
   scaleX: number
@@ -36,6 +39,24 @@ export type LayerMask = {
   opacity?: number
   updatedAt: string
 }
+
+export type MaskShapeOperation = {
+  id: string
+  shape: ShapeKind
+  x: number
+  y: number
+  width: number
+  height: number
+  value: number
+  strokeWidth: number
+  cornerRadius?: number
+  curvePoints?: CurvePoints
+  polygonPoints?: CanvasPoint[]
+}
+
+export type MaskEditOperation =
+  | { id: string; kind: 'stroke'; stroke: PaintStroke }
+  | { id: string; kind: 'shape'; shape: MaskShapeOperation }
 
 export type MaskTileMeta = {
   path?: string
@@ -70,6 +91,8 @@ export function createCanvasLayerMask(
     defaultAlpha: input.defaultAlpha ?? 255,
     tiles: input.tiles ?? {},
     strokes: input.strokes ?? [],
+    shapes: input.shapes ?? [],
+    operations: normalizeOperations(input.operations, input.strokes ?? [], input.shapes ?? []),
     x: input.x ?? 0,
     y: input.y ?? 0,
     scaleX: input.scaleX ?? 1,
@@ -110,6 +133,8 @@ export function normalizeMask(
     defaultAlpha: Math.max(0, Math.min(255, Math.round(mask.defaultAlpha ?? 255))),
     tiles: normalizeTiles(mask.tiles),
     strokes: mask.strokes ?? [],
+    shapes: normalizeShapes(mask.shapes),
+    operations: normalizeOperations(mask.operations, mask.strokes ?? [], normalizeShapes(mask.shapes)),
     x: mask.x ?? 0,
     y: mask.y ?? 0,
     scaleX: mask.scaleX ?? 1,
@@ -125,6 +150,50 @@ export function normalizeMask(
     opacity: mask.opacity,
     updatedAt: mask.updatedAt || new Date().toISOString(),
   }
+}
+
+function normalizeShapes(shapes: LayerMask['shapes'] | undefined): LayerMask['shapes'] {
+  if (!shapes) return []
+  return shapes.map((shape) => ({
+    id: shape.id || uuidv4(),
+    shape: shape.shape,
+    x: finiteNumber(shape.x, 0),
+    y: finiteNumber(shape.y, 0),
+    width: Math.max(1, finiteNumber(shape.width, 1)),
+    height: Math.max(1, finiteNumber(shape.height, 1)),
+    value: Math.max(0, Math.min(255, Math.round(finiteNumber(shape.value, 255)))),
+    strokeWidth: Math.max(0, finiteNumber(shape.strokeWidth, 0)),
+    cornerRadius: shape.cornerRadius,
+    curvePoints: shape.curvePoints,
+    polygonPoints: shape.polygonPoints,
+  }))
+}
+
+function normalizeOperations(
+  operations: Partial<MaskEditOperation>[] | undefined,
+  strokes: PaintStroke[],
+  shapes: MaskShapeOperation[],
+): MaskEditOperation[] {
+  if (operations?.length) {
+    return operations.map((operation) => {
+      if (operation.kind === 'shape' && operation.shape) {
+        return { id: operation.id || operation.shape.id || uuidv4(), kind: 'shape', shape: operation.shape }
+      }
+      if (operation.kind === 'stroke' && operation.stroke) {
+        return { id: operation.id || operation.stroke.id || uuidv4(), kind: 'stroke', stroke: operation.stroke }
+      }
+      return undefined
+    }).filter((operation): operation is MaskEditOperation => Boolean(operation))
+  }
+  return [
+    ...strokes.map((stroke) => ({ id: stroke.id, kind: 'stroke' as const, stroke })),
+    ...shapes.map((shape) => ({ id: shape.id, kind: 'shape' as const, shape })),
+  ]
+}
+
+function finiteNumber(value: unknown, fallback: number) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
 }
 
 function normalizeMatrix(mask: Partial<LayerMask>, width: number): AffineMatrix {

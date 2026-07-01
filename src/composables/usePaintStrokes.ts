@@ -2,13 +2,13 @@ import { ref } from 'vue'
 import type { Ref } from 'vue'
 import type Konva from 'konva'
 
+import type { EditorTool } from '@/lib/editor-tools'
 import type { HandoutLayer, PaintLayer, PaintStroke, StrokePoint } from '@/lib/handout'
 import { strokePointsToFlat } from '@/lib/handout'
 import { documentPointToMaskLocal } from '@/lib/mask-geometry'
 import { isPaintLayer, useEditorStore } from '@/stores/editor'
 
 type EditorStore = ReturnType<typeof useEditorStore>
-type EditorTool = 'select' | 'brush' | 'eraser'
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 
 export function usePaintStrokes(options: {

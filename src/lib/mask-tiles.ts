@@ -1,9 +1,11 @@
-import type { LayerMask, MaskTileMeta, PaintStroke } from './handout'
+import type { LayerMask, MaskShapeOperation, MaskTileMeta, PaintStroke } from './handout'
 import { tilesForStroke } from './mask-geometry'
+import { maskShapeTiles } from './mask-shapes'
 
 export type MaskTileStore = {
   allocatedTileKeys: () => string[]
   applyStroke: (stroke: PaintStroke, date?: Date) => LayerMask
+  applyShape: (shape: MaskShapeOperation, date?: Date) => LayerMask
 }
 
 export function createMaskTileStore(initialMask: LayerMask): MaskTileStore {
@@ -32,6 +34,31 @@ export function createMaskTileStore(initialMask: LayerMask): MaskTileStore {
       ...mask,
       tiles: nextTiles,
       strokes: [...mask.strokes, stroke],
+      operations: [...(mask.operations ?? []), { id: stroke.id, kind: 'stroke', stroke }],
+      version: mask.version + 1,
+      sourceVersion: mask.sourceVersion + 1,
+      updatedAt,
+    }
+    return cloneMask(mask)
+  }
+
+  function applyShape(shape: MaskShapeOperation, date = new Date()) {
+    const updatedAt = date.toISOString()
+    const dirtyKeys = maskShapeTiles(shape, {
+      maskWidth: mask.width,
+      maskHeight: mask.height,
+      tileSize: mask.tileSize,
+    })
+    const nextTiles = { ...mask.tiles }
+    for (const key of dirtyKeys) {
+      allocated.add(key)
+      nextTiles[key] = nextTileMeta(nextTiles[key], updatedAt)
+    }
+    mask = {
+      ...mask,
+      tiles: nextTiles,
+      shapes: [...(mask.shapes ?? []), shape],
+      operations: [...(mask.operations ?? []), { id: shape.id, kind: 'shape', shape }],
       version: mask.version + 1,
       sourceVersion: mask.sourceVersion + 1,
       updatedAt,
@@ -42,6 +69,7 @@ export function createMaskTileStore(initialMask: LayerMask): MaskTileStore {
   return {
     allocatedTileKeys,
     applyStroke,
+    applyShape,
   }
 }
 
@@ -51,6 +79,8 @@ function cloneMask(mask: LayerMask): LayerMask {
     matrix: [...mask.matrix],
     tiles: { ...mask.tiles },
     strokes: [...mask.strokes],
+    shapes: [...(mask.shapes ?? [])],
+    operations: [...(mask.operations ?? [])],
   }
 }
 

@@ -1,5 +1,13 @@
-import type { HandoutLayer, LayerMask, PaintStroke } from './handout'
+import type { HandoutLayer, LayerMask, MaskEditOperation, MaskShapeOperation, PaintStroke } from './handout'
+import { appendDebugLog } from './backend'
 import { applyLayerMaskToCanvas, createLayerLocalMaskCanvas } from './mask'
+import {
+  drawMaskOperationToContext,
+  maskEditOperations,
+  maskShapeContentKey,
+  maskStrokeTargetValue,
+  normalizeMaskCanvasToSingleChannel,
+} from './mask-shapes'
 import { appendSpeedLog } from './speed-log'
 import {
   layerWorldMatrix,
@@ -25,18 +33,14 @@ export type MaskRuntimeApplyResult = {
 
 type MaskRuntimeState = MaskRuntimeHandle & {
   canvas?: HTMLCanvasElement
-  renderedStrokeCount: number
+  renderedOperationCount: number
   defaultAlpha: number
   sourceKey: string
   contentKey: string
 }
 
 export function maskStrokeGrayValue(stroke: PaintStroke) {
-  const opacity = stroke.mode === 'eraser' ? stroke.eraserOpacity ?? 1 : stroke.opacity ?? 1
-  const amount = Math.max(0, Math.min(1, opacity))
-  return stroke.mode === 'eraser'
-    ? Math.round(255 * (1 - amount))
-    : Math.round(255 * amount)
+  return maskStrokeTargetValue(stroke)
 }
 
 export function maskRuntimeContentKey(mask: LayerMask) {
@@ -45,7 +49,7 @@ export function maskRuntimeContentKey(mask: LayerMask) {
     mask.defaultAlpha,
     mask.width,
     mask.height,
-    mask.strokes.map(maskStrokeContentKey).join(';'),
+    maskEditOperations(mask).map(maskOperationContentKey).join(';'),
   ].join('|')
 }
 
@@ -99,13 +103,24 @@ export class MaskGpuRuntime {
 
   syncStrokeApplied(mask: LayerMask, stroke: PaintStroke, nextVersion: number): MaskRuntimeHandle {
     const state = this.ensureMaskState(mask)
-    const expectedStrokeCount = mask.strokes.length + 1
+    const nextOperations: MaskEditOperation[] = [
+      ...maskEditOperations(mask),
+      { id: stroke.id, kind: 'stroke', stroke },
+    ]
     const nextContentKey = maskRuntimeContentKey({
       ...mask,
       version: nextVersion,
       strokes: [...mask.strokes, stroke],
+      operations: nextOperations,
     })
-    if (state.contentKey === nextContentKey && state.revision >= nextVersion && state.renderedStrokeCount >= expectedStrokeCount) {
+    if (state.contentKey === nextContentKey && state.revision >= nextVersion && state.renderedOperationCount >= nextOperations.length) {
+      void appendDebugLog('mask', 'mask-runtime-stroke-skip-current', {
+        maskId: mask.id,
+        strokeId: stroke.id,
+        revision: state.revision,
+        nextVersion,
+        renderedOperationCount: state.renderedOperationCount,
+      })
       return {
         maskId: state.maskId,
         revision: state.revision,
@@ -116,11 +131,78 @@ export class MaskGpuRuntime {
     }
     if (state.canvas) {
       const context = state.canvas.getContext('2d')
-      if (context) drawMaskStrokeToContext(context, stroke)
+      if (context) drawMaskOperationToContext(context, { id: stroke.id, kind: 'stroke', stroke })
     }
-    state.renderedStrokeCount = Math.max(state.renderedStrokeCount + 1, expectedStrokeCount)
+    state.renderedOperationCount = Math.max(state.renderedOperationCount + 1, nextOperations.length)
     state.revision = Math.max(state.revision, nextVersion)
     state.contentKey = nextContentKey
+    void appendDebugLog('mask', 'mask-runtime-stroke-synced', {
+      maskId: mask.id,
+      strokeId: stroke.id,
+      mode: stroke.mode,
+      targetValue: maskStrokeTargetValue(stroke),
+      pointCount: Math.floor((stroke.points?.length ?? 0) / 2),
+      nextVersion,
+      revision: state.revision,
+      renderedOperationCount: state.renderedOperationCount,
+      hasCanvas: Boolean(state.canvas),
+    })
+    return {
+      maskId: state.maskId,
+      revision: state.revision,
+      width: state.width,
+      height: state.height,
+      canvas: state.canvas,
+    }
+  }
+
+  syncShapeApplied(mask: LayerMask, shape: MaskShapeOperation, nextVersion: number): MaskRuntimeHandle {
+    const state = this.ensureMaskState(mask)
+    const nextOperations: MaskEditOperation[] = [
+      ...maskEditOperations(mask),
+      { id: shape.id, kind: 'shape', shape },
+    ]
+    const nextContentKey = maskRuntimeContentKey({
+      ...mask,
+      version: nextVersion,
+      shapes: [...(mask.shapes ?? []), shape],
+      operations: nextOperations,
+    })
+    if (state.contentKey === nextContentKey && state.revision >= nextVersion && state.renderedOperationCount >= nextOperations.length) {
+      void appendDebugLog('mask', 'mask-runtime-shape-skip-current', {
+        maskId: mask.id,
+        shapeId: shape.id,
+        revision: state.revision,
+        nextVersion,
+        renderedOperationCount: state.renderedOperationCount,
+      })
+      return {
+        maskId: state.maskId,
+        revision: state.revision,
+        width: state.width,
+        height: state.height,
+        canvas: state.canvas,
+      }
+    }
+    if (state.canvas) {
+      const context = state.canvas.getContext('2d')
+      if (context) drawMaskOperationToContext(context, { id: shape.id, kind: 'shape', shape })
+    }
+    state.renderedOperationCount = Math.max(state.renderedOperationCount + 1, nextOperations.length)
+    state.revision = Math.max(state.revision, nextVersion)
+    state.contentKey = nextContentKey
+    void appendDebugLog('mask', 'mask-runtime-shape-synced', {
+      maskId: mask.id,
+      shapeId: shape.id,
+      shape: shape.shape,
+      value: shape.value,
+      bounds: { x: shape.x, y: shape.y, width: shape.width, height: shape.height },
+      pointCount: shape.polygonPoints?.length ?? 0,
+      nextVersion,
+      revision: state.revision,
+      renderedOperationCount: state.renderedOperationCount,
+      hasCanvas: Boolean(state.canvas),
+    })
     return {
       maskId: state.maskId,
       revision: state.revision,
@@ -137,7 +219,7 @@ export class MaskGpuRuntime {
       && current.width === mask.width
       && current.height === mask.height
       && current.revision === mask.version
-      && current.renderedStrokeCount === mask.strokes.length
+      && current.renderedOperationCount === maskEditOperations(mask).length
       && current.contentKey === maskRuntimeContentKey(mask)
       && current.sourceKey === sourceKey,
     )
@@ -151,7 +233,7 @@ export class MaskGpuRuntime {
       && current.height === mask.height
       && current.defaultAlpha === mask.defaultAlpha
       && current.revision === mask.version
-      && current.renderedStrokeCount === mask.strokes.length
+      && current.renderedOperationCount === maskEditOperations(mask).length
       && current.contentKey === maskRuntimeContentKey(mask),
     )
   }
@@ -162,8 +244,9 @@ export class MaskGpuRuntime {
     if (canvas && context) {
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.drawImage(source, 0, 0, canvas.width, canvas.height)
+      normalizeMaskCanvasToSingleChannel(context, canvas.width, canvas.height)
       if (!strokesAlreadyApplied) {
-        for (const stroke of mask.strokes) drawMaskStrokeToContext(context, stroke)
+        for (const operation of maskEditOperations(mask)) drawMaskOperationToContext(context, operation)
       }
     }
     const state: MaskRuntimeState = {
@@ -172,7 +255,7 @@ export class MaskGpuRuntime {
       width: mask.width,
       height: mask.height,
       canvas,
-      renderedStrokeCount: mask.strokes.length,
+      renderedOperationCount: maskEditOperations(mask).length,
       defaultAlpha: mask.defaultAlpha,
       sourceKey,
       contentKey: maskRuntimeContentKey(mask),
@@ -287,17 +370,26 @@ export class MaskGpuRuntime {
     const current = this.masks.get(mask.id)
     const contentKey = maskRuntimeContentKey(mask)
     if (current && current.width === mask.width && current.height === mask.height && current.defaultAlpha === mask.defaultAlpha) {
-      if (current.contentKey === contentKey && current.revision === mask.version && current.renderedStrokeCount === mask.strokes.length) return current
-      if (canAppendMaskRuntimeStrokes(current, mask)) {
+      if (current.contentKey === contentKey && current.revision === mask.version && current.renderedOperationCount === maskEditOperations(mask).length) return current
+      if (canAppendMaskRuntimeOperations(current, mask)) {
         const context = current.canvas?.getContext('2d')
+        const appendedOperations = maskEditOperations(mask).slice(current.renderedOperationCount)
         if (context) {
-          for (const stroke of mask.strokes.slice(current.renderedStrokeCount)) {
-            drawMaskStrokeToContext(context, stroke)
+          for (const operation of appendedOperations) {
+            drawMaskOperationToContext(context, operation)
           }
         }
-        current.renderedStrokeCount = mask.strokes.length
+        current.renderedOperationCount = maskEditOperations(mask).length
         current.revision = mask.version
         current.contentKey = contentKey
+        void appendDebugLog('mask', 'mask-runtime-append-operations', {
+          maskId: mask.id,
+          appendedCount: appendedOperations.length,
+          appended: appendedOperations.map(maskOperationSummary),
+          revision: current.revision,
+          renderedOperationCount: current.renderedOperationCount,
+          hasCanvas: Boolean(current.canvas),
+        })
         return current
       }
     }
@@ -309,7 +401,7 @@ export class MaskGpuRuntime {
           width: mask.width,
           height: mask.height,
           canvas: createRuntimeCanvas(mask.width, mask.height),
-          renderedStrokeCount: 0,
+          renderedOperationCount: 0,
           defaultAlpha: mask.defaultAlpha,
           sourceKey: defaultMaskSourceKey(mask),
           contentKey: '',
@@ -322,11 +414,21 @@ export class MaskGpuRuntime {
       resetMaskCanvas(state.canvas, mask.defaultAlpha)
       const context = state.canvas.getContext('2d')
       if (context) {
-        for (const stroke of mask.strokes) drawMaskStrokeToContext(context, stroke)
+        for (const operation of maskEditOperations(mask)) drawMaskOperationToContext(context, operation)
       }
     }
-    state.renderedStrokeCount = mask.strokes.length
+    state.renderedOperationCount = maskEditOperations(mask).length
     this.masks.set(mask.id, state)
+    void appendDebugLog('mask', 'mask-runtime-rebuild-state', {
+      maskId: mask.id,
+      width: mask.width,
+      height: mask.height,
+      revision: state.revision,
+      defaultAlpha: mask.defaultAlpha,
+      operationCount: state.renderedOperationCount,
+      hasCanvas: Boolean(state.canvas),
+      reusedCanvas: Boolean(current && current.width === mask.width && current.height === mask.height),
+    })
     return state
   }
 
@@ -361,12 +463,44 @@ function maskStrokeContentKey(stroke: PaintStroke) {
   ].join(':')
 }
 
-function canAppendMaskRuntimeStrokes(current: MaskRuntimeState, mask: LayerMask) {
-  if (current.renderedStrokeCount > mask.strokes.length) return false
+function maskOperationContentKey(operation: MaskEditOperation) {
+  if (operation.kind === 'shape') return `shape:${maskShapeContentKey(operation.shape)}`
+  return `stroke:${maskStrokeContentKey(operation.stroke)}`
+}
+
+function maskOperationSummary(operation: MaskEditOperation) {
+  if (operation.kind === 'shape') {
+    return {
+      id: operation.id,
+      kind: operation.kind,
+      shape: operation.shape.shape,
+      value: operation.shape.value,
+      bounds: {
+        x: operation.shape.x,
+        y: operation.shape.y,
+        width: operation.shape.width,
+        height: operation.shape.height,
+      },
+      pointCount: operation.shape.polygonPoints?.length ?? 0,
+    }
+  }
+  return {
+    id: operation.id,
+    kind: operation.kind,
+    mode: operation.stroke.mode,
+    targetValue: maskStrokeTargetValue(operation.stroke),
+    strokeWidth: operation.stroke.strokeWidth,
+    pointCount: Math.floor((operation.stroke.points?.length ?? 0) / 2),
+  }
+}
+
+function canAppendMaskRuntimeOperations(current: MaskRuntimeState, mask: LayerMask) {
+  const operations = maskEditOperations(mask)
+  if (current.renderedOperationCount > operations.length) return false
   const prefixKey = maskRuntimeContentKey({
     ...mask,
     version: current.revision,
-    strokes: mask.strokes.slice(0, current.renderedStrokeCount),
+    operations: operations.slice(0, current.renderedOperationCount),
   })
   return current.contentKey === prefixKey
 }
@@ -413,21 +547,4 @@ function resetMaskCanvas(canvas: HTMLCanvasElement, defaultAlpha: number) {
   context.globalCompositeOperation = 'source-over'
   context.fillStyle = `rgb(${gray},${gray},${gray})`
   context.fillRect(0, 0, canvas.width, canvas.height)
-}
-
-function drawMaskStrokeToContext(context: CanvasRenderingContext2D, stroke: PaintStroke) {
-  context.save()
-  context.globalCompositeOperation = 'source-over'
-  const gray = maskStrokeGrayValue(stroke)
-  context.strokeStyle = `rgb(${gray},${gray},${gray})`
-  context.lineWidth = Math.max(1, stroke.strokeWidth)
-  context.lineCap = 'round'
-  context.lineJoin = 'round'
-  context.beginPath()
-  context.moveTo(stroke.points[0] ?? 0, stroke.points[1] ?? 0)
-  for (let index = 2; index < stroke.points.length; index += 2) {
-    context.lineTo(stroke.points[index], stroke.points[index + 1])
-  }
-  context.stroke()
-  context.restore()
 }

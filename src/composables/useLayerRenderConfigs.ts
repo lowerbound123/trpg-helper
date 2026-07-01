@@ -2,6 +2,7 @@ import type { ComputedRef, Ref } from 'vue'
 
 import { fontRecordFamily, type LibraryRecord } from '@/lib/backend'
 import { appendDebugLog } from '@/lib/backend'
+import type { EditorTool } from '@/lib/editor-tools'
 import type { HandoutLayer, ImageLayer, PaintLayer, ShapeLayer, TextLayer } from '@/lib/handout'
 import { isLayerEffectivelyVisible } from '@/lib/handout'
 import { layerKonvaConfig, textKonvaConfig } from '@/lib/layer-rendering'
@@ -13,7 +14,6 @@ type EditorStore = ReturnType<typeof useEditorStore>
 type ImageCache = Record<string, HTMLImageElement>
 type MaskedImageMap = Record<string, HTMLCanvasElement | undefined>
 type MaskPreviewUrlMap = Record<string, string | undefined>
-type EditorTool = 'select' | 'brush' | 'eraser'
 
 export function useLayerRenderConfigs(options: {
   editor: EditorStore

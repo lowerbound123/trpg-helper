@@ -6,6 +6,7 @@ import { appConfiguration } from '@/lib/configuration'
 import { maskTransformFromLayer } from '@/lib/mask-geometry'
 import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
 import { createMaskTileStore } from '@/lib/mask-tiles'
+import { maskShapeGrayValue, maskStrokeStrength, maskStrokeTargetValue } from '@/lib/mask-shapes'
 import {
   clearBackgroundMask,
   clearLayerMask,
@@ -21,11 +22,12 @@ import {
   type HandoutDocument,
   type HandoutLayer,
   type LayerMask,
+  type MaskShapeOperation,
   type MaskCacheMeta,
   type PaintStroke,
 } from '@/lib/handout'
 import type { DirtyReason } from '@/lib/handout/dirty'
-import { createSolidMaskDataUrl, drawMaskStrokes } from '@/lib/mask'
+import { createSolidMaskDataUrl, drawMaskEdits, maskHasPendingEdits } from '@/lib/mask'
 import type { CommandHistory } from '@/lib/history'
 
 export type MaskChangePulse = {
@@ -35,6 +37,11 @@ export type MaskChangePulse = {
   layerId?: string
   version: number
   reason: string
+}
+
+function changedTileKeys(before: LayerMask, after: LayerMask) {
+  const keys = new Set([...Object.keys(before.tiles), ...Object.keys(after.tiles)])
+  return [...keys].filter((key) => before.tiles[key]?.version !== after.tiles[key]?.version).sort()
 }
 
 export function createMaskStore(deps: {
@@ -302,8 +309,28 @@ export function createMaskStore(deps: {
     const nextMask = createMaskTileStore(currentMask).applyStroke(stroke)
     editorMaskGpuRuntime.syncStrokeApplied(currentMask, stroke, nextMask.version)
     queueMaskPreviewFilesForDeletion(currentMask)
+    const strokePayload = {
+      maskId: currentMask.id,
+      strokeId: stroke.id,
+      mode: stroke.mode,
+      source: 'opacity',
+      brushOpacity: stroke.opacity ?? null,
+      eraserOpacity: stroke.eraserOpacity ?? null,
+      paintValue: maskStrokeTargetValue(stroke),
+      targetValue: maskStrokeTargetValue(stroke),
+      strength: maskStrokeStrength(stroke),
+      strokeWidth: stroke.strokeWidth,
+      pointCount: Math.floor((stroke.points?.length ?? 0) / 2),
+      versionBefore: currentMask.version,
+      versionAfter: nextMask.version,
+      dirtyTileKeys: changedTileKeys(currentMask, nextMask),
+    }
     if (deps.document.value.canvas.backgroundMask?.id === currentMask.id) {
       deps.commit((doc) => setBackgroundMask(doc, nextMask))
+      void appendDebugLog('mask', 'mask-stroke-committed', {
+        ...strokePayload,
+        targetKind: 'background',
+      })
       emitMaskChangePulse({ kind: 'background', maskId: nextMask.id, version: nextMask.version, reason: 'stroke' })
       return
     }
@@ -311,7 +338,58 @@ export function createMaskStore(deps: {
     if (layer) {
       deps.commit((doc) => setLayerMask(doc, layer.id, nextMask))
       deps.markLayerDirty(layer.id, 'mask-changed')
+      void appendDebugLog('mask', 'mask-stroke-committed', {
+        ...strokePayload,
+        targetKind: 'layer',
+        layerId: layer.id,
+      })
       emitMaskChangePulse({ kind: 'layer', layerId: layer.id, maskId: nextMask.id, version: nextMask.version, reason: 'stroke' })
+    }
+  }
+
+  async function applyMaskShape(maskId: string, shape: MaskShapeOperation) {
+    if (!appConfiguration.mask.enabled) return
+    const currentMask = deps.document.value.canvas.backgroundMask?.id === maskId
+      ? deps.document.value.canvas.backgroundMask
+      : deps.document.value.layers.find((item) => item.mask?.id === maskId)?.mask
+    if (!currentMask) return
+    const nextMask = createMaskTileStore(currentMask).applyShape(shape)
+    editorMaskGpuRuntime.syncShapeApplied(currentMask, shape, nextMask.version)
+    queueMaskPreviewFilesForDeletion(currentMask)
+    const shapePayload = {
+      maskId: currentMask.id,
+      shapeId: shape.id,
+      shape: shape.shape,
+      source: 'opacity',
+      opacity: maskShapeGrayValue(shape) / 255,
+      paintValue: maskShapeGrayValue(shape),
+      value: maskShapeGrayValue(shape),
+      bounds: { x: shape.x, y: shape.y, width: shape.width, height: shape.height },
+      strokeWidth: shape.strokeWidth,
+      pointCount: shape.polygonPoints?.length ?? 0,
+      versionBefore: currentMask.version,
+      versionAfter: nextMask.version,
+      dirtyTileKeys: changedTileKeys(currentMask, nextMask),
+    }
+    if (deps.document.value.canvas.backgroundMask?.id === currentMask.id) {
+      deps.commit((doc) => setBackgroundMask(doc, nextMask))
+      void appendDebugLog('mask', 'mask-shape-committed', {
+        ...shapePayload,
+        targetKind: 'background',
+      })
+      emitMaskChangePulse({ kind: 'background', maskId: nextMask.id, version: nextMask.version, reason: 'shape' })
+      return
+    }
+    const layer = deps.document.value.layers.find((item) => item.mask?.id === currentMask.id)
+    if (layer) {
+      deps.commit((doc) => setLayerMask(doc, layer.id, nextMask))
+      deps.markLayerDirty(layer.id, 'mask-changed')
+      void appendDebugLog('mask', 'mask-shape-committed', {
+        ...shapePayload,
+        targetKind: 'layer',
+        layerId: layer.id,
+      })
+      emitMaskChangePulse({ kind: 'layer', layerId: layer.id, maskId: nextMask.id, version: nextMask.version, reason: 'shape' })
     }
   }
 
@@ -323,19 +401,27 @@ export function createMaskStore(deps: {
     await next
   }
 
+  async function addMaskShape(mask: LayerMask, shape: MaskShapeOperation) {
+    if (!appConfiguration.mask.enabled) return
+    const previous = maskPaintQueues.get(mask.id) ?? Promise.resolve()
+    const next = previous.then(() => applyMaskShape(mask.id, shape))
+    maskPaintQueues.set(mask.id, next.catch(() => undefined))
+    await next
+  }
+
   async function loadMaskDataUrl(mask: LayerMask) {
     if (!appConfiguration.mask.enabled) return createSolidMaskDataUrl(mask.width, mask.height)
     const existing = maskDataUrls.value[mask.id]
     if (existing) {
-      return mask.strokes.length
-        ? drawMaskStrokes(existing, mask.width, mask.height, mask.strokes)
+      return maskHasPendingEdits(mask)
+        ? drawMaskEdits(existing, mask)
         : existing
     }
     if (mask.path) {
       try {
         const dataUrl = await readProjectFileDataUrl(deps.projectTarget(), mask.path, 'image/png')
-        if (!mask.strokes.length) maskDataUrls.value[mask.id] = dataUrl
-        else return drawMaskStrokes(dataUrl, mask.width, mask.height, mask.strokes)
+        if (!maskHasPendingEdits(mask)) maskDataUrls.value[mask.id] = dataUrl
+        else return drawMaskEdits(dataUrl, mask)
         return dataUrl
       } catch (error) {
         void appendDebugLog('mask', 'load-mask-failed', {
@@ -346,8 +432,8 @@ export function createMaskStore(deps: {
       }
     }
     const fallback = createSolidMaskDataUrl(mask.width, mask.height)
-    if (!mask.strokes.length) maskDataUrls.value[mask.id] = fallback
-    else return drawMaskStrokes(fallback, mask.width, mask.height, mask.strokes)
+    if (!maskHasPendingEdits(mask)) maskDataUrls.value[mask.id] = fallback
+    else return drawMaskEdits(fallback, mask)
     return fallback
   }
 
@@ -359,10 +445,24 @@ export function createMaskStore(deps: {
       await deleteProjectMask(target, relativePath)
     }
     let nextDocument = deps.document.value
+    const loadStoredMaskBaseDataUrl = async (mask: LayerMask) => {
+      if (maskDataUrls.value[mask.id]) return maskDataUrls.value[mask.id]
+      if (!mask.path) return createSolidMaskDataUrl(mask.width, mask.height)
+      try {
+        return await readProjectFileDataUrl(target, mask.path, 'image/png')
+      } catch (error) {
+        void appendDebugLog('mask', 'load-mask-for-persist-failed', {
+          maskId: mask.id,
+          path: mask.path,
+          error: error instanceof Error ? { name: error.name, message: error.message } : String(error),
+        })
+        return createSolidMaskDataUrl(mask.width, mask.height)
+      }
+    }
     const saveOne = async (mask: LayerMask) => {
-      const baseDataUrl = maskDataUrls.value[mask.id] || (mask.path ? await loadMaskDataUrl(mask) : createSolidMaskDataUrl(mask.width, mask.height))
-      const dataUrl = mask.strokes.length
-        ? await drawMaskStrokes(baseDataUrl, mask.width, mask.height, mask.strokes)
+      const baseDataUrl = await loadStoredMaskBaseDataUrl(mask)
+      const dataUrl = maskHasPendingEdits(mask)
+        ? await drawMaskEdits(baseDataUrl, mask)
         : baseDataUrl
       if (!dataUrl) return mask
       const path = await saveProjectMask(target, mask.id, dataUrl)
@@ -372,6 +472,8 @@ export function createMaskStore(deps: {
         path,
         highResPath: path,
         strokes: [],
+        shapes: [],
+        operations: [],
         previewPath: null,
         previewUpdatedAt: null,
         cache: null,
@@ -423,6 +525,7 @@ export function createMaskStore(deps: {
     deleteLayerMaskById,
     deleteCanvasBackgroundMask,
     moveOrCopyLayerMask,
+    addMaskShape,
     paintMask,
     loadMaskDataUrl,
     persistProjectMasks,

@@ -10,19 +10,25 @@ import { useEditorStore } from '@/stores/editor'
 import { normalizeRotationDegrees, useLayerDragTransform } from './useLayerDragTransform'
 
 function createDragTransform() {
-  return useLayerDragTransform({
-    editor: useEditorStore(),
-    layerNodeRefs: reactive({}),
-    stageScale: computed(() => 1),
-    isShapeLayer: (layer: HandoutLayer): layer is ShapeLayer => layer.type === 'shape',
-    selectCanvasLayer: () => {},
-    autoTextLayerHeight: () => 24,
-    refreshLayerEffectCacheAfterUpdate: async () => {},
-    logBackgroundRender: () => {},
-    logShape: () => {},
-    logSnap: () => {},
-    curveControlRevision: ref(0),
-  })
+  const editor = useEditorStore()
+  const layerNodeRefs = reactive<Record<string, { getNode: () => Konva.Node } | undefined>>({})
+  return {
+    editor,
+    layerNodeRefs,
+    ...useLayerDragTransform({
+      editor,
+      layerNodeRefs,
+      stageScale: computed(() => 1),
+      isShapeLayer: (layer: HandoutLayer): layer is ShapeLayer => layer.type === 'shape',
+      selectCanvasLayer: () => {},
+      autoTextLayerHeight: () => 24,
+      refreshLayerEffectCacheAfterUpdate: async () => {},
+      logBackgroundRender: () => {},
+      logShape: () => {},
+      logSnap: () => {},
+      curveControlRevision: ref(0),
+    }),
+  }
 }
 
 describe('layer drag transform helpers', () => {
@@ -59,5 +65,46 @@ describe('layer drag transform helpers', () => {
     expect(normalizeRotationDegrees(-16)).toBe(344)
     expect(normalizeRotationDegrees(-0)).toBe(0)
     expect(normalizeRotationDegrees(390)).toBe(30)
+  })
+
+  it('persists resized arbitrary polygon points when transformer scale is reset', () => {
+    const transform = createDragTransform()
+    transform.editor.addPolygon({
+      shape: 'polygon',
+      x: 20,
+      y: 30,
+      width: 80,
+      height: 60,
+      polygonPoints: [
+        { x: 0, y: 0 },
+        { x: 80, y: 10 },
+        { x: 40, y: 60 },
+      ],
+    })
+    const layer = transform.editor.selectedLayer as ShapeLayer
+    const node = new Konva.Line({
+      x: layer.x,
+      y: layer.y,
+      width: layer.width,
+      height: layer.height,
+      points: [0, 0, 80, 10, 40, 60],
+      closed: true,
+      scaleX: 2,
+      scaleY: 0.5,
+    })
+    transform.layerNodeRefs[layer.id] = { getNode: () => node }
+
+    transform.onTransformEnd(layer)
+
+    const updated = transform.editor.document.layers.find((item) => item.id === layer.id) as ShapeLayer
+    expect(updated.width).toBe(160)
+    expect(updated.height).toBe(30)
+    expect(updated.polygonPoints).toEqual([
+      { x: 0, y: 0 },
+      { x: 160, y: 5 },
+      { x: 80, y: 30 },
+    ])
+    expect(node.scaleX()).toBe(1)
+    expect(node.scaleY()).toBe(1)
   })
 })

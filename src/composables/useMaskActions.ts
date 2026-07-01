@@ -3,13 +3,13 @@ import { confirm } from '@tauri-apps/plugin-dialog'
 import type Konva from 'konva'
 
 import { appendDebugLog } from '@/lib/backend'
+import type { EditorTool } from '@/lib/editor-tools'
 import type { HandoutLayer } from '@/lib/handout'
 import { matrixDecompose, matrixFromComponents } from '@/lib/mask-geometry'
 import { useEditorStore } from '@/stores/editor'
 
 type EditorStore = ReturnType<typeof useEditorStore>
 type NodeRef = { getNode: () => Konva.Node }
-type EditorTool = 'select' | 'brush' | 'eraser'
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
 type MaskPreviewUrlMap = Record<string, string | undefined>
 

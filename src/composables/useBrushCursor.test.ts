@@ -1,11 +1,12 @@
 import { computed, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 
+import type { EditorTool } from '@/lib/editor-tools'
 import { useBrushCursor } from './useBrushCursor'
 
 describe('useBrushCursor', () => {
   it('shows a dashed cursor ring in stage pixels using the current tool width and stage scale', () => {
-    const activeTool = ref<'select' | 'brush' | 'eraser'>('brush')
+    const activeTool = ref<EditorTool>('brush')
     const stageFrameRef = ref({
       getBoundingClientRect: () => ({
         left: 10,
@@ -35,7 +36,7 @@ describe('useBrushCursor', () => {
   })
 
   it('hides the ring outside drawing tools or outside the stage frame', () => {
-    const activeTool = ref<'select' | 'brush' | 'eraser'>('select')
+    const activeTool = ref<EditorTool>('select')
     const stageFrameRef = ref({
       getBoundingClientRect: () => ({
         left: 10,

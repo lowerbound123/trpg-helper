@@ -11,6 +11,7 @@ export type ShapeKind =
   | 'diamond'
   | 'hexagon-h'
   | 'hexagon-v'
+  | 'polygon'
   | 'line'
   | 'quadratic-curve'
   | 'cubic-bezier'
@@ -81,6 +82,7 @@ export interface ShapeLayer extends BaseLayer {
   lineArrowSize: number
   lineStyle: LineStyleKind
   curvePoints?: CurvePoints
+  polygonPoints?: CanvasPoint[]
 }
 
 export interface PaintLayer extends BaseLayer {
@@ -146,6 +148,7 @@ export type NewShapeLayerInput = {
   lineArrowSize?: number
   lineStyle?: LineStyleKind
   curvePoints?: CurvePoints
+  polygonPoints?: CanvasPoint[]
 }
 
 export type NewPaintLayerInput = {

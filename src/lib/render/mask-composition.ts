@@ -2,7 +2,7 @@ import Konva from 'konva'
 
 import { appendDebugLog, readProjectFileDataUrl, type LibraryIndex } from '@/lib/backend'
 import type { HandoutLayer, LayerMask } from '@/lib/handout'
-import { applyLayerMaskToCanvas, createSolidMaskDataUrl, downsampleDataUrl, drawMaskStrokes, loadImageFromDataUrl } from '@/lib/mask'
+import { applyLayerMaskToCanvas, createSolidMaskDataUrl, downsampleDataUrl, drawMaskEdits, loadImageFromDataUrl, maskHasPendingEdits } from '@/lib/mask'
 import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
 import { appendSpeedLog, measureSpeed } from '@/lib/speed-log'
 
@@ -25,8 +25,8 @@ async function loadMaskImage(mask: LayerMask, options?: RenderMaskOptions, inclu
     : '')
   if (!dataUrl) dataUrl = createSolidMaskDataUrl(mask.width, mask.height, mask.defaultAlpha)
   const alreadyMaterialized = Boolean(inMemory && options?.maskRenderMode === 'export-deterministic')
-  if (includeStrokes && mask.strokes.length && !alreadyMaterialized) {
-    dataUrl = await drawMaskStrokes(dataUrl, mask.width, mask.height, mask.strokes)
+  if (includeStrokes && maskHasPendingEdits(mask) && !alreadyMaterialized) {
+    dataUrl = await drawMaskEdits(dataUrl, mask)
   }
   if (options?.maxMaskEdge) dataUrl = await downsampleDataUrl(dataUrl, options.maxMaskEdge)
   return loadImageFromDataUrl(dataUrl)

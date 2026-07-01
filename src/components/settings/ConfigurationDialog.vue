@@ -60,6 +60,7 @@ function normalizeDraft() {
   draft.editor.snapThresholdScreenPx = normalizeNumber(draft.editor.snapThresholdScreenPx, appConfiguration.editor.snapThresholdScreenPx, 0)
   draft.editor.maxSnapCandidates = normalizeNumber(draft.editor.maxSnapCandidates, appConfiguration.editor.maxSnapCandidates, 0)
   draft.editor.continuousEditCommitDelayMs = normalizeNumber(draft.editor.continuousEditCommitDelayMs, appConfiguration.editor.continuousEditCommitDelayMs, 0)
+  draft.mask.strokePreviewMinOpacity = Math.min(1, normalizeNumber(draft.mask.strokePreviewMinOpacity, appConfiguration.mask.strokePreviewMinOpacity, 0))
   draft.export.defaultScale = normalizeNumber(draft.export.defaultScale, appConfiguration.export.defaultScale, 0.1)
   draft.export.minScale = normalizeNumber(draft.export.minScale, appConfiguration.export.minScale, 0.01)
 }
@@ -191,6 +192,17 @@ watch(open, (value) => {
               <em>Only affects low-frequency preview composition.</em>
             </span>
             <Switch v-model:checked="draft.mask.usePixiPreview" :disabled="!draft.mask.enabled" />
+          </label>
+          <label>
+            <span>Stroke preview min opacity</span>
+            <Input
+              v-model.number="draft.mask.strokePreviewMinOpacity"
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              :disabled="!draft.mask.enabled"
+            />
           </label>
         </section>
 

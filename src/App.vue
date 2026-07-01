@@ -24,6 +24,7 @@ import { useRenderSignatures } from '@/composables/useRenderSignatures'
 import { useMaskComposition } from '@/composables/useMaskComposition'
 import { usePaintStrokes } from '@/composables/usePaintStrokes'
 import { useBrushCursor } from '@/composables/useBrushCursor'
+import { usePolygonCreation } from '@/composables/usePolygonCreation'
 import { useCurveEditing } from '@/composables/useCurveEditing'
 import { useSelectionBox } from '@/composables/useSelectionBox'
 import { useLayerDragTransform } from '@/composables/useLayerDragTransform'
@@ -40,16 +41,18 @@ import {
   type LibraryRecord,
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
-import type { ShapeKind } from '@/lib/handout'
+import type { NewShapeLayerInput, ShapeKind } from '@/lib/handout'
 import { isLayerEffectivelyVisible } from '@/lib/handout'
+import type { EditorTool } from '@/lib/editor-tools'
+import { createMaskShapeOperation, createMaskPolygonOperationFromDocumentInput, maskBrushValueFromOpacity } from '@/lib/mask-shapes'
+import { documentPointToMaskLocal } from '@/lib/mask-geometry'
 import { createAppShortcutHandler } from '@/app/AppShortcuts'
 import { appConfiguration } from '@/lib/configuration'
 import { partitionUploadFiles } from '@/lib/upload-validation'
-import { useEditorStore } from '@/stores/editor'
+import { isPaintLayer, useEditorStore } from '@/stores/editor'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
-type EditorTool = 'select' | 'brush' | 'eraser'
 
 Konva.dragButtons = [0]
 const PREVIEW_TARGET_BYTES = 512 * 1024
@@ -348,6 +351,19 @@ const {
   isPanning: computed(() => panState.active),
 })
 const {
+  polygonDraft,
+  finishPolygonDraft,
+  handlePolygonPointerDown,
+  polygonDraftLineConfig,
+  polygonDraftPointConfig,
+} = usePolygonCreation({
+  activeTool,
+  stageScale,
+  canvasPointFromClient,
+  addPolygonToCanvas,
+  updateTransformer,
+})
+const {
   selectionBox,
   handleStagePointer,
   startSelectionBox,
@@ -363,6 +379,7 @@ const {
   startPaintStroke,
   movePaintStroke,
   stopPaintStroke,
+  handlePolygonPointerDown,
 })
 const {
   curveControlRevision,
@@ -624,6 +641,7 @@ provide('left-rail-context', {
   addAssetToCanvas,
   addFontTextToCanvas,
   addShapeToCanvas,
+  startPolygonCreation,
   startAssetDrag,
   clearAssetDrag,
   startFontDrag,
@@ -678,6 +696,9 @@ provide('canvas-context', {
   visibleCanvasLayers,
   selectedCurveLayers,
   draftStroke,
+  polygonDraft,
+  polygonDraftLineConfig,
+  polygonDraftPointConfig,
   brushCursor,
   selectionBox,
   guideLines,
@@ -735,6 +756,7 @@ const handleGlobalKeydown = createAppShortcutHandler({
   undo: () => editor.undo(),
   redo: () => editor.redo(),
   deleteLayer: () => deleteLayer(),
+  finishActiveTool,
   setTool: (tool) => setActiveTool(tool),
   setRailTab: (tab) => { activeRailTab.value = tab },
   addText: () => {
@@ -866,12 +888,161 @@ function createFontTextOnCanvas(font: LibraryRecord, position?: { x?: number; y?
 }
 
 function addShapeToCanvas(shape: ShapeKind, position?: { x?: number; y?: number }) {
+  if (addShapeToActiveMask(shape, position)) return
+  if (shape === 'polygon') {
+    startPolygonCreation()
+    return
+  }
+  void appendDebugLog('mask', 'shape-add-normal-layer', {
+    shape,
+    position,
+    layerCountBefore: editor.document.layers.length,
+  })
   editor.addShape(shape, position)
   void updateTransformer()
 }
 
+function addPolygonToCanvas(input: NewShapeLayerInput) {
+  if (addPolygonToActiveMask(input)) return
+  void appendDebugLog('mask', 'polygon-add-normal-layer', {
+    input: polygonInputLogData(input),
+    layerCountBefore: editor.document.layers.length,
+  })
+  editor.addPolygon(input)
+  void updateTransformer()
+}
+
+function activeMaskEditMask() {
+  const target = editor.maskEditTarget
+  if (!target) return undefined
+  if (target.kind === 'background') return editor.document.canvas.backgroundMask ?? undefined
+  return editor.document.layers.find((layer) => layer.id === target.layerId)?.mask ?? undefined
+}
+
+function activeMaskBrushOpacity() {
+  const layer = editor.selectedLayer
+  return layer && isPaintLayer(layer) ? layer.brushOpacity : editor.toolSettings.brushOpacity
+}
+
+function activeMaskEraserOpacity() {
+  const layer = editor.selectedLayer
+  return layer && isPaintLayer(layer) ? layer.eraserOpacity : editor.toolSettings.eraserOpacity
+}
+
+function maskLocalTopLeft(point: { x: number; y: number }) {
+  const mask = activeMaskEditMask()
+  if (!mask) return undefined
+  if (editor.maskEditTarget?.kind === 'background') return point
+  return documentPointToMaskLocal(mask, point)
+}
+
+function addShapeToActiveMask(shape: ShapeKind, position?: { x?: number; y?: number }) {
+  const mask = activeMaskEditMask()
+  if (!mask || shape === 'polygon') return false
+  const local = maskLocalTopLeft({ x: position?.x ?? 180, y: position?.y ?? 160 })
+  if (!local) return false
+  const brushOpacity = activeMaskBrushOpacity()
+  const eraserOpacity = activeMaskEraserOpacity()
+  const paintValue = maskBrushValueFromOpacity(brushOpacity)
+  const operation = createMaskShapeOperation({
+    shape,
+    x: local.x,
+    y: local.y,
+    value: paintValue,
+  })
+  void appendDebugLog('mask', 'shape-add-active-mask', {
+    maskId: mask.id,
+    target: editor.maskEditTarget,
+    shape,
+    source: 'opacity',
+    brushOpacity,
+    eraserOpacity,
+    paintValue,
+    value: operation.value,
+    documentPosition: position,
+    localPosition: local,
+    operation: maskShapeLogData(operation),
+  })
+  void editor.addMaskShape(mask, operation)
+  return true
+}
+
+function addPolygonToActiveMask(input: NewShapeLayerInput) {
+  const mask = activeMaskEditMask()
+  if (!mask || input.shape !== 'polygon' || !input.polygonPoints?.length) return false
+  const brushOpacity = activeMaskBrushOpacity()
+  const eraserOpacity = activeMaskEraserOpacity()
+  const paintValue = maskBrushValueFromOpacity(brushOpacity)
+  const operation = createMaskPolygonOperationFromDocumentInput(input, mask, paintValue)
+  void appendDebugLog('mask', 'polygon-add-active-mask', {
+    maskId: mask.id,
+    target: editor.maskEditTarget,
+    source: 'opacity',
+    brushOpacity,
+    eraserOpacity,
+    paintValue,
+    value: paintValue,
+    input: polygonInputLogData(input),
+    operation: operation ? maskShapeLogData(operation) : null,
+  })
+  if (operation) void editor.addMaskShape(mask, operation)
+  return true
+}
+
+function startPolygonCreation() {
+  void appendDebugLog('mask', 'polygon-tool-start', {
+    maskTarget: editor.maskEditTarget,
+    selectedLayerId: editor.selectedLayerId,
+    selectedLayerIds: editor.selectedLayerIds,
+  })
+  if (!editor.maskEditTarget) editor.selectLayer(undefined)
+  activeTool.value = 'polygon'
+  void updateTransformer()
+}
+
 function setActiveTool(tool: EditorTool) {
+  if (tool === 'polygon') {
+    startPolygonCreation()
+    return
+  }
   activeTool.value = tool
+}
+
+function finishActiveTool() {
+  if (activeTool.value !== 'polygon') return false
+  void appendDebugLog('mask', 'polygon-tool-finish-request', {
+    maskTarget: editor.maskEditTarget,
+  })
+  finishPolygonDraft({ selectTool: false })
+  activeTool.value = 'select'
+  return true
+}
+
+function polygonInputLogData(input: NewShapeLayerInput) {
+  return {
+    shape: input.shape,
+    x: input.x,
+    y: input.y,
+    width: input.width,
+    height: input.height,
+    pointCount: input.polygonPoints?.length ?? 0,
+    polygonPoints: input.polygonPoints,
+  }
+}
+
+function maskShapeLogData(operation: ReturnType<typeof createMaskShapeOperation>) {
+  return {
+    id: operation.id,
+    shape: operation.shape,
+    x: operation.x,
+    y: operation.y,
+    width: operation.width,
+    height: operation.height,
+    value: operation.value,
+    strokeWidth: operation.strokeWidth,
+    pointCount: operation.polygonPoints?.length ?? 0,
+    polygonPoints: operation.polygonPoints,
+  }
 }
 
 async function fitEditorCanvas(reason = 'fit') {
@@ -939,6 +1110,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (activeTool.value === 'polygon') finishPolygonDraft({ selectTool: false })
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('dragover', handleDocumentFontDragOver, { capture: true })
   window.removeEventListener('drop', handleDocumentFontDrop, { capture: true })

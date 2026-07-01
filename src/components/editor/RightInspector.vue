@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { appConfiguration } from '@/lib/configuration'
 import { fontRecordFamily } from '@/lib/backend'
+import type { EditorTool } from '@/lib/editor-tools'
 import { isPaintLayer, isShapeLayer, isTextLayer, useEditorStore } from '@/stores/editor'
 import type { BrushKind } from '@/lib/handout'
 
@@ -19,11 +20,11 @@ const exportScale = defineModel<number>('exportScale', { required: true })
 const exportFormat = defineModel<'png' | 'jpeg' | 'webp'>('exportFormat', { required: true })
 const exportQuality = defineModel<number>('exportQuality', { required: true })
 
-const props = defineProps<{
+defineProps<{
   isExporting?: boolean
   exportLog?: string
   exportProgress?: number
-  activeTool?: 'select' | 'brush' | 'eraser'
+  activeTool?: EditorTool
 }>()
 
 defineEmits<{
@@ -32,10 +33,6 @@ defineEmits<{
 
 const editor = useEditorStore()
 const activeLayer = computed(() => editor.selectedLayer)
-const isEditingActiveLayerMask = computed(() =>
-  Boolean(activeLayer.value && editor.maskEditTarget?.kind === 'layer' && editor.maskEditTarget.layerId === activeLayer.value.id),
-)
-const isEditingBackgroundMask = computed(() => editor.maskEditTarget?.kind === 'background')
 const activeTextLayer = computed(() => isTextLayer(activeLayer.value) ? activeLayer.value : undefined)
 const selectedLayers = computed(() => editor.selectedLayers)
 const selectedCount = computed(() => selectedLayers.value.length)
@@ -45,13 +42,6 @@ const selectedPaintLayers = computed(() => selectedLayers.value.filter(isPaintLa
 const allSelectedText = computed(() => selectedLayers.value.length > 0 && selectedTextLayers.value.length === selectedLayers.value.length)
 const allSelectedShapes = computed(() => selectedLayers.value.length > 0 && selectedShapeLayers.value.length === selectedLayers.value.length)
 const allSelectedPaint = computed(() => selectedLayers.value.length > 0 && selectedPaintLayers.value.length === selectedLayers.value.length)
-const showBrushControls = computed(() =>
-  allSelectedPaint.value
-  || props.activeTool === 'brush'
-  || props.activeTool === 'eraser'
-  || isEditingActiveLayerMask.value
-  || isEditingBackgroundMask.value,
-)
 const allSelectedLines = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'line'))
 const allSelectedRoundRects = computed(() => allSelectedShapes.value && selectedShapeLayers.value.every((layer) => layer.shape === 'round-rect'))
 const backgroundAsset = computed(() =>
@@ -100,6 +90,10 @@ const commonBrushTension = computed(() => allSelectedPaint.value ? commonValue(s
 const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
+const brushOpacityPercent = computed(() => Math.round((commonBrushOpacity.value ?? editor.toolSettings.brushOpacity) * 100))
+const eraserOpacityPercent = computed(() => Math.round((commonEraserOpacity.value ?? editor.toolSettings.eraserOpacity) * 100))
+const brushOpacityLabel = computed(() => commonBrushOpacity.value === undefined ? 'Mixed' : `${Math.round(commonBrushOpacity.value * 100)}%`)
+const eraserOpacityLabel = computed(() => commonEraserOpacity.value === undefined ? 'Mixed' : `${Math.round(commonEraserOpacity.value * 100)}%`)
 const continuousEditTimers = new Map<string, number>()
 
 function scheduleContinuousEditEnd(key: string) {
@@ -121,6 +115,18 @@ function endContinuousEdit(key: string) {
 function patchBrushSettings(patch: Record<string, unknown>) {
   if (allSelectedPaint.value) editor.patchSelectedLayers(patch as any)
   else editor.patchToolSettings(patch as any)
+}
+
+function percentSliderValue(value: number[] | undefined, fallback: number) {
+  return Math.max(0, Math.min(100, sliderValue(value, fallback)))
+}
+
+function patchBrushOpacitySlider(value: number[] | undefined) {
+  patchBrushSettings({ brushOpacity: percentSliderValue(value, brushOpacityPercent.value) / 100 })
+}
+
+function patchEraserOpacitySlider(value: number[] | undefined) {
+  patchBrushSettings({ eraserOpacity: percentSliderValue(value, eraserOpacityPercent.value) / 100 })
 }
 
 onBeforeUnmount(() => {
@@ -209,8 +215,8 @@ function patchDocumentSaturation(value: number[] | undefined) {
     <Tabs default-value="inspect" class="rail-tabs">
       <TabsList class="grid grid-cols-3">
         <TabsTrigger value="inspect">Inspect</TabsTrigger>
-        <TabsTrigger value="document">Doc Type</TabsTrigger>
-        <TabsTrigger value="export">Export</TabsTrigger>
+        <TabsTrigger value="brush">Brush</TabsTrigger>
+        <TabsTrigger value="document">Document</TabsTrigger>
       </TabsList>
 
       <TabsContent value="inspect" class="rail-tab-content">
@@ -287,19 +293,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 </SelectContent>
               </Select>
             </label>
-            <label v-if="showBrushControls" class="blend-control">
-              Brush type
-              <Select :model-value="commonBrushKind" @update:model-value="(value) => patchBrushSettings({ brushKind: value as BrushKind })">
-                <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pixel">Pixel</SelectItem>
-                  <SelectItem value="pencil">Pencil</SelectItem>
-                  <SelectItem value="marker">Marker</SelectItem>
-                  <SelectItem value="highlighter">Highlighter</SelectItem>
-                  <SelectItem value="airbrush">Airbrush</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
             <label v-if="allSelectedShapes" class="compact-color-control">
               Fill
               <Input
@@ -316,15 +309,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
                 :model-value="commonShapeStroke ?? ''"
                 placeholder="Mixed"
                 @update:model-value="(value) => editor.patchSelectedLayers({ stroke: String(value) })"
-              />
-            </label>
-            <label v-if="showBrushControls" class="compact-color-control">
-              Brush
-              <Input
-                :type="commonBrushColor ? 'color' : 'text'"
-                :model-value="commonBrushColor ?? ''"
-                placeholder="Mixed"
-                @update:model-value="(value) => patchBrushSettings({ brushColor: String(value) })"
               />
             </label>
           </div>
@@ -534,74 +518,6 @@ function patchDocumentSaturation(value: number[] | undefined) {
               </div>
             </template>
           </template>
-          <template v-if="showBrushControls">
-            <div class="two-col">
-              <label>
-                Brush width
-                <Input
-                  type="number"
-                  min="1"
-                  step="1"
-                  :model-value="commonBrushWidth ?? ''"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => patchBrushSettings({ brushWidth: Math.max(1, Number(value) || 1) })"
-                />
-              </label>
-              <label>
-                Eraser width
-                <Input
-                  type="number"
-                  min="1"
-                  step="1"
-                  :model-value="commonEraserWidth ?? ''"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => patchBrushSettings({ eraserWidth: Math.max(1, Number(value) || 1) })"
-                />
-              </label>
-            </div>
-            <div class="two-col">
-              <label>
-                Tension
-                <Input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  :model-value="commonBrushTension ?? ''"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => patchBrushSettings({ brushTension: Math.max(0, Math.min(1, Number(value) || 0)) })"
-                />
-              </label>
-              <label>
-                Brush opacity (%)
-                <Input
-                  type="number"
-                  min="1"
-                  max="100"
-                  step="1"
-                  :model-value="commonBrushOpacity === undefined ? '' : Math.round(commonBrushOpacity * 100)"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => patchBrushSettings({ brushOpacity: Math.max(0.01, Math.min(1, (Number(value) || 100) / 100)) })"
-                />
-              </label>
-              <label>
-                Eraser opacity (%)
-                <Input
-                  type="number"
-                  min="1"
-                  max="100"
-                  step="1"
-                  :model-value="commonEraserOpacity === undefined ? '' : Math.round(commonEraserOpacity * 100)"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => patchBrushSettings({ eraserOpacity: Math.max(0.01, Math.min(1, (Number(value) || 100) / 100)) })"
-                />
-              </label>
-            </div>
-            <div class="document-summary">
-              <span>Strokes</span>
-              <strong>{{ selectedPaintLayers.reduce((sum, layer) => sum + layer.strokes.length, 0) }}</strong>
-            </div>
-          </template>
           <Separator />
           <div class="effect-grid">
             <label>
@@ -656,6 +572,93 @@ function patchDocumentSaturation(value: number[] | undefined) {
           </div>
         </div>
         <div v-else class="empty-inspector">Select a layer on the canvas or in the layer list.</div>
+      </TabsContent>
+
+      <TabsContent value="brush" class="rail-tab-content">
+        <div class="panel-stack inspector-panel">
+          <label class="blend-control">
+            Brush type
+            <Select :model-value="commonBrushKind" @update:model-value="(value) => patchBrushSettings({ brushKind: value as BrushKind })">
+              <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pixel">Pixel</SelectItem>
+                <SelectItem value="pencil">Pencil</SelectItem>
+                <SelectItem value="marker">Marker</SelectItem>
+                <SelectItem value="highlighter">Highlighter</SelectItem>
+                <SelectItem value="airbrush">Airbrush</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          <label class="compact-color-control">
+            Brush
+            <Input
+              :type="commonBrushColor ? 'color' : 'text'"
+              :model-value="commonBrushColor ?? ''"
+              placeholder="Mixed"
+              @update:model-value="(value) => patchBrushSettings({ brushColor: String(value) })"
+            />
+          </label>
+          <div class="two-col">
+            <label>
+              Brush width
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                :model-value="commonBrushWidth ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => patchBrushSettings({ brushWidth: Math.max(1, Number(value) || 1) })"
+              />
+            </label>
+            <label>
+              Eraser width
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                :model-value="commonEraserWidth ?? ''"
+                placeholder="Mixed"
+                @update:model-value="(value) => patchBrushSettings({ eraserWidth: Math.max(1, Number(value) || 1) })"
+              />
+            </label>
+          </div>
+          <label>
+            Tension
+            <Input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              :model-value="commonBrushTension ?? ''"
+              placeholder="Mixed"
+              @update:model-value="(value) => patchBrushSettings({ brushTension: Math.max(0, Math.min(1, Number(value) || 0)) })"
+            />
+          </label>
+          <label>
+            Brush opacity {{ brushOpacityLabel }}
+            <Slider
+              :model-value="[brushOpacityPercent]"
+              :min="0"
+              :max="100"
+              :step="1"
+              @update:model-value="patchBrushOpacitySlider"
+            />
+          </label>
+          <label>
+            Eraser opacity {{ eraserOpacityLabel }}
+            <Slider
+              :model-value="[eraserOpacityPercent]"
+              :min="0"
+              :max="100"
+              :step="1"
+              @update:model-value="patchEraserOpacitySlider"
+            />
+          </label>
+          <div class="document-summary">
+            <span>Strokes</span>
+            <strong>{{ selectedPaintLayers.reduce((sum, layer) => sum + layer.strokes.length, 0) }}</strong>
+          </div>
+        </div>
       </TabsContent>
 
       <TabsContent value="document" class="rail-tab-content">
@@ -736,19 +739,17 @@ function patchDocumentSaturation(value: number[] | undefined) {
               />
             </label>
           </div>
+          <Separator />
+          <ExportPanel
+            v-model:export-scale="exportScale"
+            v-model:export-format="exportFormat"
+            v-model:export-quality="exportQuality"
+            :is-exporting="isExporting"
+            :export-log="exportLog"
+            :export-progress="exportProgress"
+            @export-image="$emit('exportImage')"
+          />
         </div>
-      </TabsContent>
-
-      <TabsContent value="export" class="rail-tab-content">
-        <ExportPanel
-          v-model:export-scale="exportScale"
-          v-model:export-format="exportFormat"
-          v-model:export-quality="exportQuality"
-          :is-exporting="isExporting"
-          :export-log="exportLog"
-          :export-progress="exportProgress"
-          @export-image="$emit('exportImage')"
-        />
       </TabsContent>
     </Tabs>
   </aside>

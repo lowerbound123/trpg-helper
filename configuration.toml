@@ -31,6 +31,9 @@ enabled = true
 # Use PixiJS for low-frequency layer mask preview composition. Final export
 # still uses the Canvas2D/Konva path so the output is deterministic.
 use_pixi_preview = true
+# Minimum opacity used only for in-progress brush/eraser stroke previews while
+# editing a mask. Final mask pixels still use the configured brush/eraser value.
+stroke_preview_min_opacity = 0.3
 
 [export]
 default_scale = 1

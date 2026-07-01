@@ -25,6 +25,8 @@ function mask(): LayerMask {
     defaultAlpha: 255,
     tiles: {},
     strokes: [],
+    shapes: [],
+    operations: [],
     x: 0,
     y: 0,
     scaleX: 1,

@@ -1,4 +1,5 @@
 import { isEditableTarget } from '@/lib/dom'
+import type { EditorTool } from '@/lib/editor-tools'
 
 export type AppShortcutContext = {
   isEditorView: () => boolean
@@ -7,7 +8,8 @@ export type AppShortcutContext = {
   undo: () => void
   redo: () => void
   deleteLayer: () => void
-  setTool: (tool: 'select' | 'brush' | 'eraser') => void
+  setTool: (tool: EditorTool) => void
+  finishActiveTool?: () => boolean
   setRailTab: (tab: 'assets' | 'fonts' | 'graph' | 'layers') => void
   addText: () => void
   moveLayerUp: () => void
@@ -28,6 +30,10 @@ export function createAppShortcutHandler(context: AppShortcutContext) {
       event.preventDefault()
       if (event.shiftKey) context.redo()
       else context.undo()
+      return
+    }
+    if (event.key === 'Escape' && context.finishActiveTool?.()) {
+      event.preventDefault()
       return
     }
     if (isEditableTarget(event.target)) return

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import type { HandoutLayer, LayerMask, PaintStroke } from './handout'
-import { maskLayerCompositeSignature, maskRuntimeContentKey, maskStrokeGrayValue } from './mask-runtime'
+import type { HandoutLayer, LayerMask, MaskShapeOperation, PaintStroke } from './handout'
+import { maskLayerCompositeSignature, maskRuntimeContentKey } from './mask-runtime'
+import { maskStrokeStrength, maskStrokeTargetValue } from './mask-shapes'
 import { identityMatrix, maskTransformFromLayer, syncMaskWithLayerDelta } from './mask-geometry'
 
 function layer(input: Partial<HandoutLayer> = {}): HandoutLayer {
@@ -40,6 +41,7 @@ function mask(input: Partial<LayerMask> = {}): LayerMask {
     defaultAlpha: 255,
     tiles: {},
     strokes: [],
+    shapes: [],
     x: 0,
     y: 0,
     scaleX: 1,
@@ -55,6 +57,20 @@ function mask(input: Partial<LayerMask> = {}): LayerMask {
   } as LayerMask
 }
 
+function shape(input: Partial<MaskShapeOperation> = {}): MaskShapeOperation {
+  return {
+    id: 'shape-1',
+    shape: 'rect',
+    x: 10,
+    y: 10,
+    width: 50,
+    height: 40,
+    value: 0,
+    strokeWidth: 4,
+    ...input,
+  }
+}
+
 function stroke(input: Partial<PaintStroke>): PaintStroke {
   return {
     id: 'stroke-1',
@@ -67,11 +83,15 @@ function stroke(input: Partial<PaintStroke>): PaintStroke {
 }
 
 describe('mask runtime semantics', () => {
-  it('uses brush as visible white and eraser as hidden black', () => {
-    expect(maskStrokeGrayValue(stroke({ mode: 'brush', opacity: 1 }))).toBe(255)
-    expect(maskStrokeGrayValue(stroke({ mode: 'eraser', eraserOpacity: 1 }))).toBe(0)
-    expect(maskStrokeGrayValue(stroke({ mode: 'brush', opacity: 0.5 }))).toBe(128)
-    expect(maskStrokeGrayValue(stroke({ mode: 'eraser', eraserOpacity: 0.5 }))).toBe(128)
+  it('uses brush and eraser opacity as single-channel mask target values', () => {
+    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 1, color: '#000000' }))).toBe(255)
+    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0.4, color: '#ffffff' }))).toBe(102)
+    expect(maskStrokeTargetValue(stroke({ mode: 'brush', opacity: 0 }))).toBe(0)
+    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 1 }))).toBe(0)
+    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0.4 }))).toBe(153)
+    expect(maskStrokeTargetValue(stroke({ mode: 'eraser', eraserOpacity: 0 }))).toBe(255)
+    expect(maskStrokeStrength(stroke({ mode: 'brush', opacity: 0.5 }))).toBe(1)
+    expect(maskStrokeStrength(stroke({ mode: 'eraser', eraserOpacity: 0.5 }))).toBe(1)
   })
 
   it('does not change the layer composite signature for document-space layer transforms', () => {
@@ -126,6 +146,19 @@ describe('mask runtime semantics', () => {
     const second = mask({
       version: 2,
       strokes: [stroke({ id: 'stroke-b', mode: 'eraser', points: [0, 0, 20, 20], strokeWidth: 10 })],
+    })
+
+    expect(maskRuntimeContentKey(first)).not.toBe(maskRuntimeContentKey(second))
+  })
+
+  it('uses mask shape identity, geometry, and gray value in the runtime content key', () => {
+    const first = mask({
+      version: 2,
+      shapes: [shape({ id: 'shape-a', value: 255 })],
+    })
+    const second = mask({
+      version: 2,
+      shapes: [shape({ id: 'shape-a', value: 0 })],
     })
 
     expect(maskRuntimeContentKey(first)).not.toBe(maskRuntimeContentKey(second))

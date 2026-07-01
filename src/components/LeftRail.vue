@@ -39,6 +39,7 @@ const fontFamily = ctx.fontFamily as (font: LibraryRecord) => string
 const addAssetToCanvas = ctx.addAssetToCanvas as (asset: LibraryRecord) => void
 const addFontTextToCanvas = ctx.addFontTextToCanvas as (font: LibraryRecord) => void
 const addShapeToCanvas = ctx.addShapeToCanvas as (shape: string) => void
+const startPolygonCreation = ctx.startPolygonCreation as () => void
 const startAssetDrag = ctx.startAssetDrag as (asset: LibraryRecord, event: DragEvent) => void
 const clearAssetDrag = ctx.clearAssetDrag as () => void
 const startFontDrag = ctx.startFontDrag as (font: LibraryRecord, event: DragEvent) => void
@@ -177,9 +178,9 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
             :key="shape.kind"
             class="shape-row"
             type="button"
-            draggable="true"
-            @click="addShapeToCanvas(shape.kind)"
-            @dragstart="startShapeDrag(shape.kind, $event)"
+            :draggable="shape.kind !== 'polygon'"
+            @click="shape.kind === 'polygon' ? startPolygonCreation() : addShapeToCanvas(shape.kind)"
+            @dragstart="shape.kind !== 'polygon' && startShapeDrag(shape.kind, $event)"
             @dragend="clearShapeDrag"
           >
             <svg class="shape-preview" viewBox="0 0 36 36" aria-hidden="true">
@@ -234,7 +235,7 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
       </TabsContent>
 
       <TabsContent value="layers" class="rail-tab-content">
-        <ButtonGroup class="layer-actions">
+        <ButtonGroup class="layer-actions" aria-label="Layer creation actions">
           <Button size="sm" variant="outline" @click="editor.addText()">
             <Type data-icon="inline-start" />
             Text
@@ -372,7 +373,7 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
             </Button>
           </div>
         </ScrollArea>
-        <ButtonGroup class="layer-actions layer-actions-bottom">
+        <ButtonGroup class="layer-actions layer-actions-bottom" aria-label="Selected layer actions">
           <Button size="sm" variant="outline" :disabled="!editor.selectedLayerIds.length" @click="editor.mergeSelectedLayersIntoGroup()">
             Merge
           </Button>

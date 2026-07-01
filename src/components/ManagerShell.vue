@@ -61,13 +61,13 @@ const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
         <h1>Handout Generator</h1>
         <p>Manage handouts, assets, and fonts before opening the canvas editor.</p>
       </div>
-      <ButtonGroup class="manager-header-actions">
+      <div class="manager-header-actions">
         <Button variant="outline" size="sm" @click="isSettingsDialogOpen = true">
           <Settings data-icon="inline-start" />
           Settings
         </Button>
         <Badge variant="secondary">{{ editor.status }}</Badge>
-      </ButtonGroup>
+      </div>
     </header>
 
     <Tabs default-value="handouts" class="manager-tabs">
@@ -104,7 +104,7 @@ const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
               <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-              <ButtonGroup class="finder-status-actions">
+              <ButtonGroup class="finder-status-actions" aria-label="Selected handout actions">
                 <Button
                   size="sm"
                   variant="outline"

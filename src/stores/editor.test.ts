@@ -92,6 +92,47 @@ describe('editor multi-selection state', () => {
     expect(editor.maskChangePulse.id).toBeGreaterThan(beforePulse.id)
   })
 
+  it('records mask shape operations as single-channel mask edits', async () => {
+    const editor = useEditorStore()
+    editor.addText()
+    const layerId = editor.selectedLayerId!
+    editor.addMaskToLayer(layerId)
+    const layer = editor.document.layers.find((item) => item.id === layerId)!
+    const beforePulse = editor.maskChangePulse
+
+    await editor.addMaskShape(layer.mask!, {
+      id: 'mask-shape-1',
+      shape: 'rect',
+      x: 10,
+      y: 12,
+      width: 80,
+      height: 60,
+      value: 0,
+      strokeWidth: 3,
+    })
+
+    const updated = editor.document.layers.find((item) => item.id === layerId)!
+    expect(updated.mask?.shapes).toEqual([expect.objectContaining({
+      id: 'mask-shape-1',
+      shape: 'rect',
+      value: 0,
+    })])
+    expect(updated.mask?.operations).toEqual([expect.objectContaining({
+      id: 'mask-shape-1',
+      kind: 'shape',
+    })])
+    expect(updated.mask?.version).toBe(2)
+    expect(editor.maskDataUrls[updated.mask!.id]).toBeUndefined()
+    expect(editor.maskChangePulse).toMatchObject({
+      kind: 'layer',
+      layerId,
+      maskId: updated.mask!.id,
+      version: 2,
+      reason: 'shape',
+    })
+    expect(editor.maskChangePulse.id).toBeGreaterThan(beforePulse.id)
+  })
+
   it('deletes all selected layers and clears selection', () => {
     const editor = useEditorStore()
     editor.addText()
@@ -144,6 +185,38 @@ describe('editor multi-selection state', () => {
 
     editor.undo()
     expect(editor.document.layers).toEqual([])
+  })
+
+  it('adds a custom polygon shape from normalized layer input', () => {
+    const editor = useEditorStore()
+
+    editor.addPolygon({
+      shape: 'polygon',
+      x: 50,
+      y: 70,
+      width: 80,
+      height: 90,
+      polygonPoints: [
+        { x: 0, y: 0 },
+        { x: 80, y: 20 },
+        { x: 30, y: 90 },
+      ],
+    })
+
+    expect(editor.selectedLayerId).toBe(editor.document.layers[0].id)
+    expect(editor.document.layers[0]).toMatchObject({
+      type: 'shape',
+      shape: 'polygon',
+      x: 50,
+      y: 70,
+      width: 80,
+      height: 90,
+      polygonPoints: [
+        { x: 0, y: 0 },
+        { x: 80, y: 20 },
+        { x: 30, y: 90 },
+      ],
+    })
   })
 
   it('appends brush and eraser strokes to the selected paint layer', () => {

@@ -3,13 +3,13 @@ import type { Reactive, Ref } from 'vue'
 import type Konva from 'konva'
 
 import { useEditorStore } from '@/stores/editor'
+import type { EditorTool } from '@/lib/editor-tools'
 import { matrixDecompose } from '@/lib/mask-geometry'
 
 type EditorStore = ReturnType<typeof useEditorStore>
 type NodeRef = { getNode: () => Konva.Node }
 type LayerNodeRefs = Reactive<Record<string, NodeRef | undefined>>
 type TransformerRef = Ref<{ getNode: () => Konva.Transformer } | undefined>
-type EditorTool = 'select' | 'brush' | 'eraser'
 
 export function normalizeTransformerRotation(rotation?: number | null) {
   if (!Number.isFinite(rotation)) return 0

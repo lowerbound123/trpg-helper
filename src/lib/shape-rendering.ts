@@ -1,5 +1,6 @@
 import type { LineArrowKind, ShapeKind, ShapeLayer } from './handout'
 import { isCurveShape } from './handout'
+import { normalizePolygonPoints, polygonPointArray } from './polygon-creation'
 
 type ShapeBaseConfig = Record<string, unknown>
 
@@ -41,7 +42,7 @@ export function shapeKonvaConfig(layer: ShapeLayer, base: ShapeBaseConfig) {
     return base
   }
 
-  if (['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)) {
+  if (['diamond', 'hexagon-h', 'hexagon-v', 'polygon'].includes(layer.shape)) {
     return {
       ...base,
       points: polygonPoints(layer),
@@ -83,6 +84,9 @@ export function curveSceneFunc(layer: ShapeLayer) {
 }
 
 export function polygonPoints(layer: ShapeLayer) {
+  if (layer.shape === 'polygon') {
+    return polygonPointArray(normalizePolygonPoints(layer))
+  }
   if (layer.shape === 'diamond') {
     return [
       layer.width / 2, 0,
@@ -235,6 +239,7 @@ export function shapePreviewPoints(kind: ShapeKind) {
   if (kind === 'diamond') return '18,4 32,18 18,32 4,18'
   if (kind === 'hexagon-v') return '18,3 31,10 31,26 18,33 5,26 5,10'
   if (kind === 'hexagon-h') return '10,5 26,5 33,18 26,31 10,31 3,18'
+  if (kind === 'polygon') return '8,8 28,6 32,19 21,31 6,25'
   return ''
 }
 

@@ -1,6 +1,7 @@
-import type { HandoutLayer, LayerMask, PaintStroke } from './handout'
+import type { HandoutLayer, LayerMask, MaskEditOperation, PaintStroke } from './handout'
 import { appendDebugLog } from './backend'
 import { documentPointToMaskLocal, matrixApplyToPoint } from './mask-geometry'
+import { drawMaskOperationToContext, maskEditOperations, normalizeMaskCanvasToSingleChannel } from './mask-shapes'
 import { appendSpeedLog } from './speed-log'
 
 export function createSolidMaskDataUrl(width: number, height: number, value = 255) {
@@ -29,21 +30,15 @@ export function drawMaskStroke(dataUrl: string, width: number, height: number, s
         return
       }
       context.drawImage(image, 0, 0, canvas.width, canvas.height)
-      context.globalCompositeOperation = 'source-over'
-      const opacity = stroke.mode === 'eraser' ? stroke.eraserOpacity ?? 1 : stroke.opacity ?? 1
-      const gray = stroke.mode === 'eraser'
-        ? Math.round(255 * (1 - Math.max(0, Math.min(1, opacity))))
-        : Math.round(255 * Math.max(0, Math.min(1, opacity)))
-      context.strokeStyle = `rgb(${gray},${gray},${gray})`
-      context.lineWidth = Math.max(1, stroke.strokeWidth)
-      context.lineCap = 'round'
-      context.lineJoin = 'round'
-      context.beginPath()
-      context.moveTo(stroke.points[0] ?? 0, stroke.points[1] ?? 0)
-      for (let index = 2; index < stroke.points.length; index += 2) {
-        context.lineTo(stroke.points[index], stroke.points[index + 1])
-      }
-      context.stroke()
+      normalizeMaskCanvasToSingleChannel(context, canvas.width, canvas.height)
+      drawMaskOperationToContext(context, { id: stroke.id, kind: 'stroke', stroke })
+      void appendDebugLog('mask', 'mask-dataurl-stroke-drawn', {
+        strokeId: stroke.id,
+        mode: stroke.mode,
+        width: canvas.width,
+        height: canvas.height,
+        pointCount: Math.floor((stroke.points?.length ?? 0) / 2),
+      })
       resolve(canvas.toDataURL('image/png'))
     }
     image.onerror = () => reject(new Error('Could not load mask image'))
@@ -62,6 +57,55 @@ export async function drawMaskStrokes(
     current = await drawMaskStroke(current, width, height, stroke)
   }
   return current
+}
+
+export function drawMaskOperations(dataUrl: string, width: number, height: number, operations: MaskEditOperation[]) {
+  return new Promise<string>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(width))
+      canvas.height = Math.max(1, Math.round(height))
+      const context = canvas.getContext('2d')
+      if (!context) {
+        reject(new Error('Could not create mask canvas context'))
+        return
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      normalizeMaskCanvasToSingleChannel(context, canvas.width, canvas.height)
+      for (const operation of operations) drawMaskOperationToContext(context, operation)
+      void appendDebugLog('mask', 'mask-dataurl-operations-drawn', {
+        width: canvas.width,
+        height: canvas.height,
+        operationCount: operations.length,
+        operations: operations.map((operation) => operation.kind === 'shape'
+          ? {
+              id: operation.id,
+              kind: operation.kind,
+              shape: operation.shape.shape,
+              value: operation.shape.value,
+              pointCount: operation.shape.polygonPoints?.length ?? 0,
+            }
+          : {
+              id: operation.id,
+              kind: operation.kind,
+              mode: operation.stroke.mode,
+              pointCount: Math.floor((operation.stroke.points?.length ?? 0) / 2),
+            }),
+      })
+      resolve(canvas.toDataURL('image/png'))
+    }
+    image.onerror = () => reject(new Error('Could not load mask image'))
+    image.src = dataUrl || createSolidMaskDataUrl(width, height)
+  })
+}
+
+export function maskHasPendingEdits(mask: LayerMask) {
+  return Boolean(maskEditOperations(mask).length)
+}
+
+export function drawMaskEdits(dataUrl: string, mask: LayerMask) {
+  return drawMaskOperations(dataUrl, mask.width, mask.height, maskEditOperations(mask))
 }
 
 export function applyGrayMaskToCanvas(source: HTMLCanvasElement, mask: HTMLImageElement) {

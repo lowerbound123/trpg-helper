@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useEditorStore } from '@/stores/editor'
 import { isImageLayer, isPaintLayer, isTextLayer } from '@/stores/editor'
+import { appConfiguration } from '@/lib/configuration'
 import { isCurveShape } from '@/lib/handout'
 import { paintStrokeLineConfig } from '@/lib/paint-rendering'
 import {
@@ -47,6 +48,9 @@ const draggedShapeKind = ctx.draggedShapeKind as Ref<any>
 const visibleCanvasLayers = ctx.visibleCanvasLayers as any[]
 const selectedCurveLayers = ctx.selectedCurveLayers as any[]
 const draftStroke = ctx.draftStroke as Ref<any>
+const polygonDraft = ctx.polygonDraft as { points: Array<{ x: number; y: number }> }
+const polygonDraftLineConfig = ctx.polygonDraftLineConfig as () => Record<string, any>
+const polygonDraftPointConfig = ctx.polygonDraftPointConfig as (index: number) => Record<string, any>
 const brushCursor = ctx.brushCursor as { visible: boolean; x: number; y: number; diameter: number; mode: 'brush' | 'eraser' }
 const selectionBox = ctx.selectionBox as { visible: boolean; x: number; y: number; width: number; height: number }
 const guideLines = ctx.guideLines as Ref<any[]>
@@ -115,6 +119,18 @@ function handleStageFramePointerLeave() {
 function handleStageFramePointerUp() {
   stopCanvasPan()
 }
+
+function handleStageFrameContextMenu(event: MouseEvent) {
+  if (activeTool.value !== 'polygon') return
+  event.preventDefault()
+}
+
+function draftStrokeConfig() {
+  return paintStrokeLineConfig(
+    draftStroke.value,
+    editor.maskEditTarget ? { minOpacity: appConfiguration.mask.strokePreviewMinOpacity } : undefined,
+  )
+}
 </script>
 
 <template>
@@ -141,6 +157,7 @@ function handleStageFramePointerUp() {
         'stage-frame-dropping': draggedAssetId || draggedFontId || draggedShapeKind,
         'stage-frame-panning': panState.active,
         'stage-frame-drawing': activeTool === 'brush' || activeTool === 'eraser',
+        'stage-frame-polygon': activeTool === 'polygon',
       }"
       @dragenter.capture="handleCanvasDragOver"
       @dragover.capture="handleCanvasDragOver"
@@ -150,6 +167,7 @@ function handleStageFramePointerUp() {
       @pointermove="handleStageFramePointerMove"
       @pointerup="handleStageFramePointerUp"
       @pointerleave="handleStageFramePointerLeave"
+      @contextmenu="handleStageFrameContextMenu"
     >
       <div class="stage-surface" :style="{ filter: documentFilterStyle }">
         <v-stage
@@ -247,7 +265,7 @@ function handleStageFramePointerUp() {
                   @transformend="onTransformEnd(layer)"
                 />
                 <v-line
-                  v-else-if="isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v'].includes(layer.shape)"
+                  v-else-if="isShapeLayer(layer) && ['diamond', 'hexagon-h', 'hexagon-v', 'polygon'].includes(layer.shape)"
                   :ref="(node: unknown) => (layerNodeRefs[layer.id] = node as NodeRef)"
                   :config="shapeConfig(layer)"
                   @click="selectCanvasLayer(layer.id, $event)"
@@ -350,7 +368,16 @@ function handleStageFramePointerUp() {
               </template>
               <v-line
                 v-if="draftStroke"
-                :config="paintStrokeLineConfig(draftStroke)"
+                :config="draftStrokeConfig()"
+              />
+              <v-line
+                v-if="polygonDraft.points.length"
+                :config="polygonDraftLineConfig()"
+              />
+              <v-circle
+                v-for="(_point, index) in polygonDraft.points"
+                :key="`polygon-draft-point-${index}`"
+                :config="polygonDraftPointConfig(index)"
               />
               <v-image
                 v-if="maskFeatureEnabled && activeMaskEditLayer?.mask && maskEditImage"

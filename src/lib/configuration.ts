@@ -57,6 +57,10 @@ function numberValue(section: string, key: string, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
+function unitValue(section: string, key: string, fallback: number) {
+  return clamp(numberValue(section, key, fallback), 0, 1)
+}
+
 function stringValue(section: string, key: string, fallback: string) {
   const value = parsed[section]?.[key]
   return typeof value === 'string' ? value : fallback
@@ -89,6 +93,7 @@ export type AppConfiguration = {
   mask: {
     enabled: boolean
     usePixiPreview: boolean
+    strokePreviewMinOpacity: number
   }
   export: {
     defaultScale: number
@@ -127,6 +132,7 @@ export const appConfiguration = {
   mask: {
     enabled: parsed.mask?.enabled !== false,
     usePixiPreview: parsed.mask?.use_pixi_preview !== false,
+    strokePreviewMinOpacity: unitValue('mask', 'stroke_preview_min_opacity', 0.3),
   },
   export: {
     defaultScale: numberValue('export', 'default_scale', 1),
@@ -177,6 +183,9 @@ export function serializeConfigurationToml(config: AppConfiguration) {
     '# Use PixiJS for low-frequency layer mask preview composition. Final export',
     '# still uses the Canvas2D/Konva path so the output is deterministic.',
     `use_pixi_preview = ${config.mask.usePixiPreview}`,
+    '# Minimum opacity used only for in-progress brush/eraser stroke previews while',
+    '# editing a mask. Final mask pixels still use the configured brush/eraser value.',
+    `stroke_preview_min_opacity = ${clamp(config.mask.strokePreviewMinOpacity, 0, 1)}`,
     '',
     '[export]',
     `default_scale = ${config.export.defaultScale}`,
@@ -195,6 +204,7 @@ export function configurationFromToml(source: string): AppConfiguration {
     const value = config[section]?.[key]
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback
   }
+  const unitFrom = (section: string, key: string, fallback: number) => clamp(numberFrom(section, key, fallback), 0, 1)
   const stringFrom = (section: string, key: string, fallback: string) => {
     const value = config[section]?.[key]
     return typeof value === 'string' ? value : fallback
@@ -226,6 +236,7 @@ export function configurationFromToml(source: string): AppConfiguration {
     mask: {
       enabled: config.mask?.enabled !== false,
       usePixiPreview: config.mask?.use_pixi_preview !== false,
+      strokePreviewMinOpacity: unitFrom('mask', 'stroke_preview_min_opacity', appConfiguration.mask.strokePreviewMinOpacity),
     },
     export: {
       defaultScale: numberFrom('export', 'default_scale', appConfiguration.export.defaultScale),
@@ -236,4 +247,8 @@ export function configurationFromToml(source: string): AppConfiguration {
       renderPerfLogEnabled: config.debug?.render_perf_log_enabled !== false,
     },
   }
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
 }

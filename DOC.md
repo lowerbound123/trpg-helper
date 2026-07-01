@@ -124,7 +124,7 @@ handout-generator/
 │
 ├── src/                          # 前端源码
 │   ├── main.ts                   # 应用入口
-│   ├── App.vue                   # 根组件（1020 行，shell + composable 编排）
+│   ├── App.vue                   # 根组件（1252 行，shell + composable 编排）
 │   ├── style.css                 # 全局样式 + Tailwind 4 配置
 │   ├── app/                      # 快捷键、持久化、生命周期
 │   ├── assets/                   # 静态资源
@@ -138,7 +138,7 @@ handout-generator/
 │   │   ├── ManagerShell.vue      # 管理器视图（Handouts/Assets/Fonts 三标签）
 │   │   ├── LeftRail.vue          # 编辑器左栏（Assets/Fonts/Graph/Layers 四标签）
 │   │   └── CanvasWorkspace.vue   # Konva 画布工作区
-│   ├── composables/              # 24 个组合式函数（详见 6.7）
+│   ├── composables/              # 27 个组合式函数实现（详见 6.7）
 │   ├── stores/                   # Pinia 状态仓库
 │   │   ├── editor.ts             # facade store（656 行）
 │   │   └── editor/               # 4 个子 store
@@ -201,7 +201,7 @@ handout-generator/
 |---|---|---|
 | `package.json` | 项目元数据、依赖、脚本 | `type: module`；devEngines 强制 pnpm 11.8.0；脚本见第 3 节 |
 | `pnpm-workspace.yaml` | pnpm 工作区配置 | `allowBuilds.vue-demi: false`；`storeDir: .pnpm-store` |
-| `vite.config.ts` | Vite 构建配置 | `vue()` + `tailwindcss()` 插件；端口 5173 strictPort；`@` → `./src` 别名；忽略 `data/`、`logs/`、`src-tauri/target/` |
+| `vite.config.ts` | Vite 构建配置 | `vue()` + `tailwindcss()` 插件；端口 5173 strictPort；`@` → `./src` 别名；忽略 `data/`、`logs/`、`src-tauri/target/`；Rolldown vendor code-splitting；精确过滤 `@vueuse/core` pure annotation warning |
 | `tsconfig.json` | 根 TS 配置 | 项目引用模式，引用 `tsconfig.app.json` 与 `tsconfig.node.json`；`@/*` → `./src/*` |
 | `tsconfig.app.json` | 应用 TS 配置 | 继承 `@vue/tsconfig/tsconfig.dom.json`；`types: ["vite/client"]`；严格 lint 选项 |
 | `tsconfig.node.json` | Node 端 TS 配置 | `target: es2023`；bundler 模式；仅含 `vite.config.ts` |
@@ -230,6 +230,7 @@ handout-generator/
 | | `continuous_edit_commit_delay_ms` | `450` | 连续编辑合并延迟 |
 | `[mask]` | `enabled` | `true` | 遮罩总开关 |
 | | `use_pixi_preview` | `true` | 使用 PixiJS 预览合成 |
+| | `stroke_preview_min_opacity` | `0.3` | mask brush/eraser 编辑中临时笔迹的最低可见透明度，不影响最终 mask 像素 |
 | `[export]` | `default_scale` | `1` | 默认导出缩放 |
 | | `min_scale` | `0.1` | 最小导出缩放 |
 | `[debug]` | `file_log_enabled` | `true` | 文件日志开关 |
@@ -246,7 +247,7 @@ handout-generator/
 | 文件 | 用途 |
 |---|---|
 | `src/main.ts` | 应用启动入口。`createApp(App).use(createPinia()).use(VueKonva).use(VueFinderPlugin, { locale: 'zhCN' }).mount('#app')` |
-| `src/App.vue` | 根组件（1020 行）。shell + composable 编排器，详见 6.12 |
+| `src/App.vue` | 根组件（1252 行）。shell + composable 编排器，详见 6.12 |
 | `src/style.css` | 全局样式（1148 行）。`@import "tailwindcss"` + `@import "tw-animate-css"`；`:root` 定义 shadcn 设计令牌（HSL）；大量应用专属类（`.loading-shell`、`.manager-shell`、`.app-shell`、`.left-rail`、`.right-rail`、`.stage-frame`、`.topbar`、`.inspector-panel` 等） |
 
 ### 6.2 `src/app/` — 快捷键、持久化、生命周期
@@ -291,7 +292,7 @@ handout-generator/
 
 | 文件 | 用途 |
 |---|---|
-| `RightInspector.vue` | 右侧检视栏（755 行）。三个标签页：**Inspect**（图层属性：transform/opacity/blend/shape/brush/text/effects）、**Doc Type**（画布属性）、**Export**（嵌套 ExportPanel）。`scheduleContinuousEditEnd` 用 `continuousEditCommitDelayMs` 延迟合并历史。所有控件直接调用 `useEditorStore` 的 patch 方法 |
+| `RightInspector.vue` | 右侧检视栏（756 行）。三个标签页：**Inspect**（选中图层属性、样式、效果、mask 开关）、**Brush**（brush/eraser 宽度、透明度滑条、tension、颜色等绘制设置）、**Document**（文档类型、画布、效果与嵌套 ExportPanel）。`scheduleContinuousEditEnd` 用 `continuousEditCommitDelayMs` 延迟合并历史。所有控件直接调用 `useEditorStore` 的 patch 方法 |
 | `ExportPanel.vue` | 导出面板（73 行）。`defineModel` 绑定 scale/format/quality；按钮 emit `exportImage`；带进度条与日志区 |
 
 #### 6.4.2 新建讲义对话框（`handout/`）
@@ -311,12 +312,12 @@ handout-generator/
 | 文件 | 行数 | 用途 |
 |---|---|---|
 | `BootSplash.vue` | 11 | 启动加载画面（三点跳动动画 + "Handout Generator" 标题） |
-| `EditorTopBar.vue` | 57 | 编辑器顶栏：Save 按钮 + 工具切换（Select/Brush/Eraser）+ Undo/Redo。Props: `activeTool`/`canUndo`/`canRedo`；Emits: `save`/`set-tool`/`undo`/`redo` |
+| `EditorTopBar.vue` | 61 | 编辑器顶栏：Save 按钮 + ButtonGroup 工具切换（Select/Brush/Eraser/Polygon）+ ButtonGroup Undo/Redo。Props: `activeTool`/`canUndo`/`canRedo`；Emits: `save`/`set-tool`/`undo`/`redo` |
 | `ManagerShell.vue` | 206 | 管理器视图：三标签页（Handouts/Assets/Fonts）+ VueFinder 实例 + Create/Clone/Export 操作 + CreateHandoutDialog + ConfigurationDialog。通过 `inject('manager-context')` 获取 33 个共享值 |
-| `LeftRail.vue` | 398 | 编辑器左栏：四标签页（Assets/Fonts/Graph/Layers）+ VueFinder + 搜索 + 可拖拽素材/字体列表 + SVG 形状预览 + 图层/分组列表（拖拽排序、mask 预览、可见性切换、Merge/Flat/Move/Delete）。通过 `inject('left-rail-context')` 获取 57 个共享值 |
-| `CanvasWorkspace.vue` | 388 | Konva 画布工作区：`<v-stage>` 含背景层 + 所有图层节点分支（masked image/raw image/text/rect/line/ellipse/curve/line group/paint）+ 曲线编辑手柄 + draftStroke + mask 编辑代理 + snap guideLines + marquee selectionBox + Transformer。通过 `inject('canvas-context')` 获取 65+ 共享值含 Konva refs |
+| `LeftRail.vue` | 402 | 编辑器左栏：四标签页（Assets/Fonts/Graph/Layers）+ VueFinder + 搜索 + 可拖拽素材/字体列表 + SVG 形状预览（含 Polygon 入口）+ 图层/分组列表（拖拽排序、mask 预览、可见性切换、Merge/Flat/Move/Delete）。通过 `inject('left-rail-context')` 获取 57 个共享值 |
+| `CanvasWorkspace.vue` | 446 | Konva 画布工作区：`<v-stage>` 含背景层 + 所有图层节点分支（masked image/raw image/text/rect/line/ellipse/polygon/curve/line group/paint）+ 曲线编辑手柄 + polygon draft overlay + brush cursor overlay + draftStroke + mask 编辑代理 + snap guideLines + marquee selectionBox + Transformer。通过 `inject('canvas-context')` 获取 65+ 共享值含 Konva refs |
 
-### 6.7 `src/composables/` — 组合式函数（24 个）
+### 6.7 `src/composables/` — 组合式函数（27 个实现 + 9 个测试）
 
 #### 原有 composables（6 个）
 
@@ -326,7 +327,7 @@ handout-generator/
 | `useEditorDragPayloads.ts` | 80 | HTML5 拖拽 payload 统一管理：`draggedAssetId`/`draggedFontId`/`draggedShapeKind` 及各 `start*/clear*` 函数 |
 | `useExportProgress.ts` | 56 | 模拟导出进度条：`beginExportProgress`（90ms 渐增到 95）、`prepareExportProgress`（等待 nextTick + RAF + setTimeout 让 UI 先绘制） |
 | `useFinderManagement.ts` | 531 | 把 Pinia store 包装成 VueFinder 的 Driver 接口，使 VueFinder 能管理 backgrounds/assets/fonts/handouts 四种"虚拟存储"。路径编码：`<storage>://<folder>/__<kind>-<id>`。注入右键菜单项 |
-| `useHandoutExport.ts` | 222 | 导出当前文档或项目为 PNG/JPEG/WebP。`exportCurrentImage` 流程：签名去重 → `ensureDocumentImages` → `renderHandoutToBlob` → `exportImageBlobToDownloads` |
+| `useHandoutExport.ts` | 222 | 导出当前文档或项目为 PNG/JPEG/WebP。`exportCurrentImage` 流程：签名去重 → `ensureDocumentImages` → materialize 当前 mask → `renderHandoutToBlob` → `writeEncodedImageBlobToDownloads` |
 | `useResourceImages.ts` | 68 | 图片预加载与缓存管理。`previewUrl(record)` 优先 thumbnailPath，回退 fileUrl |
 
 #### 从 App.vue 抽取的 composables（18 个）
@@ -334,9 +335,9 @@ handout-generator/
 | 文件 | 行数 | 用途 |
 |---|---|---|
 | `useMaskPreviewCache.ts` | 204 | idle-task mask 预览缓存队列：downsample/save/load cache data URL，`requestIdleTask`/`waitForIdleTask` |
-| `useMaskComposition.ts` | 362 | mask 合成/刷新：`refreshMaskedLayerImages`/`refreshMaskPreviewUrls`/`refreshMaskEditImage`/`refreshMaskedBackgroundImage`/`scheduleMaskCompositeRefresh`（带 runId 防竞态） |
+| `useMaskComposition.ts` | 412 | mask 合成/刷新：`refreshMaskedLayerImages`/`refreshMaskPreviewUrls`/`refreshMaskEditImage`/`refreshMaskedBackgroundImage`/`scheduleMaskCompositeRefresh`。使用 per-layer token、mask identity freshness、render revision 与 thumbnail token 防止旧异步结果覆盖新状态 |
 | `useLayerEffectCache.ts` | 99 | Konva 节点缓存：`refreshLayerEffectCache`（768px 上限）、RAF 批处理 `scheduleLayerEffectCacheRefresh`、签名 diff `changedEffectLayerIds` |
-| `usePaintStrokes.ts` | 172 | 画笔/橡皮擦：`activePaintDefaults`/`localizeStrokePoints`/`maskLocalPoint`/`startPaintStroke`/`movePaintStroke`/`stopPaintStroke`（draftStroke 实时更新） |
+| `usePaintStrokes.ts` | 178 | 画笔/橡皮擦：`activePaintDefaults`/`localizeStrokePoints`/`maskLocalPoint`/`startPaintStroke`/`movePaintStroke`/`stopPaintStroke`（draftStroke 实时更新；单点 stroke 自动补 0.1px 线段，保证 click paint/mask 生效） |
 | `useCurveEditing.ts` | 155 | 曲线手柄编辑：`curvePointKeys`/`curveHandleConfig`/`curveGuideConfig`/`moveCurvePoint`/`endCurvePointMove`/`normalizeCurveLayerPatch` |
 | `useLayerDragTransform.ts` | 319 | 拖拽/变换/吸附：`onLayerDragStart`/`onDragMove`（含 `calculateSnapGuides` 实时对齐、`multiDragState` 多选同步）/`onTransformEnd`/`onDragEnd`/`ellipseDragSnapshot` |
 | `useSelectionBox.ts` | 111 | 框选：`handleStagePointer`/`startSelectionBox`/`moveSelectionBox`/`stopSelectionBox`/`containsSelection`，含 `suppressNextStageClick` 防抖 |
@@ -346,11 +347,13 @@ handout-generator/
 | `useFinderSelection.ts` | 171 | finder 选择/上传：`uploadFiles`/`handleDirectFinderDrop`/`selectedImageRecord`/`selectedHandoutProject`/`exportSelectedHandout`/`handleCreateBackgroundInput` |
 | `useCanvasDrop.ts` | 128 | 画布拖放：`handleCanvasDrop`（font/shape/asset 分派）/`handleCanvasDragOver`/`handleDocumentFontDragOver`/`handleDocumentFontDrop`/`pointInsideStageFrame` |
 | `useTextLayerAutoResize.ts` | 79 | 文本高度自适应：`autoResizeTextLayerHeights`/`autoTextLayerHeight`/`textLineCount`/`logTextLayerMetrics` |
-| `useLayerRenderConfigs.ts` | 233 | Konva 配置构建：`layerConfig`/`textConfig`/`shapeConfig`/`paintConfig`/`maskedLayerConfig`/`layerPreviewStyle`/`layerPreviewText`/`canvasLayerRenderInfo` |
+| `useLayerRenderConfigs.ts` | 233 | Konva 配置构建：`layerConfig`/`textConfig`/`shapeConfig`/`paintConfig`/`maskedLayerConfig`/`layerPreviewStyle`/`layerPreviewText`/`canvasLayerRenderInfo`。masked config 带 `maskRenderRevision`，即使复用同一 canvas 引用也能触发 Konva 更新 |
 | `useRenderSignatures.ts` | 290 | 24 个 computed 渲染签名：`canvasLayers`/`visibleCanvasLayers`/`layerListItems`/各种 `*Signature`（watch 触发用）/`transformerConfig`/`documentFilterStyle`/`backgroundAsset`/`backgroundImage` |
 | `useMaskActions.ts` | 195 | mask 操作：`toggleSelectedLayerMask`/`toggleMaskEditFromLayerRow`/`toggleMaskEnabledFromLayerRow`/`startMaskDrag`/`handleMaskDrop`/`maskEditConfig`/`onMaskEditDragStart`/`onMaskEditDragEnd`/`onMaskEditTransformEnd`/`maskPreviewClass` |
 | `useLayerListDragDrop.ts` | 152 | 图层列表拖拽：`startLayerListDrag`/`handleLayerListDrop`/`handleGroupDrop`/`groupForLayer`/`layersForGroup`/`groupIsCollapsed`/`toggleGroupCollapsed`/`selectLayerFromList`/`toggleLayerVisibility` |
 | `useTransformerSync.ts` | 40 | Transformer 同步：`updateTransformer`（同步 Konva Transformer 节点到当前选择，mask-edit 模式附加 maskNode） |
+| `useBrushCursor.ts` | 49 | brush/eraser DOM 光标圆环：按当前工具宽度与 stage scale 计算屏幕直径，离开画布或切换工具时隐藏 |
+| `usePolygonCreation.ts` | 140 | 任意多边形创建：左键加点、右键撤销、点击首点闭合、离开 polygon tool 时自动闭合有效草稿；mask 编辑模式下输出 mask polygon operation |
 
 ### 6.8 `src/stores/` — Pinia 状态仓库
 
@@ -385,23 +388,29 @@ handout-generator/
 
 | 文件 | 行数 | 用途 |
 |---|---|---|
-| `backend.ts` | 445 | Tauri IPC 桥接层。`isTauriRuntime()` 检测；非 Tauri 时浏览器回退。导出所有 IPC 调用函数（library/project/mask/asset/export/configuration/debug） |
+| `backend.ts` | 489 | Tauri IPC 桥接层。`isTauriRuntime()` 检测；非 Tauri 时浏览器回退。导出所有 IPC 调用函数（library/project/mask/asset/export/configuration/debug）。`writeEncodedImageBlobToDownloads` 直接传 `Uint8Array` raw body，避免大导出经 JSON 数组复制 |
 | `configuration.ts` | 239 | TOML 配置解析。从 `configuration.toml?raw` 内联默认配置，支持 localStorage 覆盖。导出 `AppConfiguration` 类型与 `appConfiguration` 实例 |
 | `history.ts` | 61 | 通用命令历史。`createHistory<T>(initial, maxSteps=100)`：`past/present/future` 三栈，`commit(mutator, {merge})`、`replace(next)`、`undo/redo` |
-| `mask.ts` | 229 | 遮罩像素处理。`createSolidMaskDataUrl`、`drawMaskStroke`、`applyGrayMaskToCanvas`、坐标互转（图层↔文档、遮罩↔文档）、`createLayerLocalMaskCanvas`、`applyLayerMaskToCanvas`（destination-in 合成） |
-| `render/` | 899 行（12 模块） | **Konva 离屏渲染与导出**（从原 `render.ts` 823 行拆分）。`index.ts` barrel 导出；`stage.ts` 构造离屏 Konva.Stage；`preview.ts` `renderHandoutPreviewToDataUrl`（≤1MB 预览）；`mask-composition.ts` `renderMaskedLayerImage`（Canvas2D/Pixi 合成）；`nodes/` 按类型生成 Konva 节点（image/text/shape/paint）；`image-loading.ts` 图片预加载 |
+| `mask.ts` | 229 | 遮罩像素处理。`createSolidMaskDataUrl`、`drawMaskStroke`、`applyGrayMaskToCanvas`、坐标互转（图层↔文档、遮罩↔文档）、`createLayerLocalMaskCanvas`、`applyLayerMaskToCanvas`（默认可见语义：mask bitmap 外按 `defaultAlpha` 显示） |
+| `mask-runtime.ts` | 586 | 编辑器实时 mask GPU/runtime。长期持有 mask canvas、layer output canvas 与 runtime revision；支持 seed 持久化 path、增量 stroke/shape 同步、thumbnail/materialize、mask/layer LRU 清理 |
+| `mask-shapes.ts` | 487 | mask brush/eraser/shape/polygon 单通道合成。颜色在 mask 模式下被忽略；brush 目标白、eraser 目标黑，opacity 作为混合强度；写回强制 `R=G=B`、`A=255` |
+| `mask-geometry.ts` | 108 | mask matrix 与图层变换同步：图层移动/旋转/翻转时同步 mask matrix，mask 也可独立移动/旋转/缩放 |
+| `mask-tiles.ts` | 82 | mask dirty tile 计算，供大图局部刷新/持久化策略使用 |
+| `polygon-creation.ts` | 91 | 任意多边形创建与变换 helper：文档点归一化为 layer-local points、首点闭合阈值、polygon resize 后重算 bbox 与 `polygonPoints` |
+| `speed-log.ts` | 34 | 渲染/导出耗时 JSONL 日志 helper，写入 `logs/speed.log` |
+| `render/` | 956 行（12 模块） | **Konva 离屏渲染与导出**（从原 `render.ts` 823 行拆分）。`index.ts` barrel 导出；`stage.ts` 构造离屏 Konva.Stage；`preview.ts` `renderHandoutPreviewToDataUrl`（≤1MB 预览）；`mask-composition.ts` `renderMaskedLayerImage`（Canvas2D/Pixi 合成，含 source canvas LRU 缓存）；`nodes/` 按类型生成 Konva 节点（image/text/shape/paint）；`image-loading.ts` 图片预加载 |
 | `handout/layer/` | 832 行（9 模块） | **图层类型与操作**（从原 `layer.ts` 778 行拆分）。`index.ts` barrel 导出；`types.ts` 类型定义；`factories.ts` `addImageLayer`/`addTextLayer`/`addShapeLayer`/`addPaintLayer`；`mask.ts` `setLayerMask`/`clearLayerMask`/`transferLayerMask`/`copyLayerMask`；`group.ts` 分组操作；`ordering.ts` 排序；`delete.ts` 删除；`update.ts` 更新 |
-| `shape-rendering.ts` | 243 | 形状渲染辅助。`shapeKonvaConfig`（按 ShapeKind 生成 Konva 配置）、`curveSceneFunc`（Bezier 自定义 sceneFunc）、`polygonPoints`（diamond/hexagon 顶点）、`lineDash`、`arrowDotConfig/arrowLineConfig`（自定义箭头） |
-| `paint-rendering.ts` | 180 | 笔刷渲染。`brushDefaults`（pixel/pencil/marker/highlighter/airbrush 五种预设）；`paintCanvasCache` 用 stroke 签名做增量缓存——只重画新增 stroke |
+| `shape-rendering.ts` | 243 | 形状渲染辅助。`shapeKonvaConfig`（按 ShapeKind 生成 Konva 配置）、`curveSceneFunc`（Bezier 自定义 sceneFunc）、`polygonPoints`（diamond/hexagon/custom polygon 顶点）、`lineDash`、`arrowDotConfig/arrowLineConfig`（自定义箭头） |
+| `paint-rendering.ts` | 225 | 笔刷渲染。`brushDefaults`（pixel/pencil/marker/highlighter/airbrush 五种预设）；`paintCanvasCache` 用 stroke 签名做增量缓存并带 LRU 上限/清理 API——只重画新增 stroke |
 | `layer-rendering.ts` | 53 | 图层→Konva 配置映射。`layerKonvaConfig`（id/x/y/w/h/scale/rotation/opacity/visible/draggable/blendMode）、`textKonvaConfig`（加 text/font/fontStyle/fill/align 等） |
 | `effects.ts` | 47 | 效果→Konva 滤镜映射。`hasVisibleEffects`、`konvaEffectConfig`（filters 数组来自 Blur/Brighten/Contrast/HSL） |
 | `snapping.ts` | 132 | 对齐辅助线计算。`calculateSnapGuides(input)`：屏幕阈值换算到画布阈值；canvas 的 0/中/边三条 + 候选图层的左/中/右三条；返回 `nextPosition` 与 `lines` |
 | `selection.ts` | 13 | `RectBounds` 类型与 `containsRect(container, item)` 几何包含判断 |
-| `shape-items.ts` | 13 | `shapeItems` 数组：9 种 ShapeKind（line/quadratic-curve/cubic-bezier/rect/round-rect/ellipse/diamond/hexagon-h/hexagon-v）的 label/detail |
+| `shape-items.ts` | 13 | `shapeItems` 数组：10 种 ShapeKind（line/quadratic-curve/cubic-bezier/rect/round-rect/ellipse/diamond/hexagon-h/hexagon-v/polygon）的 label/detail |
 | `export-options.ts` | 18 | `ExportFormat`、`exportMimeType/exportExtension/exportQualityValue` |
 | `upload-validation.ts` | 31 | `isSupportedUpload`（按 MIME 或扩展名判断图片/字体）、`partitionUploadFiles` |
 | `font-preview.ts` | 71 | `generateFontPreviewDataUrl(font)`：通过像素差异比较判断中文字形支持 → 256×144 WebP/PNG dataURL |
-| `debug-log.ts` | 34 | `writeDebugLog`、`createDebugLogger(scope)`，按配置过滤高频事件 |
+| `debug-log.ts` | 34 | `appendDebugLog`、`createDebugLogger(scope)`，按 scope 路由到 `logs/app.log`、`logs/mask.log`、`logs/render.log`、`logs/text.log`、`logs/speed.log` 等；浏览器非 Tauri 环境回退 console |
 | `dom.ts` | 5 | `isEditableTarget(target)` 判断事件目标是否在 input/textarea/contenteditable 内 |
 | `utils.ts` | 7 | `cn(...inputs)` = `twMerge(clsx(inputs))`，shadcn-vue 标准类合并工具 |
 
@@ -413,7 +422,7 @@ handout-generator/
 | `document.ts` | 111 | `HandoutDocument`/`CanvasSettings` 接口；`createDefaultHandout(title)`（1280×720，透明背景）；`updateCanvas`；`setBackgroundMask/clearBackgroundMask/deleteBackgroundMask` |
 | `layer/` | 832 行（9 模块） | **图层类型与操作**（从原 `layer.ts` 778 行拆分）。`index.ts` barrel；`types.ts` 类型；`factories.ts` 各 `add*Layer`；`mask.ts` mask 操作；`group.ts` 分组；`ordering.ts` 排序；`delete.ts`/`update.ts`；`shared.ts` 共享工具 |
 | `mask.ts` | 118 | `LayerMask`/`MaskCacheMeta` 类型；`createCanvasLayerMask`（按画布尺寸创建）；`normalizeMask`/`normalizeMaskCache` |
-| `paint.ts` | 51 | `PaintMode`/`BrushKind`/`StrokePoint`/`PaintStroke`；`normalizePaintStroke`；`pointsToStrokePoints/strokePointsToFlat`（扁平坐标 ↔ StrokePoint[] 互转） |
+| `paint.ts` | 62 | `PaintMode`/`BrushKind`/`StrokePoint`/`PaintStroke`；`normalizePaintStroke`；`ensureRenderableStrokePoints`/`ensureRenderablePaintStroke`（单点补短线段）；`pointsToStrokePoints/strokePointsToFlat`（扁平坐标 ↔ StrokePoint[] 互转） |
 | `effects.ts` | 28 | `BlendMode`（6 种）、`LayerEffects`（brightness/contrast/saturation/blur）、`defaultEffects/normalizeEffects` |
 | `migration.ts` | 44 | `normalizeHandoutDocument(document)`：对每个图层应用 defaults + normalize effects + normalize mask；清理重复/失效 group；规范化 canvas。任何 load/replace/save 路径都会经过它 |
 | `dirty.ts` | 34 | `DirtyReason`/`DirtyFlags`；`createDirtyFlags/markLayerDirty/markProjectPreviewDirty`。供 App.vue 决定哪些图层需重渲染 |
@@ -430,11 +439,15 @@ handout-generator/
 
 | 文件 | 用途 |
 |---|---|
-| `configuration.test.ts` | 44 行，TOML 解析/序列化/往返一致性 |
-| `snapping.test.ts` | 90 行，对齐计算 |
-| `selection.test.ts` | 14 行，几何包含判断 |
-| `upload-validation.test.ts` | 19 行，上传校验 |
-| `handout.test.ts` | 520 行，document/layer/mask/paint/migration/history 与 render 工具函数 |
+| `configuration.test.ts` | TOML 解析/序列化/往返一致性 |
+| `snapping.test.ts` | 对齐计算 |
+| `selection.test.ts` | 几何包含判断 |
+| `upload-validation.test.ts` | 上传校验 |
+| `handout.test.ts` | document/layer/mask/paint/migration/history 与 render 工具函数 |
+| `mask*.test.ts` | mask 几何、tile、单通道合成、runtime seed/revision/cache 行为 |
+| `polygon-creation.test.ts` / `shape-rendering.test.ts` | custom polygon 创建、fallback、缩放回写与渲染 |
+| `use*Composition/Actions/PaintStrokes/PolygonCreation/BrushCursor*.test.ts` | 编辑器交互 composable 的 mask 刷新、mask 拖动、单点笔触、polygon draft、brush cursor 行为 |
+| `backend-log.test.ts` / `backend-export.test.ts` | 日志 scope 路由与 raw bytes 导出 IPC 参数 |
 
 ### 6.10 `src/assets/` — 静态资源
 
@@ -451,21 +464,21 @@ handout-generator/
 
 ### 6.12 `src/App.vue` — 根组件深度解析
 
-**职责**：应用 shell + composable 编排器。管理三态切换（boot/manager/editor）、提供 3 个 provide 上下文给子组件、装配 18 个 composable、注册全局监听与 watcher。
+**职责**：应用 shell + composable 编排器。管理三态切换（boot/manager/editor）、提供 3 个 provide 上下文给子组件、装配编辑器 composable、注册全局监听与 watcher。
 
-#### script setup 结构（1–850 行）
+#### script setup 结构
 
-- **imports**（1–55）：Vue/Konva/Tauri；4 个子组件、24 个 composable、lib、store
-- **类型**（57–59）：`NodeRef`/`KonvaEvent`/`EditorTool`
-- **响应式状态**（61–100）：editor store；stage/transformer/maskEdit node refs；`maskedLayerImages`/`maskPreviewUrls`/`maskEditImage`（传给 C2/C17）；`isDraggingMask`/`draggedMaskLayerId`（传给 C11）；对话框开关；`activeTool`/`activeRailTab`；`isBooting`；finder 选择/revision
-- **composable 装配**（102–580）：按依赖序调用 18 个 composable，用 holder 模式打破循环依赖（`maskCompositionRefreshHolder`/`projectCreationHolder`/`finderSelectionHolder`/`layerListHolder`）
-- **provide 注入**（520–580）：`manager-context`（33 值）、`left-rail-context`（57 值）、`canvas-context`（65+ 值含 Konva refs）
-- **handleGlobalKeydown**（582–595）：`createAppShortcutHandler` 绑定快捷键
-- **辅助函数**（597–850）：`resetKonvaDragButtons`/`fontFamily`/`logViewport`/`roundMetric`/`backgroundRenderMetrics`/`logBackgroundRender`/`setActiveTool`/`fitEditorCanvas`/`selectCanvasLayer`/`deleteLayer`/`toggleBackgroundVisibility`/`addAssetToCanvas`/`addFontTextToCanvas`/`createFontTextOnCanvas`/`addShapeToCanvas`
-- **生命周期**（800–840）：onMounted 并行刷新 library + projects、同步图片、注册监听、ensureProjectPreviews；onBeforeUnmount 移除监听、cleanup
-- **watch**（840–870）：14 个 watch 把签名变化映射到 transformer 更新、effect 缓存刷新、mask 合成、文字自适应
+- **imports**：Vue/Konva/Tauri；4 个子组件、27 个 composable 实现、lib、store
+- **类型**：`NodeRef`/`KonvaEvent`/`EditorTool`
+- **响应式状态**：editor store；stage/transformer/maskEdit node refs；`maskedLayerImages`/`maskedLayerRenderRevisions`/`maskPreviewUrls`/`maskEditImage`；`isDraggingMask`/`draggedMaskLayerId`；polygon draft；对话框开关；`activeTool`/`activeRailTab`；`isBooting`；finder 选择/revision
+- **composable 装配**：按依赖序调用 composable，用 holder 模式打破循环依赖（`maskCompositionRefreshHolder`/`projectCreationHolder`/`finderSelectionHolder`/`layerListHolder`）
+- **provide 注入**：`manager-context`、`left-rail-context`、`canvas-context`，向子组件提供 Konva refs、mask runtime 结果、polygon draft、brush cursor、导出状态等共享值
+- **handleGlobalKeydown**：`createAppShortcutHandler` 绑定快捷键，并在 polygon tool 退出时自动闭合/丢弃草稿
+- **辅助函数**：`setActiveTool`/`startPolygonCreation`/`finishPolygonTool`/`addShapeToCanvas`/`addShapeToActiveMask`/`addPolygonToActiveMask`/`cleanupRuntimeLayerCaches` 等
+- **生命周期**：onMounted 并行刷新 library + projects、同步图片、注册监听、ensureProjectPreviews；onBeforeUnmount 移除监听、退出 polygon draft、cleanup
+- **watch**：把签名变化映射到 transformer 更新、effect 缓存刷新、targeted mask 合成、文字自适应、runtime cache 清理等副作用
 
-#### template 结构（852–1020 行）
+#### template 结构（编辑器 shell）
 
 三态切换：
 
@@ -496,7 +509,7 @@ handout-generator/
 | 文件 | 用途 |
 |---|---|
 | `src/main.rs` | 6 行。二进制入口，release 模式隐藏 Windows 控制台，调用 `app_lib::run()` |
-| `src/lib.rs` | 89 行。模块声明 + `run()` 构建 Tauri 应用并注册全部 38 个命令处理器 |
+| `src/lib.rs` | 89 行。模块声明 + `run()` 构建 Tauri 应用并注册全部 39 个命令处理器 |
 
 #### 模块结构（staged module split 已完成）
 
@@ -508,7 +521,7 @@ handout-generator/
 | `src/commands/asset_commands.rs` | 311 | 15 个库/config 命令 |
 | `src/commands/project_commands.rs` | 324 | 13 个项目命令 |
 | `src/commands/preview_commands.rs` | 68 | `save_project_preview` + `save_project_asset` |
-| `src/commands/export_commands.rs` | 132 | 2 个导出命令：`export_image_bytes_to_downloads`/`export_image_file_to_downloads` |
+| `src/commands/export_commands.rs` | 201 | 5 个导出命令：兼容旧 `export_image*`/转码命令 + `write_encoded_image_bytes_to_downloads` raw bytes 直写 Downloads |
 | `src/commands/mask_commands.rs` | 87 | 4 个遮罩/项目文件 I/O 命令 |
 | `src/services/mod.rs` | 5 | 模块声明 |
 | `src/services/path_service.rs` | 182 | 路径/文件夹/fs/data-url/debug log |
@@ -595,7 +608,7 @@ data/
 
 ## 9. IPC API 全景
 
-后端共暴露 **38 个 Tauri 命令**，全部返回 `Result<T, String>`。前端通过 `@tauri-apps/api` 的 `invoke("command_name", { args })` 调用。
+后端共暴露 **39 个 Tauri 命令**，全部返回 `Result<T, String>`。前端通过 `@tauri-apps/api` 的 `invoke("command_name", args?, options?)` 调用。常规命令使用 JSON 参数；大导出写盘使用 raw bytes body。
 
 ### 库管理（10）
 
@@ -645,7 +658,7 @@ data/
 |---|---|
 | `save_project_asset` | 保存项目内嵌素材 |
 
-### 导出（4）
+### 导出（5）
 
 | 命令 | 用途 |
 |---|---|
@@ -653,6 +666,7 @@ data/
 | `export_image_to_downloads` | 导出图像到下载目录（原样写入） |
 | `export_image_bytes_to_downloads` | 转码 inline bytes 后导出到下载目录 |
 | `export_image_file_to_downloads` | 转码 staging 文件后导出到下载目录（删除 staging） |
+| `write_encoded_image_bytes_to_downloads` | 已编码 PNG/JPEG/WebP bytes raw body 直写下载目录；文件名通过 `x-file-name` header 传入 |
 
 ### 预览（2）
 
@@ -672,9 +686,9 @@ data/
 
 ### 通信机制
 
-- **IPC**：Tauri 2 `invoke` 协议，JSON 参数/返回值，所有结构体 `camelCase` 序列化
+- **IPC**：Tauri 2 `invoke` 协议，JSON 参数/返回值，所有结构体 `camelCase` 序列化；已编码导出图像用 `Uint8Array` raw body 避免 JSON 数组大拷贝
 - **Asset 协议**：`asset://`（`http://asset.localhost/`）直接加载磁盘图片，scope 限定 `data/**/*`
-- **大数据传输**：小图走 IPC base64 data URL；大导出走 **staging 文件模式**（前端写 staging → Rust 读+转码+写 Downloads+删 staging）
+- **大数据传输**：小图走 IPC base64 data URL；导出首选前端已编码 Blob → raw bytes IPC → Rust 直接写 Downloads；旧 staging 转码命令仅保留兼容路径
 
 ---
 
@@ -701,11 +715,12 @@ main.ts → createApp → App.vue onMounted
 `useRenderSignatures`（C18）的 computed（`canvasLayers`/`layerEffectsSignature`/`layerMaskRenderSignature`/...）是 `editor.document` 的派生视图。`CanvasWorkspace.vue` 的 `<v-stage>` 的 `<v-group>` 套用 `useCanvasViewport` 的 pan/zoom；每个图层节点用 `useLayerRenderConfigs`（C17）的 `layerConfig`/`textConfig`/`shapeConfig`/`paintConfig`/`maskedLayerConfig` 生成 Konva config。Vue-Konva 响应式应用并 `layer.draw()`。
 
 - **带效果的图层**：`useLayerEffectCache`（C3）的 `refreshLayerEffectCacheAfterUpdate` 中 `node.cache()`（768px 上限）
-- **带遮罩的图层**：`watch(layerMaskRenderSignature)` → `useMaskComposition`（C2）的 `refreshMaskedLayerImages` → `renderMaskedLayerImage` 离屏合成 → 结果存入 `maskedLayerImages[layer.id]` → `<v-image>` 显示
+- **带遮罩的图层**：mask change pulse / targeted refresh → `useMaskComposition`（C2）的 per-layer refresh queue → `renderMaskedLayerImage` / `MaskGpuRuntime.composeLayerAsync` 离屏合成 → 结果存入稳定 `maskedLayerImages[layer.id]`，并递增 `maskedLayerRenderRevisions[layer.id]` 触发 `<v-image>` 更新
+- **mask 编辑**：brush/eraser/polygon/shape 都写入单通道 mask operation；实时 draft stroke 只做视觉反馈，commit 后通过 runtime 同步 stroke/shape 并触发目标 layer 合成
 
 ### 10.4 画布交互回写 store
 
-拖拽/变换时 Konva 事件 → `useLayerDragTransform`（C6）的 `onDragMove`/`onTransform`/`onTransformEnd`（含 `calculateSnapGuides` 实时对齐、`multiDragState` 多选同步）→ `editor.patchSelectedLayersContinuous(...)` 回写 store；改 transform 时同步移动/缩放/旋转 mask。App.vue 的 14 个 `watch` 监听签名变化，触发 transformer 重建、effect 缓存刷新、mask 合成、文字自适应等副作用，形成闭环。
+拖拽/变换时 Konva 事件 → `useLayerDragTransform`（C6）的 `onDragMove`/`onTransform`/`onTransformEnd`（含 `calculateSnapGuides` 实时对齐、`multiDragState` 多选同步）→ `editor.patchSelectedLayersContinuous(...)` 回写 store；改 transform 时同步移动/缩放/旋转 mask，polygon layer 变换会同步缩放 `polygonPoints` 并重算 bbox。App.vue 的 watcher 监听签名变化，触发 transformer 重建、effect 缓存刷新、mask targeted 合成、文字自适应与 runtime cache 清理等副作用，形成闭环。
 
 ### 10.5 持久化
 
@@ -723,17 +738,18 @@ Save 按钮 → saveProject()
 ### 10.6 导出
 
 ```
-Export 标签 → exportImage emit → exportCurrentImage()
+Document 标签 → ExportPanel exportImage emit → exportCurrentImage()
   ├─ prepareExportProgress()    → 进度条先动
   ├─ 签名去重（相同文档+参数不重复导出）
   ├─ ensureDocumentImages()
+  ├─ materialize 当前 enabled masks（优先 MaskGpuRuntime，回退 loadMaskDataUrl）
   ├─ renderHandoutToBlob(document, library, scale, imageElements, mimeType, quality, {maskDataUrls, projectTarget, masksEnabled})
   │   ├─ 构造离屏 Konva.Stage
   │   ├─ 按 zIndex 渲染背景 + 所有可见图层
   │   ├─ 带遮罩走 applyLayerMaskToCanvas（Canvas2D 确定性路径，不走 Pixi）
   │   └─ stage.toCanvas → canvas.toBlob
-  └─ exportImageBlobToDownloads()
-      ├─ Tauri: 暂存 AppLocalData → invoke('export_image_file_to_downloads') → 写 Downloads + 删 staging
+  └─ writeEncodedImageBlobToDownloads()
+      ├─ Tauri: blob.arrayBuffer → Uint8Array raw invoke('write_encoded_image_bytes_to_downloads') → Rust 直写 Downloads
       └─ 浏览器: <a download>
 ```
 
@@ -764,9 +780,9 @@ Export 标签 → exportImage emit → exportCurrentImage()
 
 编辑器逻辑（`lib/handout/*`）是纯函数，store 只是包装历史 + 选择 + 副作用调度。这使得文档操作可测试、可序列化、可回放。
 
-### 11.6 Staging 文件模式（大导出）
+### 11.6 Raw bytes 导出优先
 
-前端写 staging 文件 → Rust 读 + 转码 + 写 Downloads + 删 staging，避免巨大 base64 payload 通过 IPC。
+导出路径优先在前端按用户选择的 MIME 生成 Blob，再通过 Tauri raw `Uint8Array` body 传给 Rust 直写 Downloads。这样避免 `Array.from(Uint8Array)` 的 JSON 大数组复制，也避免 staging 文件读回、解码、重编码。旧 staging 转码命令保留为兼容路径。
 
 ### 11.7 路径安全
 
@@ -779,9 +795,9 @@ Export 标签 → exportImage emit → exportCurrentImage()
 1. **Rust 后端**（`lib.rs` 1472→89 行）：拆分为 `types.rs`/`errors.rs` + `commands/`（4 组）+ `services/`（5 模块）
 2. **渲染与图层模块**（`render.ts` 823 行 → `render/` 12 模块；`layer.ts` 778 行 → `layer/` 9 模块）：barrel 导出保持 API 不变
 3. **Editor store**（`editor.ts` 1348→656+840 行）：facade + 4 子 store（font/library/mask/project），工厂函数 + 依赖注入
-4. **App.vue**（3714→1020 行）：18 个 composable + 5 个子组件，provide/inject 共享上下文
+4. **App.vue**（3714→1252 行）：27 个 composable 实现 + 5 个子组件，provide/inject 共享上下文
 
-所有阶段均保持 38 个测试全通过、typecheck 清洁、生产构建成功。消费者代码零改动。
+所有阶段均保持测试全通过、typecheck 清洁、生产构建成功。消费者代码零改动。
 
 ### 11.9 未使用依赖
 
@@ -795,14 +811,14 @@ Export 标签 → exportImage emit → exportCurrentImage()
 
 | 文件 | 行数 | 状态 |
 |---|---|---|
-| `src/App.vue` | 1020 | shell + composable 编排 |
+| `src/App.vue` | 1252 | shell + composable 编排 |
 | `src/stores/editor.ts` | 656 | facade store |
 | `src/stores/editor/` (4 文件) | 840 | 子 store |
-| `src/composables/` (24 文件) | 4202 | 完整实现 |
+| `src/composables/` (27 个实现文件 + 9 个测试文件) | — | 完整实现 |
 | `src/components/` (5 新组件) | 1060 | 完整实现 |
-| `src/components/editor/RightInspector.vue` | 755 | 完整实现 |
-| `src/lib/backend.ts` | 445 | 完整实现 |
-| `src/lib/render/` (12 模块) | 899 | 完整实现 |
+| `src/components/editor/RightInspector.vue` | 756 | 完整实现 |
+| `src/lib/backend.ts` | 489 | 完整实现 |
+| `src/lib/render/` (12 模块) | 956 | 完整实现 |
 | `src/lib/handout/layer/` (9 模块) | 832 | 完整实现 |
 | `src/lib/handout.test.ts` | 520 | 完整测试 |
 

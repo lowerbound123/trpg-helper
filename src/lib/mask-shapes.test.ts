@@ -1,9 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { LayerMask, MaskShapeOperation, PaintStroke } from './handout'
 import {
   composeMaskGrayPixel,
   createMaskPolygonOperationFromDocumentInput,
+  drawMaskOperationToContext,
   drawMaskShapeToContext,
   maskShapeContentKey,
   maskShapeGrayValue,
@@ -70,6 +73,10 @@ function mask(input: Partial<LayerMask> = {}): LayerMask {
 }
 
 describe('mask shape operations', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('normalizes any mask shape edit value to a single gray channel', () => {
     expect(maskShapeGrayValue({ value: 300 })).toBe(255)
     expect(maskShapeGrayValue({ value: -20 })).toBe(0)
@@ -130,6 +137,67 @@ describe('mask shape operations', () => {
     expect(calls).toContain('rect:128:256:300:180')
     expect(calls).toContain('fill')
     expect(calls).toContain('stroke')
+  })
+
+  it('applies shape edits through single-channel pixel accumulation', () => {
+    const targetPixels = new Uint8ClampedArray([0, 0, 0, 12])
+    const coveragePixels = new Uint8ClampedArray([255, 255, 255, 255])
+    const targetContext = {
+      canvas: { width: 1, height: 1 },
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      rect: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      getImageData: vi.fn(() => ({ data: targetPixels })),
+      putImageData: vi.fn(),
+      set fillStyle(_value: string) {},
+      set strokeStyle(_value: string) {},
+      set lineWidth(_value: number) {},
+      set lineCap(_value: CanvasLineCap) {},
+      set lineJoin(_value: CanvasLineJoin) {},
+      set globalAlpha(_value: number) {},
+      set globalCompositeOperation(_value: GlobalCompositeOperation) {},
+    } as unknown as CanvasRenderingContext2D
+    const coverageContext = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      beginPath: vi.fn(),
+      rect: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      getImageData: vi.fn(() => ({ data: coveragePixels })),
+      set fillStyle(_value: string) {},
+      set strokeStyle(_value: string) {},
+      set lineWidth(_value: number) {},
+      set lineCap(_value: CanvasLineCap) {},
+      set lineJoin(_value: CanvasLineJoin) {},
+      set globalCompositeOperation(_value: GlobalCompositeOperation) {},
+    } as unknown as CanvasRenderingContext2D
+    const coverageCanvas = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn(() => coverageContext),
+    } as unknown as HTMLCanvasElement
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      if (tagName !== 'canvas') return originalCreateElement(tagName)
+      return coverageCanvas
+    })
+
+    drawMaskOperationToContext(targetContext, {
+      id: 'shape-op',
+      kind: 'shape',
+      shape: shape({ x: 0, y: 0, width: 1, height: 1, value: 128, strokeWidth: 0 }),
+    })
+
+    expect(targetContext.getImageData).toHaveBeenCalledWith(0, 0, 1, 1)
+    expect(coverageContext.getImageData).toHaveBeenCalledWith(0, 0, 1, 1)
+    expect(targetContext.putImageData).toHaveBeenCalledTimes(1)
+    const imageData = vi.mocked(targetContext.putImageData).mock.calls[0][0] as ImageData
+    expect(Array.from(imageData.data)).toEqual([128, 128, 128, 255])
   })
 
   it('uses opacity as cumulative strength toward black or white', () => {

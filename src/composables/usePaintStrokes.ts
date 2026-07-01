@@ -4,7 +4,7 @@ import type Konva from 'konva'
 
 import type { EditorTool } from '@/lib/editor-tools'
 import type { HandoutLayer, PaintLayer, PaintStroke, StrokePoint } from '@/lib/handout'
-import { strokePointsToFlat } from '@/lib/handout'
+import { ensureRenderablePaintStroke, strokePointsToFlat } from '@/lib/handout'
 import { documentPointToMaskLocal } from '@/lib/mask-geometry'
 import { isPaintLayer, useEditorStore } from '@/stores/editor'
 
@@ -133,22 +133,17 @@ export function usePaintStrokes(options: {
 
   function stopPaintStroke() {
     if (!draftStroke.value) return false
+    const renderableStroke = ensureRenderablePaintStroke(draftStroke.value)
     if (editor.maskEditTarget) {
-      const maskStroke = localizeMaskStroke(draftStroke.value)
+      const maskStroke = localizeMaskStroke(renderableStroke)
       draftStroke.value = undefined
       if (maskStroke) void editor.paintMask(maskStroke.mask, maskStroke.stroke)
       return true
     }
     const selectedPaint = isPaintLayer(editor.selectedLayer) ? editor.selectedLayer : undefined
     const stroke = {
-      ...draftStroke.value,
-      rawPoints: localizeStrokePoints(draftStroke.value.rawPoints ?? [], selectedPaint),
-    }
-    if (stroke.rawPoints.length === 1) {
-      stroke.rawPoints = [
-        ...stroke.rawPoints,
-        { ...stroke.rawPoints[0], x: stroke.rawPoints[0].x + 0.1, y: stroke.rawPoints[0].y + 0.1 },
-      ]
+      ...renderableStroke,
+      rawPoints: localizeStrokePoints(renderableStroke.rawPoints ?? [], selectedPaint),
     }
     stroke.points = strokePointsToFlat(stroke.rawPoints)
     editor.appendStrokeToPaintLayer(stroke)

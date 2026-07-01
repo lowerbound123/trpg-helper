@@ -75,8 +75,10 @@ export function useMaskComposition(options: {
   let maskedBackgroundRefreshRunId = 0
   let maskEditImageRefreshRunId = 0
   let nextLayerCompositeToken = 0
+  let nextMaskPreviewToken = 0
   const layerCompositeTokens = new Map<string, number>()
   const maskCompositeRefreshTimers = new Map<string, MaskCompositeTimer>()
+  const maskPreviewTokens = new Map<string, number>()
 
   function targetSet(values?: Iterable<string>) {
     return values ? new Set(values) : undefined
@@ -127,6 +129,47 @@ export function useMaskComposition(options: {
       && expected.layerId === current.layerId
       && expected.maskId === current.maskId
       && expected.key === current.key,
+    )
+  }
+
+  function maskPreviewIdentity(mask: import('@/lib/handout').LayerMask) {
+    const tileKey = Object.keys(mask.tiles)
+      .sort()
+      .map((key) => {
+        const tile = mask.tiles[key]
+        return `${key}:${tile.version}:${tile.updatedAt}`
+      })
+      .join(',')
+    return [
+      mask.id,
+      mask.version,
+      mask.sourceVersion,
+      mask.updatedAt,
+      mask.defaultAlpha,
+      mask.width,
+      mask.height,
+      mask.matrix.join(','),
+      tileKey,
+    ].join('|')
+  }
+
+  function currentMaskById(maskId: string) {
+    if (editor.document.canvas.backgroundMask?.id === maskId) return editor.document.canvas.backgroundMask
+    return editor.document.layers.find((layer) => layer.mask?.id === maskId)?.mask
+  }
+
+  function beginMaskPreview(maskId: string) {
+    const token = ++nextMaskPreviewToken
+    maskPreviewTokens.set(maskId, token)
+    return token
+  }
+
+  function maskPreviewIsCurrent(maskId: string, token: number, expectedIdentity: string) {
+    const current = currentMaskById(maskId)
+    return Boolean(
+      current
+      && maskPreviewTokens.get(maskId) === token
+      && maskPreviewIdentity(current) === expectedIdentity,
     )
   }
 
@@ -293,6 +336,8 @@ export function useMaskComposition(options: {
     }
     await Promise.all(masks.map(async (mask) => {
       if (!mask) return
+      const token = beginMaskPreview(mask.id)
+      const expectedIdentity = maskPreviewIdentity(mask)
       const maskStartedAt = performance.now()
       if (mask.path && !editorMaskGpuRuntime.hasMaskSource(mask, `path:${mask.path}`)) {
         const persisted = await editor.loadMaskDataUrl(mask)
@@ -301,6 +346,13 @@ export function useMaskComposition(options: {
       }
       const dataUrl = editorMaskGpuRuntime.thumbnail(mask, 96)
       if (!dataUrl) {
+        if (!maskPreviewIsCurrent(mask.id, token, expectedIdentity)) {
+          void appendDebugLog('mask', 'refresh-mask-preview-url-discarded-stale', {
+            maskId: mask.id,
+            reason: 'empty-stale',
+          })
+          return
+        }
         delete maskPreviewUrls[mask.id]
         void appendDebugLog('mask', 'refresh-mask-preview-url-empty', {
           maskId: mask.id,
@@ -308,7 +360,16 @@ export function useMaskComposition(options: {
         })
         return
       }
-      maskPreviewUrls[mask.id] = await downsampleDataUrl(dataUrl, 96)
+      const previewUrl = await downsampleDataUrl(dataUrl, 96)
+      if (!maskPreviewIsCurrent(mask.id, token, expectedIdentity)) {
+        void appendDebugLog('mask', 'refresh-mask-preview-url-discarded-stale', {
+          maskId: mask.id,
+          sourceVersion: mask.sourceVersion,
+          token,
+        })
+        return
+      }
+      maskPreviewUrls[mask.id] = previewUrl
       void appendDebugLog('mask', 'refresh-mask-preview-url-complete', {
         maskId: mask.id,
         source: 'runtime',

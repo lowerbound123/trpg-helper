@@ -7,6 +7,25 @@ import { renderMaskedLayerImage } from '@/lib/render'
 
 import { useMaskComposition } from './useMaskComposition'
 
+const downsampleDataUrlMock = vi.hoisted(() => vi.fn(async (dataUrl: string) => dataUrl))
+const loadImageFromDataUrlMock = vi.hoisted(() => vi.fn(async () => ({} as HTMLImageElement)))
+const runtimeThumbnailMock = vi.hoisted(() => vi.fn((_targetMask?: unknown) => 'data:image/png;base64,THUMB'))
+const runtimeHasMaskSourceMock = vi.hoisted(() => vi.fn(() => true))
+const runtimeSeedMaskMock = vi.hoisted(() => vi.fn())
+
+vi.mock('@/lib/mask', () => ({
+  downsampleDataUrl: downsampleDataUrlMock,
+  loadImageFromDataUrl: loadImageFromDataUrlMock,
+}))
+
+vi.mock('@/lib/mask-runtime', () => ({
+  editorMaskGpuRuntime: {
+    hasMaskSource: runtimeHasMaskSourceMock,
+    seedMask: runtimeSeedMaskMock,
+    thumbnail: runtimeThumbnailMock,
+  },
+}))
+
 vi.mock('@/lib/render', () => ({
   renderMaskedLayerImage: vi.fn(async (layer: HandoutLayer) => {
     return {
@@ -93,6 +112,14 @@ function deferred<T>() {
 describe('useMaskComposition targeted refresh', () => {
   beforeEach(() => {
     vi.mocked(renderMaskedLayerImage).mockClear()
+    downsampleDataUrlMock.mockReset()
+    downsampleDataUrlMock.mockImplementation(async (dataUrl: string) => dataUrl)
+    loadImageFromDataUrlMock.mockClear()
+    runtimeThumbnailMock.mockReset()
+    runtimeThumbnailMock.mockReturnValue('data:image/png;base64,THUMB')
+    runtimeHasMaskSourceMock.mockReset()
+    runtimeHasMaskSourceMock.mockReturnValue(true)
+    runtimeSeedMaskMock.mockClear()
   })
 
   it('refreshes only requested masked layers and leaves other stable canvases untouched', async () => {
@@ -289,5 +316,83 @@ describe('useMaskComposition targeted refresh', () => {
     expect(maskedLayerImages[sourceLayer.id]).toBeUndefined()
     expect(maskedLayerRenderRevisions[sourceLayer.id]).toBeUndefined()
     expect(requestMaskedLayerDraw).not.toHaveBeenCalled()
+  })
+
+  it('does not let a stale mask thumbnail overwrite a newer mask revision', async () => {
+    const sourceLayer = layer('layer-1')
+    runtimeThumbnailMock.mockImplementation((targetMask: unknown) => {
+      const mask = targetMask as LayerMask
+      return mask.version === 1 ? 'data:image/png;base64,OLD' : 'data:image/png;base64,NEW'
+    })
+    const oldPreview = deferred<string>()
+    const newPreview = deferred<string>()
+    downsampleDataUrlMock.mockImplementation((dataUrl: string) => {
+      if (dataUrl.endsWith('OLD')) return oldPreview.promise
+      return newPreview.promise
+    })
+    const maskPreviewUrls = shallowReactive<Record<string, string | undefined>>({})
+    const editor = {
+      view: 'editor',
+      document: {
+        canvas: {
+          width: 800,
+          height: 600,
+          backgroundColor: 'rgba(0,0,0,0)',
+          backgroundVisible: true,
+          backgroundMask: null,
+          effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
+        },
+        layers: [sourceLayer],
+        groups: [],
+      },
+      library: { backgrounds: [], assets: [], fonts: [], backgroundFolders: [], assetFolders: [], fontFolders: [] },
+      currentProjectId: undefined,
+      projectDir: '',
+      loadMaskDataUrl: vi.fn(),
+      maskDataUrls: {},
+    } as any
+
+    const composition = useMaskComposition({
+      editor,
+      imageElements: {},
+      maskFeatureEnabled: true,
+      isDraggingMask: ref(false),
+      stageScale: computed(() => 1),
+      editorMaskPreviewMaxEdge: 1200,
+      maskProxyMaxEdge: () => 1200,
+      activeMaskEditLayer: computed(() => undefined),
+      logCanvasLayerRenderState: vi.fn(),
+      maskedLayerImages: {},
+      maskedLayerRenderRevisions: {},
+      requestMaskedLayerDraw: vi.fn(),
+      maskPreviewUrls,
+      maskEditImage: ref(),
+      maskEditImageRevision: ref(0),
+    })
+
+    const oldRefresh = composition.refreshMaskPreviewUrls({ maskIds: [sourceLayer.mask!.id] })
+    await Promise.resolve()
+    editor.document = {
+      ...editor.document,
+      layers: [{
+        ...sourceLayer,
+        mask: {
+          ...sourceLayer.mask!,
+          version: 2,
+          sourceVersion: 2,
+          updatedAt: '2026-07-01T00:00:01.000Z',
+        },
+      }],
+    }
+    const newRefresh = composition.refreshMaskPreviewUrls({ maskIds: [sourceLayer.mask!.id] })
+
+    newPreview.resolve('new-thumb')
+    await newRefresh
+    expect(maskPreviewUrls[sourceLayer.mask!.id]).toBe('new-thumb')
+
+    oldPreview.resolve('old-thumb')
+    await oldRefresh
+
+    expect(maskPreviewUrls[sourceLayer.mask!.id]).toBe('new-thumb')
   })
 })

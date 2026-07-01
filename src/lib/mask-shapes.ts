@@ -5,6 +5,7 @@ import type {
   MaskEditOperation,
   MaskShapeOperation,
   NewShapeLayerInput,
+  PaintStroke,
   ShapeKind,
 } from './handout'
 import { documentPointToMaskLocal } from './mask-geometry'
@@ -14,6 +15,13 @@ type TileBoundsInput = {
   maskWidth: number
   maskHeight: number
   tileSize: number
+}
+
+type PixelBounds = {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export function maskShapeGrayValue(input: { value?: number; color?: string }) {
@@ -178,26 +186,132 @@ export function drawMaskShapeToContext(context: CanvasRenderingContext2D, shape:
 }
 
 export function drawMaskOperationToContext(context: CanvasRenderingContext2D, operation: MaskEditOperation) {
-  if (operation.kind === 'shape') {
-    drawMaskShapeToContext(context, operation.shape)
-    return
+  const canvasWidth = Math.max(1, Math.round(context.canvas?.width ?? 0))
+  const canvasHeight = Math.max(1, Math.round(context.canvas?.height ?? 0))
+  const bounds = maskOperationPixelBounds(operation, canvasWidth, canvasHeight)
+  if (!bounds || typeof document === 'undefined') return
+  const coverageCanvas = document.createElement('canvas')
+  coverageCanvas.width = bounds.width
+  coverageCanvas.height = bounds.height
+  const coverageContext = coverageCanvas.getContext('2d')
+  if (!coverageContext) return
+  drawMaskCoverage(coverageContext, operation, bounds)
+  const targetPixels = context.getImageData(bounds.x, bounds.y, bounds.width, bounds.height)
+  const coveragePixels = coverageContext.getImageData(0, 0, bounds.width, bounds.height)
+  const target = operation.kind === 'shape' ? 255 : maskStrokeTargetValue(operation.stroke)
+  const strength = operation.kind === 'shape' ? maskShapeStrength(operation.shape) : maskStrokeStrength(operation.stroke)
+  applyMaskCoverageToPixelData(targetPixels.data, coveragePixels.data, target, strength)
+  context.putImageData(targetPixels, bounds.x, bounds.y)
+}
+
+export function applyMaskCoverageToPixelData(
+  targetPixels: Uint8ClampedArray,
+  coveragePixels: Uint8ClampedArray,
+  target: number,
+  strength: number,
+) {
+  const targetGray = clampByte(target)
+  const opacity = clampUnit(strength)
+  for (let index = 0; index < targetPixels.length; index += 4) {
+    const coverage = (coveragePixels[index + 3] ?? 0) / 255
+    if (coverage <= 0 || opacity <= 0) {
+      const current = maskPixelGray(targetPixels, index)
+      targetPixels[index] = current
+      targetPixels[index + 1] = current
+      targetPixels[index + 2] = current
+      targetPixels[index + 3] = 255
+      continue
+    }
+    const current = maskPixelGray(targetPixels, index)
+    const next = composeMaskGrayPixel(current, targetGray, coverage * opacity)
+    targetPixels[index] = next
+    targetPixels[index + 1] = next
+    targetPixels[index + 2] = next
+    targetPixels[index + 3] = 255
   }
-  const stroke = operation.stroke
-  const gray = maskStrokeTargetValue(stroke)
+}
+
+function maskPixelGray(pixels: Uint8ClampedArray, index: number) {
+  return clampByte(((pixels[index] ?? 0) + (pixels[index + 1] ?? 0) + (pixels[index + 2] ?? 0)) / 3)
+}
+
+function drawMaskCoverage(
+  context: CanvasRenderingContext2D,
+  operation: MaskEditOperation,
+  bounds: PixelBounds,
+) {
   context.save()
+  context.translate(-bounds.x, -bounds.y)
   context.globalCompositeOperation = 'source-over'
-  context.globalAlpha = maskStrokeStrength(stroke)
-  context.strokeStyle = `rgb(${gray},${gray},${gray})`
-  context.lineWidth = Math.max(1, stroke.strokeWidth)
+  context.fillStyle = 'rgb(0,0,0)'
+  context.strokeStyle = 'rgb(0,0,0)'
   context.lineCap = 'round'
   context.lineJoin = 'round'
   context.beginPath()
+  if (operation.kind === 'shape') {
+    const shape = operation.shape
+    context.lineWidth = Math.max(0, shape.strokeWidth)
+    drawMaskShapePath(context, shape)
+    if (closedShape(shape.shape)) context.fill()
+    if (shape.strokeWidth > 0 || !closedShape(shape.shape)) context.stroke()
+    context.restore()
+    return
+  }
+  const stroke = operation.stroke
+  context.lineWidth = Math.max(1, stroke.strokeWidth)
   context.moveTo(stroke.points[0] ?? 0, stroke.points[1] ?? 0)
   for (let index = 2; index < stroke.points.length; index += 2) {
     context.lineTo(stroke.points[index], stroke.points[index + 1])
   }
   context.stroke()
   context.restore()
+}
+
+function maskOperationPixelBounds(operation: MaskEditOperation, width: number, height: number): PixelBounds | undefined {
+  const raw = operation.kind === 'shape'
+    ? paddedShapeBounds(operation.shape)
+    : paddedStrokeBounds(operation.stroke)
+  if (!raw) return undefined
+  const x = clamp(Math.floor(raw.minX), 0, width)
+  const y = clamp(Math.floor(raw.minY), 0, height)
+  const maxX = clamp(Math.ceil(raw.maxX), 0, width)
+  const maxY = clamp(Math.ceil(raw.maxY), 0, height)
+  if (maxX <= x || maxY <= y) return undefined
+  return { x, y, width: maxX - x, height: maxY - y }
+}
+
+function paddedShapeBounds(shape: MaskShapeOperation) {
+  const bounds = maskShapeBounds(shape)
+  const padding = Math.max(1, shape.strokeWidth / 2 + 2)
+  return {
+    minX: bounds.minX - padding,
+    minY: bounds.minY - padding,
+    maxX: bounds.maxX + padding,
+    maxY: bounds.maxY + padding,
+  }
+}
+
+function paddedStrokeBounds(stroke: PaintStroke) {
+  const points = stroke.points ?? []
+  if (points.length < 2) return undefined
+  const xs: number[] = []
+  const ys: number[] = []
+  for (let index = 0; index < points.length; index += 2) {
+    const x = points[index]
+    const y = points[index + 1]
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      xs.push(x)
+      ys.push(y)
+    }
+  }
+  if (!xs.length || !ys.length) return undefined
+  const padding = Math.max(1, stroke.strokeWidth / 2 + 2)
+  return {
+    minX: Math.min(...xs) - padding,
+    minY: Math.min(...ys) - padding,
+    maxX: Math.max(...xs) + padding,
+    maxY: Math.max(...ys) + padding,
+  }
 }
 
 function drawMaskShapePath(context: CanvasRenderingContext2D, shape: MaskShapeOperation) {

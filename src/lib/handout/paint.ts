@@ -34,6 +34,26 @@ export function normalizePaintStroke(stroke: PaintStroke): PaintStroke {
   }
 }
 
+export function ensureRenderableStrokePoints(points: StrokePoint[]): StrokePoint[] {
+  if (points.length !== 1) return points
+  const point = points[0]
+  return [
+    point,
+    { ...point, x: point.x + 0.1, y: point.y + 0.1 },
+  ]
+}
+
+export function ensureRenderablePaintStroke(stroke: PaintStroke): PaintStroke {
+  const rawPoints = ensureRenderableStrokePoints(
+    stroke.rawPoints?.length ? stroke.rawPoints : pointsToStrokePoints(stroke.points),
+  )
+  return {
+    ...stroke,
+    rawPoints,
+    points: strokePointsToFlat(rawPoints),
+  }
+}
+
 export function pointsToStrokePoints(points: number[], pressure = 0.5): StrokePoint[] {
   const result: StrokePoint[] = []
   for (let index = 0; index < points.length; index += 2) {

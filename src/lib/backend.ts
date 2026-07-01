@@ -450,14 +450,16 @@ export async function writeEncodedImageBlobToDownloads(
     return fileName
   }
   const arrayStartedAt = performance.now()
-  const data = Array.from(new Uint8Array(await blob.arrayBuffer()))
+  const data = new Uint8Array(await blob.arrayBuffer())
   void appendDebugLog('speed', 'export-encoded-blob-array-buffer', {
     fileName,
     bytes: data.length,
     durationMs: Math.round(performance.now() - arrayStartedAt),
   })
   const writeStartedAt = performance.now()
-  const path = await invoke<string>('write_encoded_image_bytes_to_downloads', { fileName, data })
+  const path = await invoke<string>('write_encoded_image_bytes_to_downloads', data, {
+    headers: { 'x-file-name': fileName },
+  })
   void appendDebugLog('speed', 'export-encoded-downloads-write', {
     fileName,
     bytes: data.length,

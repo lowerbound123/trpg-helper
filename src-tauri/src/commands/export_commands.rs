@@ -2,7 +2,10 @@
 
 use std::{fs, path::PathBuf, time::Instant};
 
-use tauri::{AppHandle, Manager};
+use tauri::{
+    ipc::{InvokeBody, Request},
+    AppHandle, Manager,
+};
 
 use crate::{
     clean_file_name,
@@ -80,22 +83,25 @@ pub fn export_image_bytes_to_downloads(
 #[tauri::command]
 pub fn write_encoded_image_bytes_to_downloads(
     app: AppHandle,
-    file_name: String,
-    data: Vec<u8>,
+    request: Request<'_>,
 ) -> CommandResult<String> {
-    let clean_name = normalize_encoded_export_file_name(&clean_file_name(&file_name));
+    let file_name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("handout.png")
+        .to_string();
+    let data = match request.body() {
+        InvokeBody::Raw(bytes) => bytes.clone(),
+        InvokeBody::Json(_) => {
+            return Err("write_encoded_image_bytes_to_downloads expects raw bytes".into())
+        }
+    };
     let downloads = app
         .path()
         .download_dir()
         .map_err(|error| error.to_string())?;
-    fs::create_dir_all(&downloads)
-        .map_err(AppError::from)
-        .map_err(String::from)?;
-    let path = downloads.join(clean_name);
-    fs::write(&path, data)
-        .map_err(AppError::from)
-        .map_err(String::from)?;
-    Ok(path.to_string_lossy().to_string())
+    write_encoded_bytes_to_dir(&downloads, &file_name, &data)
 }
 
 #[tauri::command]
@@ -158,5 +164,38 @@ fn normalize_encoded_export_file_name(file_name: &str) -> String {
         file_name.to_string()
     } else {
         format!("{file_name}.png")
+    }
+}
+
+fn write_encoded_bytes_to_dir(downloads: &std::path::Path, file_name: &str, data: &[u8]) -> CommandResult<String> {
+    let clean_name = normalize_encoded_export_file_name(&clean_file_name(file_name));
+    fs::create_dir_all(downloads)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    let path = downloads.join(clean_name);
+    fs::write(&path, data)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_encoded_bytes_to_dir;
+
+    #[test]
+    fn writes_encoded_bytes_without_reencoding() {
+        let dir = std::env::temp_dir().join(format!(
+            "handout-generator-export-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bytes = [1_u8, 2, 3, 4, 5];
+
+        let path = write_encoded_bytes_to_dir(&dir, "handout.png", &bytes).unwrap();
+        let written = std::fs::read(path).unwrap();
+
+        assert_eq!(written, bytes);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

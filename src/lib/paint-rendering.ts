@@ -25,6 +25,7 @@ const paintCanvasCache = new Map<string, {
   height: number
   canvas: HTMLCanvasElement
 }>()
+const MAX_PAINT_CANVAS_CACHE_ENTRIES = 48
 
 export function brushRenderPreset(kind: BrushKind = 'pixel') {
   return brushDefaults[kind]
@@ -55,6 +56,37 @@ function layerSignature(layer: PaintLayer) {
     layer.strokes.length,
     ...layer.strokes.map(strokeSignature),
   ].join('|')
+}
+
+function setPaintCanvasCache(layerId: string, entry: {
+  signature: string
+  strokeSignatures: string[]
+  width: number
+  height: number
+  canvas: HTMLCanvasElement
+}) {
+  paintCanvasCache.delete(layerId)
+  paintCanvasCache.set(layerId, entry)
+  while (paintCanvasCache.size > MAX_PAINT_CANVAS_CACHE_ENTRIES) {
+    const oldest = paintCanvasCache.keys().next().value
+    if (!oldest) break
+    paintCanvasCache.delete(oldest)
+  }
+}
+
+export function clearPaintCanvasCache(layerIds?: Iterable<string>) {
+  if (!layerIds) {
+    paintCanvasCache.clear()
+    return
+  }
+  const allowed = new Set(layerIds)
+  for (const layerId of paintCanvasCache.keys()) {
+    if (!allowed.has(layerId)) paintCanvasCache.delete(layerId)
+  }
+}
+
+export function paintCanvasCacheSize() {
+  return paintCanvasCache.size
 }
 
 function drawLineStroke(context: CanvasRenderingContext2D, stroke: PaintStroke) {
@@ -107,6 +139,8 @@ export function paintSceneFunc(layer: PaintLayer) {
     const strokeSignatures = layer.strokes.map(strokeSignature)
     const cached = paintCanvasCache.get(layer.id)
     if (cached?.signature === signature) {
+      paintCanvasCache.delete(layer.id)
+      paintCanvasCache.set(layer.id, cached)
       context.drawImage?.(cached.canvas, 0, 0)
       return
     }
@@ -122,7 +156,7 @@ export function paintSceneFunc(layer: PaintLayer) {
         for (const stroke of layer.strokes.slice(cached.strokeSignatures.length)) {
           drawStroke(paintContext, stroke)
         }
-        paintCanvasCache.set(layer.id, {
+        setPaintCanvasCache(layer.id, {
           signature,
           strokeSignatures,
           width,
@@ -139,7 +173,7 @@ export function paintSceneFunc(layer: PaintLayer) {
     const paintContext = canvas.getContext('2d')
     if (!paintContext) return
     for (const stroke of layer.strokes) drawStroke(paintContext, stroke)
-    paintCanvasCache.set(layer.id, {
+    setPaintCanvasCache(layer.id, {
       signature,
       strokeSignatures,
       width,

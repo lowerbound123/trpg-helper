@@ -16,6 +16,32 @@ type LayerSourceCacheEntry = {
 }
 
 const layerSourceCanvasCache = new Map<string, LayerSourceCacheEntry>()
+const MAX_LAYER_SOURCE_CANVAS_CACHE_ENTRIES = 48
+
+function setLayerSourceCanvasCache(layerId: string, entry: LayerSourceCacheEntry) {
+  layerSourceCanvasCache.delete(layerId)
+  layerSourceCanvasCache.set(layerId, entry)
+  while (layerSourceCanvasCache.size > MAX_LAYER_SOURCE_CANVAS_CACHE_ENTRIES) {
+    const oldest = layerSourceCanvasCache.keys().next().value
+    if (!oldest) break
+    layerSourceCanvasCache.delete(oldest)
+  }
+}
+
+export function disposeLayerSourceCanvasCache(layerIds?: Iterable<string>) {
+  if (!layerIds) {
+    layerSourceCanvasCache.clear()
+    return
+  }
+  const allowed = new Set(layerIds)
+  for (const layerId of layerSourceCanvasCache.keys()) {
+    if (!allowed.has(layerId)) layerSourceCanvasCache.delete(layerId)
+  }
+}
+
+export function layerSourceCanvasCacheSize() {
+  return layerSourceCanvasCache.size
+}
 
 async function loadMaskImage(mask: LayerMask, options?: RenderMaskOptions, includeStrokes = true) {
   const inMemory = options?.maskDataUrls?.[mask.id]
@@ -93,6 +119,8 @@ async function renderLayerSourceCanvas(layer: HandoutLayer, library: LibraryInde
   const signature = layerSourceCanvasSignature(layer)
   const existing = layerSourceCanvasCache.get(layer.id)
   if (existing?.signature === signature) {
+    layerSourceCanvasCache.delete(layer.id)
+    layerSourceCanvasCache.set(layer.id, existing)
     appendSpeedLog('mask-source-cache-hit', {
       layerId: layer.id,
       width: existing.canvas.width,
@@ -106,7 +134,7 @@ async function renderLayerSourceCanvas(layer: HandoutLayer, library: LibraryInde
     width: layer.width,
     height: layer.height,
   }, () => renderLayerToLocalCanvas(layer, library, cache))
-  layerSourceCanvasCache.set(layer.id, { signature, canvas })
+  setLayerSourceCanvasCache(layer.id, { signature, canvas })
   return canvas
 }
 

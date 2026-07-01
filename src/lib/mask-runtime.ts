@@ -78,6 +78,8 @@ export function maskLayerCompositeSignature(layer: HandoutLayer, zoomBucket: str
 export class MaskGpuRuntime {
   private readonly masks = new Map<string, MaskRuntimeState>()
   private readonly layerOutputs = new Map<string, HTMLCanvasElement>()
+  private readonly maxMaskStates = 128
+  private readonly maxLayerOutputs = 64
 
   ensureMask(mask: LayerMask): MaskRuntimeHandle {
     const state = this.ensureMaskState(mask)
@@ -262,7 +264,7 @@ export class MaskGpuRuntime {
       sourceKey,
       contentKey: maskRuntimeContentKey(mask),
     }
-    this.masks.set(mask.id, state)
+    this.setMaskState(mask.id, state)
     return state
   }
 
@@ -368,6 +370,14 @@ export class MaskGpuRuntime {
     }
   }
 
+  maskStateCount() {
+    return this.masks.size
+  }
+
+  layerOutputCount() {
+    return this.layerOutputs.size
+  }
+
   private ensureMaskState(mask: LayerMask): MaskRuntimeState {
     const current = this.masks.get(mask.id)
     const contentKey = maskRuntimeContentKey(mask)
@@ -420,7 +430,7 @@ export class MaskGpuRuntime {
       }
     }
     state.renderedOperationCount = maskEditOperations(mask).length
-    this.masks.set(mask.id, state)
+    this.setMaskState(mask.id, state)
     void appendDebugLog('mask', 'mask-runtime-rebuild-state', {
       maskId: mask.id,
       width: mask.width,
@@ -436,12 +446,36 @@ export class MaskGpuRuntime {
 
   private ensureLayerOutput(layerId: string, width: number, height: number) {
     const existing = this.layerOutputs.get(layerId)
-    if (existing && existing.width === width && existing.height === height) return existing
+    if (existing && existing.width === width && existing.height === height) {
+      this.layerOutputs.delete(layerId)
+      this.layerOutputs.set(layerId, existing)
+      return existing
+    }
     const canvas = createRuntimeCanvas(width, height) ?? document.createElement('canvas')
     canvas.width = width
     canvas.height = height
+    this.layerOutputs.delete(layerId)
     this.layerOutputs.set(layerId, canvas)
+    this.trimLayerOutputs()
     return canvas
+  }
+
+  private setMaskState(maskId: string, state: MaskRuntimeState) {
+    this.masks.delete(maskId)
+    this.masks.set(maskId, state)
+    while (this.masks.size > this.maxMaskStates) {
+      const oldest = this.masks.keys().next().value
+      if (!oldest) break
+      this.masks.delete(oldest)
+    }
+  }
+
+  private trimLayerOutputs() {
+    while (this.layerOutputs.size > this.maxLayerOutputs) {
+      const oldest = this.layerOutputs.keys().next().value
+      if (!oldest) break
+      this.layerOutputs.delete(oldest)
+    }
   }
 }
 

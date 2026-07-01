@@ -12,12 +12,17 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useEditorStore } from '@/stores/editor'
 import type { LibraryRecord } from '@/lib/backend'
+import type { HandoutLayer, LayerGroup } from '@/lib/handout'
 import { shapeItems } from '@/lib/shape-items'
 import { shapePreviewPoints } from '@/lib/shape-rendering'
 
 const editor = useEditorStore()
 
 const ctx = inject<Record<string, any>>('left-rail-context')!
+
+type LayerListItem =
+  | { kind: 'layer'; layer: HandoutLayer }
+  | { kind: 'group'; group: LayerGroup; layers: HandoutLayer[] }
 
 const activeRailTab = ctx.activeRailTab as Ref<string>
 const assetSearch = ctx.assetSearch as Ref<string>
@@ -46,7 +51,7 @@ const startFontDrag = ctx.startFontDrag as (font: LibraryRecord, event: DragEven
 const clearFontDrag = ctx.clearFontDrag as () => void
 const startShapeDrag = ctx.startShapeDrag as (shape: string, event: DragEvent) => void
 const clearShapeDrag = ctx.clearShapeDrag as () => void
-const layerListItems = ctx.layerListItems as any[]
+const layerListItems = ctx.layerListItems as LayerListItem[]
 const draggedLayerId = ctx.draggedLayerId as Ref<string>
 const draggedGroupId = ctx.draggedGroupId as Ref<string>
 const startLayerListDrag = ctx.startLayerListDrag as (layer: any, event: DragEvent) => void
@@ -67,7 +72,7 @@ const toggleSelectedLayerMask = ctx.toggleSelectedLayerMask as () => void
 const toggleMaskEditFromLayerRow = ctx.toggleMaskEditFromLayerRow as (layer: any, event: MouseEvent) => void
 const toggleMaskEnabledFromLayerRow = ctx.toggleMaskEnabledFromLayerRow as (layer: any, event: MouseEvent) => void
 const startMaskDrag = ctx.startMaskDrag as (layer: any, event: DragEvent) => void
-const selectedMaskControlLayers = ctx.selectedMaskControlLayers as any[]
+const selectedMaskControlLayers = ctx.selectedMaskControlLayers as HandoutLayer[]
 const selectedMaskControlDeletes = ctx.selectedMaskControlDeletes as boolean
 const isFlatteningLayers = ctx.isFlatteningLayers as Ref<boolean>
 const flattenSelectedLayers = ctx.flattenSelectedLayers as () => void

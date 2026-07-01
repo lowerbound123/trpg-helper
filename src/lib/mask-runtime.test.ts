@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { HandoutLayer, LayerMask, MaskShapeOperation, PaintStroke } from './handout'
-import { maskLayerCompositeSignature, maskRuntimeContentKey } from './mask-runtime'
+import { MaskGpuRuntime, maskLayerCompositeSignature, maskRuntimeContentKey } from './mask-runtime'
 import { maskStrokeStrength, maskStrokeTargetValue } from './mask-shapes'
 import { identityMatrix, maskTransformFromLayer, syncMaskWithLayerDelta } from './mask-geometry'
 
@@ -162,5 +162,15 @@ describe('mask runtime semantics', () => {
     })
 
     expect(maskRuntimeContentKey(first)).not.toBe(maskRuntimeContentKey(second))
+  })
+
+  it('disposes runtime mask states that are no longer present in the document', () => {
+    const runtime = new MaskGpuRuntime()
+    runtime.ensureMask(mask({ id: 'keep-mask' }))
+    runtime.ensureMask(mask({ id: 'drop-mask' }))
+
+    runtime.disposeMissing(['keep-mask'], [])
+
+    expect(runtime.maskStateCount()).toBe(1)
   })
 })

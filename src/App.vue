@@ -46,6 +46,9 @@ import { isLayerEffectivelyVisible } from '@/lib/handout'
 import type { EditorTool } from '@/lib/editor-tools'
 import { createMaskShapeOperation, createMaskPolygonOperationFromDocumentInput, maskBrushValueFromOpacity } from '@/lib/mask-shapes'
 import { documentPointToMaskLocal } from '@/lib/mask-geometry'
+import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
+import { clearPaintCanvasCache } from '@/lib/paint-rendering'
+import { disposeLayerSourceCanvasCache } from '@/lib/render/mask-composition'
 import { createAppShortcutHandler } from '@/app/AppShortcuts'
 import { appConfiguration } from '@/lib/configuration'
 import { partitionUploadFiles } from '@/lib/upload-validation'
@@ -1082,6 +1085,17 @@ function toggleBackgroundVisibility() {
   editor.patchCanvas({ backgroundVisible: !(editor.document.canvas.backgroundVisible !== false) })
 }
 
+function cleanupRuntimeLayerCaches() {
+  const layerIds = editor.document.layers.map((layer) => layer.id)
+  const maskIds = [
+    editor.document.canvas.backgroundMask?.id,
+    ...editor.document.layers.map((layer) => layer.mask?.id),
+  ].filter((id): id is string => Boolean(id))
+  clearPaintCanvasCache(layerIds)
+  disposeLayerSourceCanvasCache(layerIds)
+  editorMaskGpuRuntime.disposeMissing(maskIds, layerIds)
+}
+
 onMounted(async () => {
   try {
     resetKonvaDragButtons()
@@ -1126,6 +1140,7 @@ onBeforeUnmount(() => {
 
 watch(() => editor.library.backgrounds, () => { void syncImages(editor.library) }, { deep: true })
 watch(() => editor.library.assets, () => { void syncImages(editor.library) }, { deep: true })
+watch(() => editor.document.layers.map((layer) => layer.id).join('|'), cleanupRuntimeLayerCaches)
 watch(() => editor.selectedLayerId, updateTransformer)
 watch(selectedLayerIdsSignature, updateTransformer)
 watch(selectedLayerTransformSignature, updateTransformer)

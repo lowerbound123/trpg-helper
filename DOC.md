@@ -1,6 +1,6 @@
 # Handout Generator — 项目文档
 
-> 本地桌面单页讲义（handout）编辑器，基于 Tauri 2 + Vue 3 + TypeScript + Konva.js 构建。
+> 本地桌面 Handout 与 Token 生成器，基于 Tauri 2 + Vue 3 + TypeScript + Konva.js + PixiJS 构建。
 
 ---
 
@@ -17,12 +17,13 @@
 - [9. IPC API 全景](#9-ipc-api-全景)
 - [10. 数据流与架构](#10-数据流与架构)
 - [11. 关键设计决策](#11-关键设计决策)
+- [12. Token Generator 领域](#12-token-generator-领域)
 
 ---
 
 ## 1. 项目概览
 
-**Handout Generator** 是一个本地桌面应用，用于创建、编辑、导出单页图形讲义/海报。用户通过文件浏览器管理项目、背景图、图像素材和字体，然后在画布上叠加图层（图像、文字、形状、笔刷）、应用遮罩与效果，最终导出为 PNG/JPEG/WebP。
+**Handout Generator** 是一个本地桌面应用，用于创建、编辑、导出单页图形讲义/海报以及批量 TRPG Token。用户通过文件浏览器管理 Handout、Token、图像素材和字体；Handout 编辑器使用 Konva 图层系统，Token 编辑器使用 PixiJS 实时预览，最终支持 PNG/JPEG/WebP/JXL 导出。
 
 - **应用类型**：Tauri 2 桌面应用（Rust 后端 + Vue 3 前端），支持浏览器独立开发预览
 - **包管理器**：pnpm 11.8.0（强制声明于 `package.json` 的 `devEngines`）
@@ -52,6 +53,7 @@
 | vue-sonner | ^2.0.9 | Toast 通知 |
 | @vueuse/core | ^14.3.0 | Vue 组合式工具集 |
 | zod | ^4.4.3 | Schema 校验 |
+| js-toml | ^1.2.1 | 完整 TOML 1.1 解析与序列化（嵌套表、数组、数组表） |
 | Vitest + @vue/test-utils + jsdom | — | 单元测试 |
 
 ### 后端
@@ -65,6 +67,9 @@
 | serde / serde_json | 1.0 | 序列化 |
 | image | 0.25.6 | 图像解码/缩放/编码 |
 | webp | 0.3.1 | WebP 编码 |
+| oxipng / mozjpeg-rs | 10.1.1 / 0.9.2 | Token PNG 与 JPEG 高质量编码 |
+| jpegxl-rs / jpegxl-sys | 0.15.0 / 0.13.0 | JPEG XL 编码（GPL-3.0-or-later 约束） |
+| resvg / usvg / tiny-skia | 0.47 / 0.47 / 0.12 | 11 个内置 SVG Token 环渲染 |
 | base64 | 0.22.1 | data URL 编解码 |
 | uuid | 1.20.0 | UUIDv4 生成 |
 | chrono | 0.4.45 | 时间戳 |
@@ -130,16 +135,18 @@ handout-generator/
 │   ├── assets/                   # 静态资源
 │   ├── components/               # Vue 组件
 │   │   ├── ui/                   # shadcn-vue UI 原语（20 个组件）
-│   │   ├── editor/               # 编辑器面板（RightInspector, ExportPanel）
+│   │   ├── controls/             # 通用 NumericSliderField / ParameterLabel
+│   │   ├── editor/               # Handout 编辑器面板（RightInspector, ExportPanel）
+│   │   ├── token/                # Token 三栏编辑器与 Pixi 实时预览
 │   │   ├── handout/              # 新建讲义对话框
 │   │   ├── settings/             # 配置对话框
 │   │   ├── BootSplash.vue        # 启动加载画面
 │   │   ├── EditorTopBar.vue      # 编辑器顶栏（Save/工具/Undo/Redo）
-│   │   ├── ManagerShell.vue      # 管理器视图（Handouts/Assets/Fonts 三标签）
+│   │   ├── ManagerShell.vue      # 管理器视图（Handouts/Tokens/Assets/Fonts 四标签）
 │   │   ├── LeftRail.vue          # 编辑器左栏（Assets/Fonts/Graph/Layers 四标签）
 │   │   └── CanvasWorkspace.vue   # Konva 画布工作区
 │   ├── composables/              # 27 个组合式函数实现（详见 6.7）
-│   ├── stores/                   # Pinia 状态仓库
+│   ├── stores/                   # Pinia 状态仓库（workspace/editor/token）
 │   │   ├── editor.ts             # facade store（656 行）
 │   │   └── editor/               # 4 个子 store
 │   │       ├── font-store.ts
@@ -148,7 +155,8 @@ handout-generator/
 │   │       └── project-store.ts
 │   └── lib/                      # 核心业务逻辑
 │       ├── backend.ts            # Tauri IPC 桥接层
-│       ├── configuration.ts      # TOML 配置解析
+│       ├── configuration.ts      # js-toml 配置解析与完整 round-trip
+│       ├── token/                # Token 类型、配置、Pixi 几何、环纹理 Worker
 │       ├── history.ts            # 通用命令历史
 │       ├── render/               # Konva 离屏渲染（12 个模块）
 │       ├── handout/layer/        # 图层操作（9 个模块）
@@ -172,8 +180,9 @@ handout-generator/
 │       ├── lib.rs                # 模块声明 + run()（89 行）
 │       ├── types.rs              # 共享数据结构
 │       ├── errors.rs             # AppError 枚举
-│       ├── commands/             # IPC 命令模块（4 组 + mod.rs）
-│       ├── services/             # 服务层（5 模块 + mod.rs）
+│       ├── commands/             # IPC 命令模块（含 Token 项目 CRUD）
+│       ├── services/             # 服务层（含 Token 项目源图回退）
+│       ├── token/                # Token Rust 引擎、编码、配色、环与 55 项测试
 │       └── editor/mod.rs         # 编辑器领域占位
 │
 └── data/                         # 运行时数据（git 忽略）
@@ -191,6 +200,13 @@ handout-generator/
             ├── preview.webp
             ├── masks/
             └── .cache/
+    └── token-projects/           # Token 项目
+        ├── folders.json
+        └── <project-uuid>/
+            ├── token.json
+            ├── metadata.json
+            ├── preview.webp
+            └── sources/          # Asset 删除后的原图保底副本
 ```
 
 ---
@@ -237,6 +253,8 @@ handout-generator/
 | | `min_scale` | `0.1` | 最小导出缩放 |
 | `[debug]` | `file_log_enabled` | `true` | 文件日志开关 |
 | | `render_perf_log_enabled` | `true` | 渲染性能日志开关 |
+
+`[token.*]` 是独立的完整 Token 配置命名空间，包含 `defaults`、`limits`、`export.defaults`、`export.limits`、`export.webp_strength_profiles`、`export.rendering`、`export.naming`、`export.random_colors`、`preview`、`layout`、`files`、`rings`、`history` 和 `notifications`。前端由 `js-toml` 完整往返；Rust 启动时读取同一子树并严格校验，不再维护运行时第二份 Token 配置。
 
 > `configuration.toml` 可被 localStorage（key: `handout-generator.configuration.toml`）覆盖，实现运行时配置覆盖而无需改源文件。
 
@@ -610,9 +628,9 @@ data/
 
 ## 9. IPC API 全景
 
-后端共暴露 **39 个 Tauri 命令**，全部返回 `Result<T, String>`。前端通过 `@tauri-apps/api` 的 `invoke("command_name", args?, options?)` 调用。常规命令使用 JSON 参数；大导出写盘使用 raw bytes body。
+后端共暴露 **53 个 Tauri 命令**，全部返回 `Result<T, String>`。前端通过 `@tauri-apps/api` 的 `invoke("command_name", args?, options?)` 调用。常规命令使用 JSON 参数；Handout 大导出使用 raw bytes body，Token 批量导出使用 Channel 推送进度。
 
-### 库管理（10）
+### 库管理（11）
 
 | 命令 | 用途 |
 |---|---|
@@ -626,6 +644,7 @@ data/
 | `import_background` | 导入背景图（生成缩略图） |
 | `import_asset` | 导入素材图（生成缩略图） |
 | `import_font` | 导入字体（提取 font_family） |
+| `update_token_ring_config` | 使用 expected revision 更新 Asset 自定义环几何 |
 
 ### 项目管理（13）
 
@@ -644,6 +663,26 @@ data/
 | `create_project_folder` | 创建项目文件夹 |
 | `rename_project_folder` | 重命名项目文件夹（遍历所有项目 metadata） |
 | `list_project_folders` | 列出项目文件夹 |
+
+### Token 项目与导出（13）
+
+| 命令 | 用途 |
+|---|---|
+| `list_token_projects` | 列出 Token 项目及 preview/item count |
+| `create_token_project` | 创建批量 Token 项目并复制源图到 `sources/` |
+| `open_token_project` | 解析 Asset ID，缺失时回退项目源图副本 |
+| `save_token_project` | 保存项目并补齐新增项源图副本 |
+| `rename_token_project` | 重命名 Token 项目 |
+| `move_token_project` | 移动 Token 项目到逻辑目录 |
+| `copy_token_project` | 复制完整项目和 `sources/` |
+| `delete_token_project_entries` | 删除 Token 项目或目录树 |
+| `create_token_project_folder` | 创建 Token 逻辑目录 |
+| `rename_token_project_folder` | 重命名 Token 逻辑目录及项目 metadata |
+| `list_token_project_folders` | 列出 Token 逻辑目录 |
+| `save_token_project_preview` | 保存当前项优先的 WebP 项目预览 |
+| `generate_token_batch` | PNG/JPEG/WebP/JXL 批量生成，逐项失败隔离 |
+
+`generate_token_batch` 的 `onProgress` 参数是 Tauri Channel，发送逐项阶段和完成进度，不单独占用命令名。
 
 ### 遮罩/项目文件 I/O（4）
 
@@ -804,6 +843,53 @@ Document 标签 → ExportPanel exportImage emit → exportCurrentImage()
 ### 11.9 未使用依赖
 
 `rusqlite` 0.40.1 和 `anyhow` 在 `Cargo.toml` 中声明但全代码库零引用——持久化完全基于 JSON 文件 + 图像文件，无数据库。这两个依赖可安全移除。
+
+---
+
+## 12. Token Generator 领域
+
+### 12.1 Workspace 与主界面
+
+根级 `useWorkspaceStore` 管理 `manager | handout-editor | token-editor`，Token 导航不依赖 Handout Editor Store。主界面包含 `Handouts / Tokens / Assets / Fonts`：Tokens 使用独立 VueFinder driver；Assets 使用多选模式，恰好一张图片时可创建 Handout，任意数量图片可一次创建一个批量 Token 项目。
+
+Token 项目默认命名为 `未命名项目-YYYYMMDD-HHmmss`，创建后立即打开。Tokens VueFinder 支持目录、新建、重命名、移动、删除和 Clone；双击项目进入 Token 编辑器。
+
+### 12.2 项目模型与资源回退
+
+`TokenProjectDocument` 保存项目项的独立 `TokenVisualStyle` 和共享 `TokenExportSettings`。每个项目项优先使用稳定 `assetId` 解析当前 Assets；创建/保存时 Rust 将源图复制到项目 `sources/` 并写入 `fallbackSource`。Asset 被移动不影响引用，Asset 被删除后仍可通过项目副本打开、预览和导出；两处均缺失的项保留在文档中并在导出时跳过。
+
+Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编辑器导入外部文件/文件夹时先进入 `token-tmp`；自定义环进入 `rings`。`LibraryRecord.tokenRing` 保存 revision、设计尺寸、内外径、素材缩放和偏移，更新使用 expected revision 防止旧提交覆盖新设置。
+
+### 12.3 三栏编辑器
+
+- 左栏 `Items / Assets`：当前项、勾选项、删除项、将当前样式应用到勾选项、从 Assets 或外部文件/文件夹追加图片。
+- 中栏：长期持有的 `PixiTokenRenderer`，支持头像拖动、滚轮缩放、响应式取景、出框参考线、快速切图令牌、纹理释放和完整 dispose。
+- 右栏 `参数 / 导出`：头像缩放/偏移、背景、环样式/颜色/半径/拉伸、分割角度与高度、自定义环几何，以及 PNG/JPEG/WebP/JXL 参数和导出范围。
+
+连续滑块编辑通过 `edit-start -> update:modelValue -> commit` 合并为一条历史。显式 Save 和返回 Manager 都会保存；Save 使用当前预览写入 `preview.webp`。`NumericSliderField` 是 Handout 与 Token 共享的唯一滑块精确输入控件，支持点击数字编辑、clamp、step、单位、Mixed 和禁用状态。
+
+### 12.4 圆环与 Pixi 预览
+
+11 个内置 SVG 位于 `src-tauri/src/token/rings/`，Rust 文件是素材唯一来源，前端通过 Vite `?raw` 复用。`RingTextureProvider` 在 Worker 中进行径向映射并带 LRU 风格缓存；自定义环保留原始 RGB，仅乘环颜色 alpha。环 Asset 缺失时预览和导出均回退 solid，并写入 `logs/token.log`。
+
+### 12.5 Rust 批量导出
+
+`generate_token_batch` 使用 Tauri `Channel<ExportProgressEvent>` 报告 preparing、decoding、rendering、compositing、encoding。每项冻结独立视觉参数与共享导出参数，单项失败不会终止后续项，重复文件名按配置避让。
+
+- PNG：OxiPNG，支持优化级别、alpha、metadata 和 Zopfli。
+- JPEG：MozJPEG，支持质量、progressive、deringing 和 444/422/420。
+- WebP：lossy/lossless、质量和 strength profile。
+- JXL：lossless/distance/effort/progressive/decoding speed。
+
+随机配色使用高对比 palette；内置环可随机环色，自定义环保持 RGB 并只参与背景对比选择。导出结果与耗时分别写入 `logs/render.log` 和 `logs/speed.log`，Token 业务事件写入 `logs/token.log`。
+
+### 12.6 当前验证基线
+
+- `pnpm exec vitest run`：35 个测试文件、170 项测试。
+- `pnpm run typecheck`：通过。
+- `pnpm run build`：通过，无构建 warning。
+- `cargo test --manifest-path src-tauri/Cargo.toml`：55 项 Rust 测试通过，覆盖项目源图副本、配置、几何、内置/自定义环、随机配色及四种编码器。
+- Playwright：验证主界面四标签、Tokens VueFinder 和 Assets 多选操作组，浏览器 console 0 errors / 0 warnings；验证后开发服务器已关闭。
 
 ---
 

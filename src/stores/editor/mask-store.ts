@@ -307,7 +307,7 @@ export function createMaskStore(deps: {
       : deps.document.value.layers.find((item) => item.mask?.id === maskId)?.mask
     if (!currentMask) return
     const nextMask = createMaskTileStore(currentMask).applyStroke(stroke)
-    editorMaskGpuRuntime.syncStrokeApplied(currentMask, stroke, nextMask.version)
+    editorMaskGpuRuntime.queueMaskRuntimeOperation(currentMask, { id: stroke.id, kind: 'stroke', stroke }, nextMask.version)
     queueMaskPreviewFilesForDeletion(currentMask)
     const strokePayload = {
       maskId: currentMask.id,
@@ -353,7 +353,7 @@ export function createMaskStore(deps: {
       : deps.document.value.layers.find((item) => item.mask?.id === maskId)?.mask
     if (!currentMask) return
     const nextMask = createMaskTileStore(currentMask).applyShape(shape)
-    editorMaskGpuRuntime.syncShapeApplied(currentMask, shape, nextMask.version)
+    editorMaskGpuRuntime.queueMaskRuntimeOperation(currentMask, { id: shape.id, kind: 'shape', shape }, nextMask.version)
     queueMaskPreviewFilesForDeletion(currentMask)
     const shapePayload = {
       maskId: currentMask.id,

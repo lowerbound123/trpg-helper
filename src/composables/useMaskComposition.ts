@@ -20,12 +20,16 @@ type MaskRefreshInput = {
   maskIds?: Iterable<string>
   reason?: string
   queuedAt?: number
+  interactive?: boolean
+  priority?: MaskRefreshPriority
 }
 type MaskCompositeScheduleOptions = MaskRefreshInput & {
   immediate?: boolean
 }
+type MaskRefreshPriority = 'target' | 'secondary' | 'full'
+export type MaskPointerActivity = 'down' | 'drag' | 'up' | 'leave' | 'move'
 type MaskCompositeTimer = {
-  id: number
+  id: ReturnType<typeof setTimeout> | number
   kind: 'timeout' | 'raf'
 }
 export type MaskCompositeIdentity = {
@@ -76,8 +80,12 @@ export function useMaskComposition(options: {
   let maskEditImageRefreshRunId = 0
   let nextLayerCompositeToken = 0
   let nextMaskPreviewToken = 0
+  let maskPointerDown = false
+  let lastMaskPointerActivityAt = 0
   const layerCompositeTokens = new Map<string, number>()
   const maskCompositeRefreshTimers = new Map<string, MaskCompositeTimer>()
+  const maskPreviewRefreshTimers = new Map<string, MaskCompositeTimer>()
+  let maskEditImageRefreshTimer: MaskCompositeTimer | undefined
   const maskPreviewTokens = new Map<string, number>()
 
   function targetSet(values?: Iterable<string>) {
@@ -193,6 +201,78 @@ export function useMaskComposition(options: {
     bumpMaskedLayerRevision(layerId)
   }
 
+  function nowMs() {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now()
+  }
+
+  function recordMaskPointerActivity(activity: MaskPointerActivity | boolean = 'move') {
+    if (typeof activity === 'boolean') {
+      maskPointerDown = activity
+      if (activity) lastMaskPointerActivityAt = nowMs()
+      return
+    }
+    if (activity === 'move') return
+    lastMaskPointerActivityAt = nowMs()
+    maskPointerDown = activity === 'down' || activity === 'drag'
+  }
+
+  function maskPointerIdleDelayMs() {
+    const grace = Math.max(0, appConfiguration.mask.pointerIdleGraceMs)
+    if (maskPointerDown) return grace
+    if (!lastMaskPointerActivityAt) return 0
+    return Math.max(0, grace - (nowMs() - lastMaskPointerActivityAt))
+  }
+
+  function isInteractiveMaskRefreshReason(reason?: string) {
+    return Boolean(reason && [
+      'mask-pulse:stroke',
+      'mask-pulse:shape',
+      'mask-pulse:patch',
+      'mask-pulse:clear',
+      'mask-pulse:add',
+      'mask-pulse:enabled',
+    ].some((prefix) => reason.startsWith(prefix)))
+  }
+
+  function isTargetMaskRefreshReason(reason?: string) {
+    return Boolean(reason && [
+      'mask-pulse:stroke',
+      'mask-pulse:shape',
+      'mask-pulse:patch',
+    ].some((prefix) => reason.startsWith(prefix)))
+  }
+
+  function maskRefreshPriority(reason: string, options: MaskCompositeScheduleOptions): MaskRefreshPriority {
+    if (options.priority) return options.priority
+    if (isTargetMaskRefreshReason(reason) && (options.layerIds || options.maskIds)) return 'target'
+    if (isInteractiveMaskRefreshReason(reason)) return 'secondary'
+    return 'full'
+  }
+
+  function shouldWriteDetailedMaskState(input: MaskRefreshInput) {
+    return input.priority !== 'target' && !input.interactive && !isInteractiveMaskRefreshReason(input.reason)
+  }
+
+  function scheduleTimer(
+    timers: Map<string, MaskCompositeTimer>,
+    key: string,
+    delayMs: number,
+    run: () => void,
+  ) {
+    const id = globalThis.setTimeout(run, Math.max(0, Math.round(delayMs)))
+    timers.set(key, { kind: 'timeout', id })
+  }
+
+  async function yieldMaskRefreshSlice() {
+    await new Promise<void>((resolve) => {
+      if (typeof globalThis.requestAnimationFrame === 'function') {
+        globalThis.requestAnimationFrame(() => resolve())
+        return
+      }
+      globalThis.setTimeout(resolve, 0)
+    })
+  }
+
   async function refreshMaskedLayerImages(input: MaskRefreshInput = {}) {
     if (!maskFeatureEnabled) return
     if (editor.view !== 'editor') return
@@ -202,13 +282,15 @@ export function useMaskComposition(options: {
     }
     const layerIds = targetSet(input.layerIds)
     const maskIds = targetSet(input.maskIds)
+    const priority = input.priority ?? 'full'
     const targeted = Boolean(layerIds || maskIds)
     const runId = ++maskedLayerRefreshSequence
-    const startedAt = performance.now()
+    const startedAt = nowMs()
     if (input.queuedAt !== undefined) {
       appendSpeedLog('mask-refresh-queue-delay', {
         runId,
         reason: input.reason,
+        priority,
         delayMs: Math.round(startedAt - input.queuedAt),
       })
     }
@@ -225,16 +307,45 @@ export function useMaskComposition(options: {
       previewMaxEdge: editorMaskPreviewMaxEdge,
       canvas: { width: editor.document.canvas.width, height: editor.document.canvas.height },
     })
-    logCanvasLayerRenderState('editor-layer-render-state-before-mask-refresh', {
-      runId,
-      maskedLayerIds: maskedLayers.map((layer) => layer.id),
-      proxyMaxEdge,
-    })
+    if (shouldWriteDetailedMaskState(input)) {
+      logCanvasLayerRenderState('editor-layer-render-state-before-mask-refresh', {
+        runId,
+        maskedLayerIds: maskedLayers.map((layer) => layer.id),
+        proxyMaxEdge,
+      })
+    }
     const maskedIds = new Set(allMaskedLayers.map((layer) => layer.id))
-    for (const layer of maskedLayers) {
+    for (const [index, layer] of maskedLayers.entries()) {
       const compositeToken = beginLayerComposite(layer.id)
       const expectedIdentity = maskCompositeIdentity(layer)
-      const layerStartedAt = performance.now()
+      const pendingStartedAt = nowMs()
+      if (layer.mask) {
+        const pendingCount = editorMaskGpuRuntime.pendingMaskRuntimeOperationCount(layer.mask.id)
+        editorMaskGpuRuntime.flushMaskRuntimeOperations(layer.mask.id, layer.mask)
+        const pendingDurationMs = Math.round(nowMs() - pendingStartedAt)
+        if (pendingCount > 0) {
+          appendSpeedLog('mask-runtime-pending-flush', {
+            runId,
+            reason: input.reason,
+            layerId: layer.id,
+            maskId: layer.mask.id,
+            pendingCount,
+            priority,
+            durationMs: pendingDurationMs,
+          })
+        }
+        if (priority === 'target' && pendingDurationMs > 12) {
+          appendSpeedLog('mask-target-long-segment', {
+            runId,
+            reason: input.reason,
+            layerId: layer.id,
+            segment: 'pending-flush',
+            durationMs: pendingDurationMs,
+          })
+          await yieldMaskRefreshSlice()
+        }
+      }
+      const layerStartedAt = nowMs()
       const image = await renderMaskedLayerImage(layer, editor.library, imageElements, {
         projectTarget: {
           projectId: editor.currentProjectId,
@@ -243,6 +354,7 @@ export function useMaskComposition(options: {
         masksEnabled: maskFeatureEnabled,
         maxCompositeEdge: proxyMaxEdge,
         usePixiMaskPreview: appConfiguration.mask.usePixiPreview,
+        yieldToMainThread: priority === 'target' ? yieldMaskRefreshSlice : undefined,
       }) ?? maskedLayerImages[layer.id]
       if (!layerCompositeIsCurrent(layer.id, compositeToken) || isDraggingMask.value) {
         void appendDebugLog('mask', 'refresh-masked-layer-images-discarded-stale', {
@@ -274,12 +386,30 @@ export function useMaskComposition(options: {
       appendSpeedLog('mask-refresh-layer', {
         runId,
         reason: input.reason,
+        priority,
         layerId: layer.id,
         maskId: layer.mask?.id,
         durationMs: Math.round(performance.now() - layerStartedAt),
       })
       if (image) {
         commitMaskedLayerImage(layer.id, image)
+      }
+      if (index < maskedLayers.length - 1) {
+        await yieldMaskRefreshSlice()
+        if (priority !== 'target' && input.interactive && maskPointerIdleDelayMs() > 0) {
+          void appendDebugLog('mask', 'refresh-masked-layer-images-paused-pointer-active', {
+            runId,
+            reason: input.reason,
+            nextLayerIndex: index + 1,
+          })
+          scheduleMaskCompositeRefresh(input.reason ?? 'mask-refresh-resume', {
+            layerIds,
+            maskIds,
+            interactive: true,
+            priority,
+          })
+          return
+        }
       }
     }
     if (isDraggingMask.value) {
@@ -304,16 +434,19 @@ export function useMaskComposition(options: {
     appendSpeedLog('mask-refresh-layers-complete', {
       runId,
       reason: input.reason,
+      priority,
       targeted,
       count: maskedLayers.length,
       durationMs: Math.round(performance.now() - startedAt),
     })
-    logCanvasLayerRenderState('editor-layer-render-state-after-mask-refresh', {
-      runId,
-      maskedLayerIds: maskedLayers.map((layer) => layer.id),
-      maskedImageIds: Object.keys(maskedLayerImages),
-      durationMs: Math.round(performance.now() - startedAt),
-    })
+    if (shouldWriteDetailedMaskState(input)) {
+      logCanvasLayerRenderState('editor-layer-render-state-after-mask-refresh', {
+        runId,
+        maskedLayerIds: maskedLayers.map((layer) => layer.id),
+        maskedImageIds: Object.keys(maskedLayerImages),
+        durationMs: Math.round(nowMs() - startedAt),
+      })
+    }
   }
 
   async function refreshMaskPreviewUrls(input: { maskIds?: Iterable<string> } = {}) {
@@ -322,7 +455,7 @@ export function useMaskComposition(options: {
       void appendDebugLog('mask', 'refresh-mask-preview-urls-skipped-dragging')
       return
     }
-    const startedAt = performance.now()
+    const startedAt = nowMs()
     const maskIdsFilter = targetSet(input.maskIds)
     const masks = editor.document.layers
       .map((layer) => layer.mask)
@@ -338,12 +471,13 @@ export function useMaskComposition(options: {
       if (!mask) return
       const token = beginMaskPreview(mask.id)
       const expectedIdentity = maskPreviewIdentity(mask)
-      const maskStartedAt = performance.now()
+      const maskStartedAt = nowMs()
       if (mask.path && !editorMaskGpuRuntime.hasMaskSource(mask, `path:${mask.path}`)) {
         const persisted = await editor.loadMaskDataUrl(mask)
         const persistedImage = await loadImageFromDataUrl(persisted)
         editorMaskGpuRuntime.seedMask(mask, persistedImage, `path:${mask.path}`, true)
       }
+      editorMaskGpuRuntime.flushMaskRuntimeOperations(mask.id, mask)
       const dataUrl = editorMaskGpuRuntime.thumbnail(mask, 96)
       if (!dataUrl) {
         if (!maskPreviewIsCurrent(mask.id, token, expectedIdentity)) {
@@ -391,7 +525,7 @@ export function useMaskComposition(options: {
       return
     }
     const runId = ++maskEditImageRefreshRunId
-    const startedAt = performance.now()
+    const startedAt = nowMs()
     const layer = activeMaskEditLayer.value
     if (!layer?.mask) {
       maskEditImage.value = undefined
@@ -410,6 +544,7 @@ export function useMaskComposition(options: {
       const persistedImage = await loadImageFromDataUrl(persisted)
       editorMaskGpuRuntime.seedMask(layer.mask, persistedImage, `path:${layer.mask.path}`, true)
     }
+    editorMaskGpuRuntime.flushMaskRuntimeOperations(layer.mask.id, layer.mask)
     const image = editorMaskGpuRuntime.maskCanvas(layer.mask)
     if (!image) {
       maskEditImage.value = undefined
@@ -501,58 +636,133 @@ export function useMaskComposition(options: {
   }
 
   function clearMaskCompositeTimer(timer: MaskCompositeTimer) {
-    if (timer.kind === 'raf' && typeof window.cancelAnimationFrame === 'function') {
-      window.cancelAnimationFrame(timer.id)
+    if (timer.kind === 'raf' && typeof globalThis.cancelAnimationFrame === 'function') {
+      globalThis.cancelAnimationFrame(timer.id as number)
       return
     }
-    window.clearTimeout(timer.id)
+    globalThis.clearTimeout(timer.id)
   }
 
   function scheduleMaskCompositeRefresh(reason: string, options: MaskCompositeScheduleOptions = {}) {
     if (!maskFeatureEnabled) return
+    if (reason === 'background-mask-signature') {
+      void refreshMaskedBackgroundImage()
+      return
+    }
     const timerKey = maskCompositeRefreshTimerKey(options)
     if (timerKey === 'all') {
-      for (const timer of maskCompositeRefreshTimers.values()) clearMaskCompositeTimer(timer)
-      maskCompositeRefreshTimers.clear()
+      const existingTimer = maskCompositeRefreshTimers.get(timerKey)
+      if (existingTimer) clearMaskCompositeTimer(existingTimer)
     } else {
       const existingTimer = maskCompositeRefreshTimers.get(timerKey)
       if (existingTimer) clearMaskCompositeTimer(existingTimer)
     }
+    const priority = maskRefreshPriority(reason, options)
     void appendDebugLog('mask', 'schedule-mask-composite-refresh', {
       reason,
       targeted: Boolean(options.layerIds || options.maskIds),
       immediate: Boolean(options.immediate),
+      interactive: Boolean(options.interactive ?? isInteractiveMaskRefreshReason(reason)),
+      priority,
       isDraggingMask: isDraggingMask.value,
       timerKey,
     })
-    logCanvasLayerRenderState('editor-layer-render-state-scheduled', { reason })
-    const queuedAt = performance.now()
+    const interactive = Boolean(options.interactive ?? isInteractiveMaskRefreshReason(reason))
+    if (!interactive) logCanvasLayerRenderState('editor-layer-render-state-scheduled', { reason })
+    const queuedAt = nowMs()
     const run = () => {
       maskCompositeRefreshTimers.delete(timerKey)
       if (isDraggingMask.value) {
         void appendDebugLog('mask', 'schedule-mask-composite-refresh-skipped-dragging', { reason })
         return
       }
-      void refreshMaskedLayerImages({ ...options, reason, queuedAt })
+      if (priority !== 'target' && interactive) {
+        const idleDelayMs = maskPointerIdleDelayMs()
+        if (idleDelayMs > 0) {
+          scheduleTimer(maskCompositeRefreshTimers, timerKey, idleDelayMs, run)
+          return
+        }
+        appendSpeedLog('mask-interactive-refresh-delay', {
+          reason,
+          timerKey,
+          priority,
+          delayMs: Math.round(nowMs() - queuedAt),
+        })
+      }
+      if (priority === 'target') {
+        appendSpeedLog('mask-target-refresh-next-frame', {
+          reason,
+          timerKey,
+          delayMs: Math.round(nowMs() - queuedAt),
+        })
+      }
+      void refreshMaskedLayerImages({ ...options, reason, queuedAt, interactive, priority })
       if (!options.layerIds && !options.maskIds) void refreshMaskedBackgroundImage()
       else if (editor.document.canvas.backgroundMask && options.maskIds && targetSet(options.maskIds)?.has(editor.document.canvas.backgroundMask.id)) {
         void refreshMaskedBackgroundImage()
       }
     }
-    if (options.immediate) {
-      if (typeof window.requestAnimationFrame === 'function') {
-        maskCompositeRefreshTimers.set(timerKey, { kind: 'raf', id: window.requestAnimationFrame(run) })
+    if (options.immediate || priority === 'target') {
+      if (typeof globalThis.requestAnimationFrame === 'function') {
+        maskCompositeRefreshTimers.set(timerKey, { kind: 'raf', id: globalThis.requestAnimationFrame(run) })
       } else {
-        maskCompositeRefreshTimers.set(timerKey, { kind: 'timeout', id: window.setTimeout(run, 0) })
+        scheduleTimer(maskCompositeRefreshTimers, timerKey, 0, run)
       }
       return
     }
-    maskCompositeRefreshTimers.set(timerKey, { kind: 'timeout', id: window.setTimeout(run, 180) })
+    scheduleTimer(
+      maskCompositeRefreshTimers,
+      timerKey,
+      priority === 'secondary' ? appConfiguration.mask.interactiveRefreshDelayMs : 180,
+      run,
+    )
+  }
+
+  function scheduleMaskPreviewRefresh(input: { maskIds?: Iterable<string> } = {}, reason = 'mask-preview') {
+    if (!maskFeatureEnabled) return
+    const key = input.maskIds ? Array.from(input.maskIds).sort().join('|') : 'all'
+    const existing = maskPreviewRefreshTimers.get(key)
+    if (existing) clearMaskCompositeTimer(existing)
+    const run = () => {
+      maskPreviewRefreshTimers.delete(key)
+      const idleDelayMs = maskPointerIdleDelayMs()
+      if (idleDelayMs > 0) {
+        scheduleTimer(maskPreviewRefreshTimers, key, idleDelayMs, run)
+        return
+      }
+      void appendDebugLog('mask', 'schedule-mask-preview-refresh-run', { reason, key })
+      void refreshMaskPreviewUrls(input)
+    }
+    scheduleTimer(maskPreviewRefreshTimers, key, appConfiguration.mask.interactiveRefreshDelayMs, run)
+  }
+
+  function scheduleMaskEditImageRefresh(reason = 'mask-edit-image') {
+    if (!maskFeatureEnabled) return
+    if (maskEditImageRefreshTimer) clearMaskCompositeTimer(maskEditImageRefreshTimer)
+    const run = () => {
+      maskEditImageRefreshTimer = undefined
+      const idleDelayMs = maskPointerIdleDelayMs()
+      if (idleDelayMs > 0) {
+        const id = globalThis.setTimeout(run, idleDelayMs)
+        maskEditImageRefreshTimer = { kind: 'timeout', id }
+        return
+      }
+      void appendDebugLog('mask', 'schedule-mask-edit-image-refresh-run', { reason })
+      void refreshMaskEditImage()
+    }
+    const id = globalThis.setTimeout(run, appConfiguration.mask.interactiveRefreshDelayMs)
+    maskEditImageRefreshTimer = { kind: 'timeout', id }
   }
 
   function cancelMaskCompositeRefresh() {
     for (const timer of maskCompositeRefreshTimers.values()) clearMaskCompositeTimer(timer)
     maskCompositeRefreshTimers.clear()
+    for (const timer of maskPreviewRefreshTimers.values()) clearMaskCompositeTimer(timer)
+    maskPreviewRefreshTimers.clear()
+    if (maskEditImageRefreshTimer) {
+      clearMaskCompositeTimer(maskEditImageRefreshTimer)
+      maskEditImageRefreshTimer = undefined
+    }
   }
 
   return {
@@ -562,6 +772,9 @@ export function useMaskComposition(options: {
     refreshMaskEditImage,
     refreshMaskedBackgroundImage,
     scheduleMaskCompositeRefresh,
+    scheduleMaskPreviewRefresh,
+    scheduleMaskEditImageRefresh,
     cancelMaskCompositeRefresh,
+    recordMaskPointerActivity,
   }
 }

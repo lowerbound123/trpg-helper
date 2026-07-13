@@ -12,6 +12,8 @@ const loadImageFromDataUrlMock = vi.hoisted(() => vi.fn(async () => ({} as HTMLI
 const runtimeThumbnailMock = vi.hoisted(() => vi.fn((_targetMask?: unknown) => 'data:image/png;base64,THUMB'))
 const runtimeHasMaskSourceMock = vi.hoisted(() => vi.fn(() => true))
 const runtimeSeedMaskMock = vi.hoisted(() => vi.fn())
+const runtimePendingCountMock = vi.hoisted(() => vi.fn(() => 0))
+const runtimeFlushMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/mask', () => ({
   downsampleDataUrl: downsampleDataUrlMock,
@@ -23,6 +25,8 @@ vi.mock('@/lib/mask-runtime', () => ({
     hasMaskSource: runtimeHasMaskSourceMock,
     seedMask: runtimeSeedMaskMock,
     thumbnail: runtimeThumbnailMock,
+    pendingMaskRuntimeOperationCount: runtimePendingCountMock,
+    flushMaskRuntimeOperations: runtimeFlushMock,
   },
 }))
 
@@ -120,6 +124,9 @@ describe('useMaskComposition targeted refresh', () => {
     runtimeHasMaskSourceMock.mockReset()
     runtimeHasMaskSourceMock.mockReturnValue(true)
     runtimeSeedMaskMock.mockClear()
+    runtimePendingCountMock.mockReset()
+    runtimePendingCountMock.mockReturnValue(0)
+    runtimeFlushMock.mockClear()
   })
 
   it('refreshes only requested masked layers and leaves other stable canvases untouched', async () => {
@@ -394,5 +401,251 @@ describe('useMaskComposition targeted refresh', () => {
     await oldRefresh
 
     expect(maskPreviewUrls[sourceLayer.mask!.id]).toBe('new-thumb')
+  })
+
+  it('starts target mask refreshes on the next frame after a stroke pulse', async () => {
+    vi.useFakeTimers()
+    const originalRaf = globalThis.requestAnimationFrame
+    const originalCancelRaf = globalThis.cancelAnimationFrame
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+      globalThis.setTimeout(() => callback(performance.now()), 16) as unknown as number)
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => globalThis.clearTimeout(id))
+    try {
+      const sourceLayer = layer('layer-1')
+      const editor = {
+        view: 'editor',
+        document: {
+          canvas: {
+            width: 800,
+            height: 600,
+            backgroundColor: 'rgba(0,0,0,0)',
+            backgroundVisible: true,
+            backgroundMask: null,
+            effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
+          },
+          layers: [sourceLayer],
+          groups: [],
+        },
+        library: { backgrounds: [], assets: [], fonts: [], backgroundFolders: [], assetFolders: [], fontFolders: [] },
+        currentProjectId: undefined,
+        projectDir: '',
+        loadMaskDataUrl: vi.fn(),
+        maskDataUrls: {},
+      } as any
+
+      const composition = useMaskComposition({
+        editor,
+        imageElements: {},
+        maskFeatureEnabled: true,
+        isDraggingMask: ref(false),
+        stageScale: computed(() => 1),
+        editorMaskPreviewMaxEdge: 1200,
+        maskProxyMaxEdge: () => 1200,
+        activeMaskEditLayer: computed(() => undefined),
+        logCanvasLayerRenderState: vi.fn(),
+        maskedLayerImages: {},
+        maskedLayerRenderRevisions: {},
+        requestMaskedLayerDraw: vi.fn(),
+        maskPreviewUrls: {},
+        maskEditImage: ref(),
+        maskEditImageRevision: ref(0),
+      })
+
+      composition.scheduleMaskCompositeRefresh('mask-pulse:stroke', {
+        layerIds: [sourceLayer.id],
+        maskIds: [sourceLayer.mask!.id],
+      })
+
+      expect(renderMaskedLayerImage).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(16)
+      expect(renderMaskedLayerImage).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(renderMaskedLayerImage).mock.calls[0][0].id).toBe(sourceLayer.id)
+    } finally {
+      vi.stubGlobal('requestAnimationFrame', originalRaf)
+      vi.stubGlobal('cancelAnimationFrame', originalCancelRaf)
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not let passive cursor movement postpone a target mask refresh', async () => {
+    vi.useFakeTimers()
+    const originalRaf = globalThis.requestAnimationFrame
+    const originalCancelRaf = globalThis.cancelAnimationFrame
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+      globalThis.setTimeout(() => callback(performance.now()), 16) as unknown as number)
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => globalThis.clearTimeout(id))
+    try {
+      const sourceLayer = layer('layer-1')
+      const editor = {
+        view: 'editor',
+        document: {
+          canvas: {
+            width: 800,
+            height: 600,
+            backgroundColor: 'rgba(0,0,0,0)',
+            backgroundVisible: true,
+            backgroundMask: null,
+            effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
+          },
+          layers: [sourceLayer],
+          groups: [],
+        },
+        library: { backgrounds: [], assets: [], fonts: [], backgroundFolders: [], assetFolders: [], fontFolders: [] },
+        currentProjectId: undefined,
+        projectDir: '',
+        loadMaskDataUrl: vi.fn(),
+        maskDataUrls: {},
+      } as any
+
+      const composition = useMaskComposition({
+        editor,
+        imageElements: {},
+        maskFeatureEnabled: true,
+        isDraggingMask: ref(false),
+        stageScale: computed(() => 1),
+        editorMaskPreviewMaxEdge: 1200,
+        maskProxyMaxEdge: () => 1200,
+        activeMaskEditLayer: computed(() => undefined),
+        logCanvasLayerRenderState: vi.fn(),
+        maskedLayerImages: {},
+        maskedLayerRenderRevisions: {},
+        requestMaskedLayerDraw: vi.fn(),
+        maskPreviewUrls: {},
+        maskEditImage: ref(),
+        maskEditImageRevision: ref(0),
+      })
+
+      composition.scheduleMaskCompositeRefresh('mask-pulse:stroke', {
+        layerIds: [sourceLayer.id],
+        maskIds: [sourceLayer.mask!.id],
+      })
+      composition.recordMaskPointerActivity('move')
+      composition.recordMaskPointerActivity('move')
+
+      await vi.advanceTimersByTimeAsync(16)
+      expect(renderMaskedLayerImage).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.stubGlobal('requestAnimationFrame', originalRaf)
+      vi.stubGlobal('cancelAnimationFrame', originalCancelRaf)
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not let a full refresh cancel a pending target mask refresh', async () => {
+    vi.useFakeTimers()
+    const originalRaf = globalThis.requestAnimationFrame
+    const originalCancelRaf = globalThis.cancelAnimationFrame
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+      globalThis.setTimeout(() => callback(performance.now()), 16) as unknown as number)
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => globalThis.clearTimeout(id))
+    try {
+      const first = layer('layer-1')
+      const second = layer('layer-2')
+      const editor = {
+        view: 'editor',
+        document: {
+          canvas: {
+            width: 800,
+            height: 600,
+            backgroundColor: 'rgba(0,0,0,0)',
+            backgroundVisible: true,
+            backgroundMask: null,
+            effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
+          },
+          layers: [first, second],
+          groups: [],
+        },
+        library: { backgrounds: [], assets: [], fonts: [], backgroundFolders: [], assetFolders: [], fontFolders: [] },
+        currentProjectId: undefined,
+        projectDir: '',
+        loadMaskDataUrl: vi.fn(),
+        maskDataUrls: {},
+      } as any
+
+      const composition = useMaskComposition({
+        editor,
+        imageElements: {},
+        maskFeatureEnabled: true,
+        isDraggingMask: ref(false),
+        stageScale: computed(() => 1),
+        editorMaskPreviewMaxEdge: 1200,
+        maskProxyMaxEdge: () => 1200,
+        activeMaskEditLayer: computed(() => undefined),
+        logCanvasLayerRenderState: vi.fn(),
+        maskedLayerImages: {},
+        maskedLayerRenderRevisions: {},
+        requestMaskedLayerDraw: vi.fn(),
+        maskPreviewUrls: {},
+        maskEditImage: ref(),
+        maskEditImageRevision: ref(0),
+      })
+
+      composition.scheduleMaskCompositeRefresh('mask-pulse:stroke', {
+        layerIds: [first.id],
+        maskIds: [first.mask!.id],
+      })
+      composition.scheduleMaskCompositeRefresh('layer-mask-signature')
+
+      await vi.advanceTimersByTimeAsync(16)
+      expect(renderMaskedLayerImage).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(renderMaskedLayerImage).mock.calls[0][0].id).toBe(first.id)
+    } finally {
+      vi.stubGlobal('requestAnimationFrame', originalRaf)
+      vi.stubGlobal('cancelAnimationFrame', originalCancelRaf)
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not route background mask signatures through masked layer refreshes', async () => {
+    vi.useFakeTimers()
+    try {
+      const sourceLayer = layer('layer-1')
+      const editor = {
+        view: 'editor',
+        document: {
+          canvas: {
+            width: 800,
+            height: 600,
+            backgroundColor: 'rgba(0,0,0,0)',
+            backgroundVisible: true,
+            backgroundMask: mask('background-mask', 'background'),
+            effects: { brightness: 0, contrast: 0, saturation: 0, blur: 0 },
+          },
+          layers: [sourceLayer],
+          groups: [],
+        },
+        library: { backgrounds: [], assets: [], fonts: [], backgroundFolders: [], assetFolders: [], fontFolders: [] },
+        currentProjectId: undefined,
+        projectDir: '',
+        loadMaskDataUrl: vi.fn(async () => ''),
+        maskDataUrls: {},
+      } as any
+
+      const composition = useMaskComposition({
+        editor,
+        imageElements: {},
+        maskFeatureEnabled: true,
+        isDraggingMask: ref(false),
+        stageScale: computed(() => 1),
+        editorMaskPreviewMaxEdge: 1200,
+        maskProxyMaxEdge: () => 1200,
+        activeMaskEditLayer: computed(() => undefined),
+        logCanvasLayerRenderState: vi.fn(),
+        maskedLayerImages: {},
+        maskedLayerRenderRevisions: {},
+        requestMaskedLayerDraw: vi.fn(),
+        maskPreviewUrls: {},
+        maskEditImage: ref(),
+        maskEditImageRevision: ref(0),
+      })
+
+      composition.scheduleMaskCompositeRefresh('background-mask-signature')
+
+      await vi.advanceTimersByTimeAsync(180)
+      expect(renderMaskedLayerImage).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

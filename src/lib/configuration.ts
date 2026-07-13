@@ -94,6 +94,8 @@ export type AppConfiguration = {
     enabled: boolean
     usePixiPreview: boolean
     strokePreviewMinOpacity: number
+    interactiveRefreshDelayMs: number
+    pointerIdleGraceMs: number
   }
   export: {
     defaultScale: number
@@ -119,7 +121,7 @@ export const appConfiguration = {
     targetMaxBytes: numberValue('previews', 'target_max_bytes', 524288),
   },
   finder: {
-    managerHeightPx: numberValue('finder', 'manager_height_px', 360),
+    managerHeightPx: numberValue('finder', 'manager_height_px', 1080),
     compactHeightPx: numberValue('finder', 'compact_height_px', 300),
     handoutGridScale: numberValue('finder', 'handout_grid_scale', 2),
     backgroundGridScale: numberValue('finder', 'background_grid_scale', 2),
@@ -133,6 +135,8 @@ export const appConfiguration = {
     enabled: parsed.mask?.enabled !== false,
     usePixiPreview: parsed.mask?.use_pixi_preview !== false,
     strokePreviewMinOpacity: unitValue('mask', 'stroke_preview_min_opacity', 0.3),
+    interactiveRefreshDelayMs: numberValue('mask', 'interactive_refresh_delay_ms', 1000),
+    pointerIdleGraceMs: numberValue('mask', 'pointer_idle_grace_ms', 120),
   },
   export: {
     defaultScale: numberValue('export', 'default_scale', 1),
@@ -186,6 +190,11 @@ export function serializeConfigurationToml(config: AppConfiguration) {
     '# Minimum opacity used only for in-progress brush/eraser stroke previews while',
     '# editing a mask. Final mask pixels still use the configured brush/eraser value.',
     `stroke_preview_min_opacity = ${clamp(config.mask.strokePreviewMinOpacity, 0, 1)}`,
+    '# Delay secondary mask preview work after brush/eraser/shape edits. Target layer',
+    '# recomposition starts on the next frame.',
+    `interactive_refresh_delay_ms = ${Math.max(0, Math.round(config.mask.interactiveRefreshDelayMs))}`,
+    '# Keep secondary/full mask recomposition out of pointer down/drag hot paths.',
+    `pointer_idle_grace_ms = ${Math.max(0, Math.round(config.mask.pointerIdleGraceMs))}`,
     '',
     '[export]',
     `default_scale = ${config.export.defaultScale}`,
@@ -237,6 +246,8 @@ export function configurationFromToml(source: string): AppConfiguration {
       enabled: config.mask?.enabled !== false,
       usePixiPreview: config.mask?.use_pixi_preview !== false,
       strokePreviewMinOpacity: unitFrom('mask', 'stroke_preview_min_opacity', appConfiguration.mask.strokePreviewMinOpacity),
+      interactiveRefreshDelayMs: numberFrom('mask', 'interactive_refresh_delay_ms', appConfiguration.mask.interactiveRefreshDelayMs),
+      pointerIdleGraceMs: numberFrom('mask', 'pointer_idle_grace_ms', appConfiguration.mask.pointerIdleGraceMs),
     },
     export: {
       defaultScale: numberFrom('export', 'default_scale', appConfiguration.export.defaultScale),

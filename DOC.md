@@ -221,7 +221,7 @@ handout-generator/
 | `[previews]` | `thumbnail_max_edge_px` | `256` | 缩略图最大边长 |
 | | `thumbnail_quality` | `80` | 缩略图质量 |
 | | `target_max_bytes` | `524288` | 预览目标大小上限（512KB） |
-| `[finder]` | `manager_height_px` | `360` | 管理器高度 |
+| `[finder]` | `manager_height_px` | `1080` | 主界面 Handouts 文件管理器高度 |
 | | `compact_height_px` | `300` | 紧凑模式高度 |
 | | `handout_grid_scale` | `2` | 讲义网格缩放 |
 | | `background_grid_scale` | `2` | 背景网格缩放 |
@@ -231,6 +231,8 @@ handout-generator/
 | `[mask]` | `enabled` | `true` | 遮罩总开关 |
 | | `use_pixi_preview` | `true` | 使用 PixiJS 预览合成 |
 | | `stroke_preview_min_opacity` | `0.3` | mask brush/eraser 编辑中临时笔迹的最低可见透明度，不影响最终 mask 像素 |
+| | `interactive_refresh_delay_ms` | `1000` | brush/eraser/shape 后 secondary mask 工作（左栏预览、mask edit image、full refresh）的延迟；目标图层下一帧开始重合成 |
+| | `pointer_idle_grace_ms` | `120` | pointer down/drag 后 secondary/full mask 工作的空闲等待时间；不阻塞目标图层刷新或光标更新 |
 | `[export]` | `default_scale` | `1` | 默认导出缩放 |
 | | `min_scale` | `0.1` | 最小导出缩放 |
 | `[debug]` | `file_log_enabled` | `true` | 文件日志开关 |

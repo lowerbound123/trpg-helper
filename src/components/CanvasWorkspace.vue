@@ -65,6 +65,7 @@ const startCanvasPan = ctx.startCanvasPan as (event: PointerEvent) => void
 const moveCanvasPan = ctx.moveCanvasPan as (event: PointerEvent) => void
 const stopCanvasPan = ctx.stopCanvasPan as () => void
 const updateBrushCursorFromPointer = ctx.updateBrushCursorFromPointer as (event: PointerEvent) => void
+const recordMaskPointerActivity = ctx.recordMaskPointerActivity as (activity: 'down' | 'drag' | 'up' | 'leave' | 'move') => void
 const hideBrushCursor = ctx.hideBrushCursor as () => void
 const handleStagePointer = ctx.handleStagePointer as (event: KonvaEvent) => void
 const startSelectionBox = ctx.startSelectionBox as (event: KonvaEvent) => void
@@ -102,21 +103,25 @@ const fitEditorCanvas = ctx.fitEditorCanvas as (reason?: string) => void
 void stageFrameRef; void stageRef; void transformerRef
 
 function handleStageFramePointerDown(event: PointerEvent) {
+  recordMaskPointerActivity('down')
   startCanvasPan(event)
   updateBrushCursorFromPointer(event)
 }
 
 function handleStageFramePointerMove(event: PointerEvent) {
+  if (event.buttons > 0) recordMaskPointerActivity('drag')
   moveCanvasPan(event)
   updateBrushCursorFromPointer(event)
 }
 
 function handleStageFramePointerLeave() {
+  recordMaskPointerActivity('leave')
   stopCanvasPan()
   hideBrushCursor()
 }
 
 function handleStageFramePointerUp() {
+  recordMaskPointerActivity('up')
   stopCanvasPan()
 }
 

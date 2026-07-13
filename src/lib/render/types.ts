@@ -12,6 +12,7 @@ export type RenderMaskOptions = {
   maxMaskEdge?: number
   maxCompositeEdge?: number
   usePixiMaskPreview?: boolean
+  yieldToMainThread?: () => Promise<void>
 }
 
 export const PREVIEW_TARGET_BYTES = 512 * 1024

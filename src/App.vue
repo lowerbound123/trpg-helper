@@ -98,7 +98,12 @@ const finderRevision = reactive<Record<'background' | 'asset' | 'font', number>>
   font: 0,
 })
 const finderUploadConfig = { maxFileSize: appConfiguration.uploads.maxFileSize }
-const handoutFinderStyle = { '--finder-grid-scale': String(appConfiguration.finder.handoutGridScale) }
+const handoutFinderStyle = {
+  '--finder-grid-scale': String(appConfiguration.finder.handoutGridScale),
+  height: `${appConfiguration.finder.managerHeightPx}px`,
+  minHeight: `${appConfiguration.finder.managerHeightPx}px`,
+  maxHeight: `${appConfiguration.finder.managerHeightPx}px`,
+}
 const EDITOR_EFFECT_CACHE_MAX_EDGE = 768
 const EDITOR_MASK_PREVIEW_MAX_EDGE = 1200
 const maskFeatureEnabled = appConfiguration.mask.enabled
@@ -308,7 +313,11 @@ const {
   maskedBackgroundImage,
   refreshMaskPreviewUrls,
   refreshMaskEditImage,
+  refreshMaskedBackgroundImage,
   scheduleMaskCompositeRefresh,
+  scheduleMaskPreviewRefresh,
+  scheduleMaskEditImageRefresh,
+  recordMaskPointerActivity,
   cancelMaskCompositeRefresh,
 } = useMaskComposition({
   editor,
@@ -717,6 +726,7 @@ provide('canvas-context', {
   moveCanvasPan,
   stopCanvasPan,
   updateBrushCursorFromPointer,
+  recordMaskPointerActivity,
   hideBrushCursor,
   handleStagePointer,
   startSelectionBox,
@@ -1154,32 +1164,47 @@ watch(textLayerRenderSignature, () => {
 watch(layerEffectsSignature, (nextSignature, previousSignature) => {
   scheduleLayerEffectCacheRefresh(changedEffectLayerIds(nextSignature, previousSignature))
 })
-let maskSignatureHandledByPulse = ''
+const maskSignaturesHandledByPulse = new Set<string>()
+function rememberMaskSignatureHandledByPulse(signature: string) {
+  if (!signature) return
+  maskSignaturesHandledByPulse.add(signature)
+  while (maskSignaturesHandledByPulse.size > 24) {
+    const oldest = maskSignaturesHandledByPulse.values().next().value
+    if (!oldest) break
+    maskSignaturesHandledByPulse.delete(oldest)
+  }
+}
 watch(() => editor.maskChangePulse, (pulse) => {
   if (!pulse?.id) return
-  maskSignatureHandledByPulse = layerMaskRenderSignature.value
+  rememberMaskSignatureHandledByPulse(layerMaskRenderSignature.value)
   const maskIds = pulse.maskId ? [pulse.maskId] : undefined
   const layerIds = pulse.layerId ? [pulse.layerId] : undefined
   scheduleMaskCompositeRefresh(`mask-pulse:${pulse.reason}`, {
     layerIds,
     maskIds,
-    immediate: true,
+    interactive: true,
   })
-  void refreshMaskPreviewUrls(maskIds ? { maskIds } : undefined)
-  void refreshMaskEditImage()
+  scheduleMaskPreviewRefresh(maskIds ? { maskIds } : undefined, `mask-pulse:${pulse.reason}`)
+  scheduleMaskEditImageRefresh(`mask-pulse:${pulse.reason}`)
 }, { flush: 'post' })
 watch(layerMaskRenderSignature, () => {
-  if (layerMaskRenderSignature.value === maskSignatureHandledByPulse) return
-  scheduleMaskCompositeRefresh('layer-mask-signature')
-  void refreshMaskPreviewUrls()
-  void refreshMaskEditImage()
+  const signature = layerMaskRenderSignature.value
+  queueMicrotask(() => {
+    if (maskSignaturesHandledByPulse.has(signature)) {
+      maskSignaturesHandledByPulse.delete(signature)
+      return
+    }
+    scheduleMaskCompositeRefresh('layer-mask-signature')
+    scheduleMaskPreviewRefresh(undefined, 'layer-mask-signature')
+    scheduleMaskEditImageRefresh('layer-mask-signature')
+  })
 }, { flush: 'post' })
 watch(() => editor.maskEditTarget, () => {
   void refreshMaskEditImage()
   void updateTransformer()
 }, { deep: true })
 watch(backgroundMaskRenderSignature, () => {
-  scheduleMaskCompositeRefresh('background-mask-signature')
+  void refreshMaskedBackgroundImage()
 }, { flush: 'post' })
 watch(
   backgroundRenderSignature,

@@ -19,19 +19,28 @@ describe('configuration', () => {
   })
 
   it('loads app configuration defaults from configuration.toml', () => {
+    expect(appConfiguration.finder.managerHeightPx).toBe(1080)
     expect(appConfiguration.finder.handoutGridScale).toBe(2)
     expect(appConfiguration.finder.backgroundGridScale).toBe(2)
     expect(appConfiguration.editor.continuousEditCommitDelayMs).toBeGreaterThan(0)
     expect(appConfiguration.mask.enabled).toBe(true)
     expect(appConfiguration.mask.usePixiPreview).toBe(true)
     expect(appConfiguration.mask.strokePreviewMinOpacity).toBe(0.3)
+    expect(appConfiguration.mask.interactiveRefreshDelayMs).toBe(1000)
+    expect(appConfiguration.mask.pointerIdleGraceMs).toBe(120)
   })
 
   it('round-trips editable configuration fields', () => {
     const source = serializeConfigurationToml({
       ...appConfiguration,
       paths: { dataDir: './custom-data', logFile: './custom-log.txt' },
-      mask: { enabled: false, usePixiPreview: false, strokePreviewMinOpacity: 0.45 },
+      mask: {
+        enabled: false,
+        usePixiPreview: false,
+        strokePreviewMinOpacity: 0.45,
+        interactiveRefreshDelayMs: 800,
+        pointerIdleGraceMs: 90,
+      },
       export: { defaultScale: 2, minScale: 0.2 },
     })
     const parsed = configurationFromToml(source)
@@ -40,6 +49,8 @@ describe('configuration', () => {
     expect(parsed.mask.enabled).toBe(false)
     expect(parsed.mask.usePixiPreview).toBe(false)
     expect(parsed.mask.strokePreviewMinOpacity).toBe(0.45)
+    expect(parsed.mask.interactiveRefreshDelayMs).toBe(800)
+    expect(parsed.mask.pointerIdleGraceMs).toBe(90)
     expect(parsed.export.defaultScale).toBe(2)
     expect(parsed.export.minScale).toBe(0.2)
   })

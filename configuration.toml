@@ -14,7 +14,7 @@ thumbnail_quality = 80
 target_max_bytes = 524288
 
 [finder]
-manager_height_px = 360
+manager_height_px = 1080
 compact_height_px = 300
 handout_grid_scale = 2
 background_grid_scale = 2
@@ -34,6 +34,11 @@ use_pixi_preview = true
 # Minimum opacity used only for in-progress brush/eraser stroke previews while
 # editing a mask. Final mask pixels still use the configured brush/eraser value.
 stroke_preview_min_opacity = 0.3
+# Delay secondary mask preview work after brush/eraser/shape edits. Target layer
+# recomposition starts on the next frame.
+interactive_refresh_delay_ms = 1000
+# Keep secondary/full mask recomposition out of pointer down/drag hot paths.
+pointer_idle_grace_ms = 120
 
 [export]
 default_scale = 1

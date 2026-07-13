@@ -173,4 +173,20 @@ describe('mask runtime semantics', () => {
 
     expect(runtime.maskStateCount()).toBe(1)
   })
+
+  it('queues mask runtime operations and flushes them later', () => {
+    const runtime = new MaskGpuRuntime()
+    const sourceMask = mask()
+    const nextStroke = stroke({ id: 'pending-stroke', mode: 'eraser', eraserOpacity: 0.5 })
+
+    runtime.queueMaskRuntimeOperation(sourceMask, { id: nextStroke.id, kind: 'stroke', stroke: nextStroke }, sourceMask.version + 1)
+
+    expect(runtime.hasPendingMaskRuntimeOperations(sourceMask.id)).toBe(true)
+    expect(runtime.pendingMaskRuntimeOperationCount(sourceMask.id)).toBe(1)
+
+    runtime.flushMaskRuntimeOperations(sourceMask.id)
+
+    expect(runtime.hasPendingMaskRuntimeOperations(sourceMask.id)).toBe(false)
+    expect(runtime.pendingMaskRuntimeOperationCount(sourceMask.id)).toBe(0)
+  })
 })

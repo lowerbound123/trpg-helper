@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useEditorStore } from './editor'
 import { maskTransformFromLayer, matrixNearlyEqual } from '@/lib/mask-geometry'
+import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
 
 describe('editor multi-selection state', () => {
   beforeEach(() => {
@@ -60,6 +61,7 @@ describe('editor multi-selection state', () => {
   })
 
   it('records mask brush strokes as dirty tiles instead of replacing the whole mask image', async () => {
+    editorMaskGpuRuntime.disposeMissing([], [])
     const editor = useEditorStore()
     editor.addText()
     const layerId = editor.selectedLayerId!
@@ -90,9 +92,11 @@ describe('editor multi-selection state', () => {
       reason: 'stroke',
     })
     expect(editor.maskChangePulse.id).toBeGreaterThan(beforePulse.id)
+    expect(editorMaskGpuRuntime.hasPendingMaskRuntimeOperations(updated.mask!.id)).toBe(true)
   })
 
   it('records mask shape operations as single-channel mask edits', async () => {
+    editorMaskGpuRuntime.disposeMissing([], [])
     const editor = useEditorStore()
     editor.addText()
     const layerId = editor.selectedLayerId!
@@ -131,6 +135,7 @@ describe('editor multi-selection state', () => {
       reason: 'shape',
     })
     expect(editor.maskChangePulse.id).toBeGreaterThan(beforePulse.id)
+    expect(editorMaskGpuRuntime.hasPendingMaskRuntimeOperations(updated.mask!.id)).toBe(true)
   })
 
   it('deletes all selected layers and clears selection', () => {

@@ -61,6 +61,8 @@ function normalizeDraft() {
   draft.editor.maxSnapCandidates = normalizeNumber(draft.editor.maxSnapCandidates, appConfiguration.editor.maxSnapCandidates, 0)
   draft.editor.continuousEditCommitDelayMs = normalizeNumber(draft.editor.continuousEditCommitDelayMs, appConfiguration.editor.continuousEditCommitDelayMs, 0)
   draft.mask.strokePreviewMinOpacity = Math.min(1, normalizeNumber(draft.mask.strokePreviewMinOpacity, appConfiguration.mask.strokePreviewMinOpacity, 0))
+  draft.mask.interactiveRefreshDelayMs = normalizeNumber(draft.mask.interactiveRefreshDelayMs, appConfiguration.mask.interactiveRefreshDelayMs, 0)
+  draft.mask.pointerIdleGraceMs = normalizeNumber(draft.mask.pointerIdleGraceMs, appConfiguration.mask.pointerIdleGraceMs, 0)
   draft.export.defaultScale = normalizeNumber(draft.export.defaultScale, appConfiguration.export.defaultScale, 0.1)
   draft.export.minScale = normalizeNumber(draft.export.minScale, appConfiguration.export.minScale, 0.01)
 }
@@ -201,6 +203,26 @@ watch(open, (value) => {
               min="0"
               max="1"
               step="0.05"
+              :disabled="!draft.mask.enabled"
+            />
+          </label>
+          <label>
+            <span>Secondary refresh delay ms</span>
+            <Input
+              v-model.number="draft.mask.interactiveRefreshDelayMs"
+              type="number"
+              min="0"
+              step="50"
+              :disabled="!draft.mask.enabled"
+            />
+          </label>
+          <label>
+            <span>Secondary pointer idle grace ms</span>
+            <Input
+              v-model.number="draft.mask.pointerIdleGraceMs"
+              type="number"
+              min="0"
+              step="10"
               :disabled="!draft.mask.enabled"
             />
           </label>

@@ -40,6 +40,12 @@ type MaskRuntimeState = MaskRuntimeHandle & {
   contentKey: string
 }
 
+type PendingMaskRuntimeOperation = {
+  mask: LayerMask
+  operation: MaskEditOperation
+  nextVersion: number
+}
+
 export function maskStrokeGrayValue(stroke: PaintStroke) {
   return maskStrokeTargetValue(stroke)
 }
@@ -78,6 +84,7 @@ export function maskLayerCompositeSignature(layer: HandoutLayer, zoomBucket: str
 export class MaskGpuRuntime {
   private readonly masks = new Map<string, MaskRuntimeState>()
   private readonly layerOutputs = new Map<string, HTMLCanvasElement>()
+  private readonly pendingOperations = new Map<string, PendingMaskRuntimeOperation[]>()
   private readonly maxMaskStates = 128
   private readonly maxLayerOutputs = 64
 
@@ -214,6 +221,53 @@ export class MaskGpuRuntime {
       height: state.height,
       canvas: state.canvas,
     }
+  }
+
+  queueMaskRuntimeOperation(mask: LayerMask, operation: MaskEditOperation, nextVersion: number) {
+    const current = this.pendingOperations.get(mask.id) ?? []
+    current.push({
+      mask: {
+        ...mask,
+        matrix: [...mask.matrix],
+        tiles: { ...mask.tiles },
+        strokes: [...mask.strokes],
+        shapes: [...(mask.shapes ?? [])],
+        operations: [...(mask.operations ?? [])],
+      },
+      operation,
+      nextVersion,
+    })
+    this.pendingOperations.set(mask.id, current)
+    void appendDebugLog('mask', 'mask-runtime-operation-queued', {
+      maskId: mask.id,
+      operationId: operation.id,
+      kind: operation.kind,
+      nextVersion,
+      pendingCount: current.length,
+    })
+  }
+
+  flushMaskRuntimeOperations(maskId: string, currentMask?: LayerMask) {
+    const pending = this.pendingOperations.get(maskId)
+    if (!pending?.length) return
+    const latestMask = currentMask ?? pending.at(-1)?.mask
+    if (latestMask) {
+      this.ensureMaskState(latestMask)
+    }
+    this.pendingOperations.delete(maskId)
+    void appendDebugLog('mask', 'mask-runtime-operations-flushed', {
+      maskId,
+      count: pending.length,
+      version: currentMask?.version ?? pending.at(-1)?.nextVersion,
+    })
+  }
+
+  hasPendingMaskRuntimeOperations(maskId: string) {
+    return (this.pendingOperations.get(maskId)?.length ?? 0) > 0
+  }
+
+  pendingMaskRuntimeOperationCount(maskId: string) {
+    return this.pendingOperations.get(maskId)?.length ?? 0
   }
 
   hasMaskSource(mask: LayerMask, sourceKey: string) {
@@ -367,6 +421,9 @@ export class MaskGpuRuntime {
     }
     for (const key of this.layerOutputs.keys()) {
       if (!layers.has(key)) this.layerOutputs.delete(key)
+    }
+    for (const key of this.pendingOperations.keys()) {
+      if (!masks.has(key)) this.pendingOperations.delete(key)
     }
   }
 

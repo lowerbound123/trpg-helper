@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, FlipHorizontal, Italic, Strikethrough, Trash2, Underline } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import ExportPanel from '@/components/editor/ExportPanel.vue'
+import InspectorNumberSlider from '@/components/editor/InspectorNumberSlider.vue'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { appConfiguration } from '@/lib/configuration'
@@ -20,7 +20,7 @@ const exportScale = defineModel<number>('exportScale', { required: true })
 const exportFormat = defineModel<'png' | 'jpeg' | 'webp'>('exportFormat', { required: true })
 const exportQuality = defineModel<number>('exportQuality', { required: true })
 
-defineProps<{
+const props = defineProps<{
   isExporting?: boolean
   exportLog?: string
   exportProgress?: number
@@ -32,6 +32,8 @@ defineEmits<{
 }>()
 
 const editor = useEditorStore()
+type InspectorTab = 'inspect' | 'brush' | 'document'
+const activeInspectorTab = ref<InspectorTab>('inspect')
 const activeLayer = computed(() => editor.selectedLayer)
 const activeTextLayer = computed(() => isTextLayer(activeLayer.value) ? activeLayer.value : undefined)
 const selectedLayers = computed(() => editor.selectedLayers)
@@ -87,14 +89,30 @@ const commonBrushOpacity = computed(() => allSelectedPaint.value ? commonValue(s
 const commonEraserWidth = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.eraserWidth), undefined) : editor.toolSettings.eraserWidth)
 const commonEraserOpacity = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.eraserOpacity), undefined) : editor.toolSettings.eraserOpacity)
 const commonBrushTension = computed(() => allSelectedPaint.value ? commonValue(selectedPaintLayers.value.map((layer) => layer.brushTension), undefined) : editor.toolSettings.brushTension)
+const commonX = computed(() => commonLayerValue((layer) => layer.x, undefined))
+const commonY = computed(() => commonLayerValue((layer) => layer.y, undefined))
 const commonWidth = computed(() => commonLayerValue((layer) => layer.width, undefined))
+const commonHeight = computed(() => commonLayerValue((layer) => layer.height, undefined))
 const commonRotation = computed(() => commonLayerValue((layer) => layer.rotation, undefined))
+const commonOpacity = computed(() => commonLayerValue((layer) => layer.opacity, undefined))
 const commonFlipX = computed(() => commonLayerValue((layer) => layer.flipX, undefined))
-const brushOpacityPercent = computed(() => Math.round((commonBrushOpacity.value ?? editor.toolSettings.brushOpacity) * 100))
-const eraserOpacityPercent = computed(() => Math.round((commonEraserOpacity.value ?? editor.toolSettings.eraserOpacity) * 100))
-const brushOpacityLabel = computed(() => commonBrushOpacity.value === undefined ? 'Mixed' : `${Math.round(commonBrushOpacity.value * 100)}%`)
-const eraserOpacityLabel = computed(() => commonEraserOpacity.value === undefined ? 'Mixed' : `${Math.round(commonEraserOpacity.value * 100)}%`)
+const commonLayerBlur = computed(() => commonLayerValue((layer) => layer.effects.blur, undefined))
+const commonLayerBrightness = computed(() => commonLayerValue((layer) => layer.effects.brightness, undefined))
+const commonLayerContrast = computed(() => commonLayerValue((layer) => layer.effects.contrast, undefined))
+const commonLayerSaturation = computed(() => commonLayerValue((layer) => layer.effects.saturation, undefined))
+const brushOpacityPercent = computed(() => commonBrushOpacity.value === undefined ? undefined : Math.round(commonBrushOpacity.value * 100))
+const eraserOpacityPercent = computed(() => commonEraserOpacity.value === undefined ? undefined : Math.round(commonEraserOpacity.value * 100))
 const continuousEditTimers = new Map<string, number>()
+
+watch(() => props.activeTool, (tool) => {
+  if (tool === 'brush' || tool === 'eraser') {
+    activeInspectorTab.value = 'brush'
+    return
+  }
+  if (tool === 'select' || tool === 'polygon') {
+    activeInspectorTab.value = 'inspect'
+  }
+}, { immediate: true })
 
 function scheduleContinuousEditEnd(key: string) {
   const existing = continuousEditTimers.get(key)
@@ -117,16 +135,12 @@ function patchBrushSettings(patch: Record<string, unknown>) {
   else editor.patchToolSettings(patch as any)
 }
 
-function percentSliderValue(value: number[] | undefined, fallback: number) {
-  return Math.max(0, Math.min(100, sliderValue(value, fallback)))
+function patchBrushOpacitySlider(value: number) {
+  patchBrushSettings({ brushOpacity: value / 100 })
 }
 
-function patchBrushOpacitySlider(value: number[] | undefined) {
-  patchBrushSettings({ brushOpacity: percentSliderValue(value, brushOpacityPercent.value) / 100 })
-}
-
-function patchEraserOpacitySlider(value: number[] | undefined) {
-  patchBrushSettings({ eraserOpacity: percentSliderValue(value, eraserOpacityPercent.value) / 100 })
+function patchEraserOpacitySlider(value: number) {
+  patchBrushSettings({ eraserOpacity: value / 100 })
 }
 
 onBeforeUnmount(() => {
@@ -155,64 +169,60 @@ function patchTextDecoration(kind: 'underline' | 'strikethrough', value: boolean
   editor.patchSelectedLayers({ [kind]: value })
 }
 
-function sliderValue(value: number[] | undefined, fallback = 0) {
-  return value?.[0] ?? fallback
-}
-
-function patchOpacity(value: number[] | undefined) {
+function patchOpacity(value: number) {
   const key = 'layer-opacity'
-  editor.patchSelectedLayersContinuous(key, { opacity: sliderValue(value, 100) / 100 })
+  editor.patchSelectedLayersContinuous(key, { opacity: value / 100 })
   scheduleContinuousEditEnd(key)
 }
 
-function patchEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number[] | undefined) {
+function patchEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number) {
   const key = `layer-effect-${kind}`
-  editor.patchSelectedLayerEffectContinuous(key, kind, sliderValue(value))
+  editor.patchSelectedLayerEffectContinuous(key, kind, value)
   scheduleContinuousEditEnd(key)
 }
 
-function patchBlur(value: number[] | undefined) {
+function patchBlur(value: number) {
   patchEffect('blur', value)
 }
 
-function patchBrightness(value: number[] | undefined) {
+function patchBrightness(value: number) {
   patchEffect('brightness', value)
 }
 
-function patchContrast(value: number[] | undefined) {
+function patchContrast(value: number) {
   patchEffect('contrast', value)
 }
 
-function patchSaturation(value: number[] | undefined) {
+function patchSaturation(value: number) {
   patchEffect('saturation', value)
 }
 
-function patchDocumentEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number[] | undefined) {
+function patchDocumentEffect(kind: 'blur' | 'brightness' | 'contrast' | 'saturation', value: number) {
   const key = `document-effect-${kind}`
-  editor.patchCanvasEffectContinuous(key, kind, sliderValue(value))
+  editor.patchCanvasEffectContinuous(key, kind, value)
   scheduleContinuousEditEnd(key)
 }
 
-function patchDocumentBlur(value: number[] | undefined) {
+function patchDocumentBlur(value: number) {
   patchDocumentEffect('blur', value)
 }
 
-function patchDocumentBrightness(value: number[] | undefined) {
+function patchDocumentBrightness(value: number) {
   patchDocumentEffect('brightness', value)
 }
 
-function patchDocumentContrast(value: number[] | undefined) {
+function patchDocumentContrast(value: number) {
   patchDocumentEffect('contrast', value)
 }
 
-function patchDocumentSaturation(value: number[] | undefined) {
+function patchDocumentSaturation(value: number) {
   patchDocumentEffect('saturation', value)
 }
 </script>
 
 <template>
   <aside class="right-rail">
-    <Tabs default-value="inspect" class="rail-tabs">
+    <Tabs v-model="activeInspectorTab" default-value="inspect" class="rail-tabs">
       <TabsList class="grid grid-cols-3">
         <TabsTrigger value="inspect">Inspect</TabsTrigger>
         <TabsTrigger value="brush">Brush</TabsTrigger>
@@ -229,31 +239,11 @@ function patchDocumentSaturation(value: number[] | undefined) {
             <Input :model-value="activeLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
           </label>
           <div class="transform-grid">
-            <label>
-              X
-              <Input type="number" :model-value="activeLayer.x" @update:model-value="(value) => editor.patchSelectedLayer({ x: Number(value) || 0 })" />
-            </label>
-            <label>
-              Y
-              <Input type="number" :model-value="activeLayer.y" @update:model-value="(value) => editor.patchSelectedLayer({ y: Number(value) || 0 })" />
-            </label>
-            <label>
-              Rotation
-              <Input
-                type="number"
-                :model-value="commonRotation ?? ''"
-                placeholder="Mixed"
-                @update:model-value="(value) => editor.patchSelectedLayers({ rotation: Number(value) || 0 })"
-              />
-            </label>
-            <label>
-              Width
-              <Input type="number" :model-value="activeLayer.width" @update:model-value="(value) => editor.patchSelectedLayer({ width: Number(value) || 1 })" />
-            </label>
-            <label>
-              Height
-              <Input type="number" :model-value="activeLayer.height" @update:model-value="(value) => editor.patchSelectedLayer({ height: Number(value) || 1 })" />
-            </label>
+            <InspectorNumberSlider label="X" :model-value="commonX" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ x: value })" />
+            <InspectorNumberSlider label="Y" :model-value="commonY" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ y: value })" />
+            <InspectorNumberSlider label="Rotation" :model-value="commonRotation" :min="0" :max="359" :step="1" unit="°" @update:model-value="(value) => editor.patchSelectedLayers({ rotation: value })" />
+            <InspectorNumberSlider label="Width" :model-value="commonWidth" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
+            <InspectorNumberSlider label="Height" :model-value="commonHeight" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ height: value })" />
             <label>
               Flip
               <Button
@@ -268,16 +258,16 @@ function patchDocumentSaturation(value: number[] | undefined) {
               </Button>
             </label>
           </div>
-          <label>
-            Opacity {{ Math.round(activeLayer.opacity * 100) }}%
-              <Slider
-                :model-value="[activeLayer.opacity * 100]"
-                :max="100"
-                :step="1"
-                @update:model-value="patchOpacity"
-                @value-commit="endContinuousEdit('layer-opacity')"
-              />
-          </label>
+          <InspectorNumberSlider
+            label="Opacity"
+            :model-value="commonOpacity === undefined ? undefined : Math.round(commonOpacity * 100)"
+            :min="0"
+            :max="100"
+            :step="1"
+            unit="%"
+            @update:model-value="patchOpacity"
+            @value-commit="endContinuousEdit('layer-opacity')"
+          />
           <div class="appearance-row">
             <label class="blend-control">
               Blend mode
@@ -317,37 +307,17 @@ function patchDocumentSaturation(value: number[] | undefined) {
               Text
               <Textarea :model-value="activeTextLayer?.text" @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })" />
             </label>
-            <div class="two-col">
-              <label>
-                Font size
-                <Input
-                  type="number"
-                  :model-value="commonFontSize ?? ''"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => editor.patchSelectedLayers({ fontSize: Number(value) || 1 })"
-                />
-              </label>
-              <label>
-                Color
-                <Input
-                  :type="commonFill ? 'color' : 'text'"
-                  :model-value="commonFill ?? ''"
-                  placeholder="Mixed"
-                  @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
-                />
-              </label>
-            </div>
+            <InspectorNumberSlider label="Font size" :model-value="commonFontSize" :min="1" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ fontSize: value })" />
             <label>
-              Line height
+              Color
               <Input
-                type="number"
-                step="0.05"
-                min="0.5"
-                :model-value="commonLineHeight ?? ''"
+                :type="commonFill ? 'color' : 'text'"
+                :model-value="commonFill ?? ''"
                 placeholder="Mixed"
-                @update:model-value="(value) => editor.patchSelectedLayers({ lineHeight: Math.max(0.5, Number(value) || 1) })"
+                @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
               />
             </label>
+            <InspectorNumberSlider label="Line height" :model-value="commonLineHeight" :min="0.5" :max="3" :step="0.05" @update:model-value="(value) => editor.patchSelectedLayers({ lineHeight: value })" />
             <div class="icon-button-grid">
               <Button
                 size="icon"
@@ -429,65 +399,23 @@ function patchDocumentSaturation(value: number[] | undefined) {
             </label>
           </template>
           <template v-if="allSelectedShapes">
-            <label v-if="allSelectedLines">
-              Line length
-              <Input
-                type="number"
-                min="12"
-                step="1"
-                :model-value="commonWidth ?? ''"
-                placeholder="Mixed"
-                @update:model-value="(value) => editor.patchSelectedLayers({ width: Math.max(12, Number(value) || 12) })"
-              />
-            </label>
-            <label v-if="allSelectedRoundRects">
-              Corner radius
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                :model-value="commonShapeCornerRadius ?? ''"
-                placeholder="Mixed"
-                @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: Math.max(0, Number(value) || 0) })"
-              />
-            </label>
-            <label>
-              Stroke width
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                :model-value="commonShapeStrokeWidth ?? ''"
-                placeholder="Mixed"
-                @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: Math.max(0, Number(value) || 0) })"
-              />
-            </label>
+            <InspectorNumberSlider v-if="allSelectedLines" label="Line length" :model-value="commonWidth" :min="12" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
+            <InspectorNumberSlider v-if="allSelectedRoundRects" label="Corner radius" :model-value="commonShapeCornerRadius" :min="0" :max="4096" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: value })" />
+            <InspectorNumberSlider label="Stroke width" :model-value="commonShapeStrokeWidth" :min="0" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: value })" />
             <template v-if="allSelectedLines">
-              <div class="two-col">
-                <label>
-                  Line style
-                  <Select :model-value="commonLineStyle" @update:model-value="(value) => editor.patchSelectedLayers({ lineStyle: value as any })">
-                    <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="solid">Solid</SelectItem>
-                      <SelectItem value="dashed">Dashed</SelectItem>
-                      <SelectItem value="dotted">Dotted</SelectItem>
-                      <SelectItem value="double">Double</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
-                <label>
-                  Arrow size
-                  <Input
-                    type="number"
-                    min="0.25"
-                    step="0.25"
-                    :model-value="commonLineArrowSize ?? ''"
-                    placeholder="Mixed"
-                    @update:model-value="(value) => editor.patchSelectedLayers({ lineArrowSize: Math.max(0.25, Number(value) || 1) })"
-                  />
-                </label>
-              </div>
+              <label>
+                Line style
+                <Select :model-value="commonLineStyle" @update:model-value="(value) => editor.patchSelectedLayers({ lineStyle: value as any })">
+                  <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="solid">Solid</SelectItem>
+                    <SelectItem value="dashed">Dashed</SelectItem>
+                    <SelectItem value="dotted">Dotted</SelectItem>
+                    <SelectItem value="double">Double</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <InspectorNumberSlider label="Arrow size" :model-value="commonLineArrowSize" :min="0.25" :max="16" :step="0.25" @update:model-value="(value) => editor.patchSelectedLayers({ lineArrowSize: value })" />
               <div class="two-col">
                 <label>
                   Start arrow
@@ -520,49 +448,10 @@ function patchDocumentSaturation(value: number[] | undefined) {
           </template>
           <Separator />
           <div class="effect-grid">
-            <label>
-              Blur {{ activeLayer.effects.blur }}
-              <Slider
-                :model-value="[activeLayer.effects.blur]"
-                :max="40"
-                :step="1"
-                @update:model-value="patchBlur"
-                @value-commit="endContinuousEdit('layer-effect-blur')"
-              />
-            </label>
-            <label>
-              Brightness {{ activeLayer.effects.brightness }}%
-              <Slider
-                :model-value="[activeLayer.effects.brightness]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="patchBrightness"
-                @value-commit="endContinuousEdit('layer-effect-brightness')"
-              />
-            </label>
-            <label>
-              Contrast {{ activeLayer.effects.contrast }}%
-              <Slider
-                :model-value="[activeLayer.effects.contrast]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="patchContrast"
-                @value-commit="endContinuousEdit('layer-effect-contrast')"
-              />
-            </label>
-            <label>
-              Saturation {{ activeLayer.effects.saturation }}%
-              <Slider
-                :model-value="[activeLayer.effects.saturation]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="patchSaturation"
-                @value-commit="endContinuousEdit('layer-effect-saturation')"
-              />
-            </label>
+            <InspectorNumberSlider label="Blur" :model-value="commonLayerBlur" :min="0" :max="40" :step="1" @update:model-value="patchBlur" @value-commit="endContinuousEdit('layer-effect-blur')" />
+            <InspectorNumberSlider label="Brightness" :model-value="commonLayerBrightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchBrightness" @value-commit="endContinuousEdit('layer-effect-brightness')" />
+            <InspectorNumberSlider label="Contrast" :model-value="commonLayerContrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchContrast" @value-commit="endContinuousEdit('layer-effect-contrast')" />
+            <InspectorNumberSlider label="Saturation" :model-value="commonLayerSaturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchSaturation" @value-commit="endContinuousEdit('layer-effect-saturation')" />
           </div>
           <div class="danger-row">
             <Button variant="destructive" @click="deleteLayer">
@@ -598,62 +487,11 @@ function patchDocumentSaturation(value: number[] | undefined) {
               @update:model-value="(value) => patchBrushSettings({ brushColor: String(value) })"
             />
           </label>
-          <div class="two-col">
-            <label>
-              Brush width
-              <Input
-                type="number"
-                min="1"
-                step="1"
-                :model-value="commonBrushWidth ?? ''"
-                placeholder="Mixed"
-                @update:model-value="(value) => patchBrushSettings({ brushWidth: Math.max(1, Number(value) || 1) })"
-              />
-            </label>
-            <label>
-              Eraser width
-              <Input
-                type="number"
-                min="1"
-                step="1"
-                :model-value="commonEraserWidth ?? ''"
-                placeholder="Mixed"
-                @update:model-value="(value) => patchBrushSettings({ eraserWidth: Math.max(1, Number(value) || 1) })"
-              />
-            </label>
-          </div>
-          <label>
-            Tension
-            <Input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              :model-value="commonBrushTension ?? ''"
-              placeholder="Mixed"
-              @update:model-value="(value) => patchBrushSettings({ brushTension: Math.max(0, Math.min(1, Number(value) || 0)) })"
-            />
-          </label>
-          <label>
-            Brush opacity {{ brushOpacityLabel }}
-            <Slider
-              :model-value="[brushOpacityPercent]"
-              :min="0"
-              :max="100"
-              :step="1"
-              @update:model-value="patchBrushOpacitySlider"
-            />
-          </label>
-          <label>
-            Eraser opacity {{ eraserOpacityLabel }}
-            <Slider
-              :model-value="[eraserOpacityPercent]"
-              :min="0"
-              :max="100"
-              :step="1"
-              @update:model-value="patchEraserOpacitySlider"
-            />
-          </label>
+          <InspectorNumberSlider label="Brush width" :model-value="commonBrushWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ brushWidth: value })" />
+          <InspectorNumberSlider label="Eraser width" :model-value="commonEraserWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ eraserWidth: value })" />
+          <InspectorNumberSlider label="Tension" :model-value="commonBrushTension" :min="0" :max="1" :step="0.05" @update:model-value="(value) => patchBrushSettings({ brushTension: value })" />
+          <InspectorNumberSlider label="Brush opacity" :model-value="brushOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchBrushOpacitySlider" />
+          <InspectorNumberSlider label="Eraser opacity" :model-value="eraserOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchEraserOpacitySlider" />
           <div class="document-summary">
             <span>Strokes</span>
             <strong>{{ selectedPaintLayers.reduce((sum, layer) => sum + layer.strokes.length, 0) }}</strong>
@@ -667,24 +505,8 @@ function patchDocumentSaturation(value: number[] | undefined) {
             Title
             <Input :model-value="editor.document.title" @update:model-value="(value) => editor.renameDocument(String(value))" />
           </label>
-          <div class="two-col">
-            <label>
-              Width
-              <Input
-                type="number"
-                :model-value="editor.document.canvas.width"
-                @update:model-value="(value) => editor.patchCanvas({ width: Number(value) || 1 })"
-              />
-            </label>
-            <label>
-              Height
-              <Input
-                type="number"
-                :model-value="editor.document.canvas.height"
-                @update:model-value="(value) => editor.patchCanvas({ height: Number(value) || 1 })"
-              />
-            </label>
-          </div>
+          <InspectorNumberSlider label="Width" :model-value="editor.document.canvas.width" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ width: value })" />
+          <InspectorNumberSlider label="Height" :model-value="editor.document.canvas.height" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ height: value })" />
           <div class="document-summary">
             <span>Background</span>
             <strong>{{ backgroundAsset?.name || 'Transparent canvas' }}</strong>
@@ -695,49 +517,10 @@ function patchDocumentSaturation(value: number[] | undefined) {
           </div>
           <Separator />
           <div class="effect-grid">
-            <label>
-              Document blur {{ editor.document.canvas.effects.blur }}
-              <Slider
-                :model-value="[editor.document.canvas.effects.blur]"
-                :max="40"
-                :step="1"
-                @update:model-value="patchDocumentBlur"
-                @value-commit="endContinuousEdit('document-effect-blur')"
-              />
-            </label>
-            <label>
-              Document brightness {{ editor.document.canvas.effects.brightness }}%
-              <Slider
-                :model-value="[editor.document.canvas.effects.brightness]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="patchDocumentBrightness"
-                @value-commit="endContinuousEdit('document-effect-brightness')"
-              />
-            </label>
-            <label>
-              Document contrast {{ editor.document.canvas.effects.contrast }}%
-              <Slider
-                :model-value="[editor.document.canvas.effects.contrast]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="patchDocumentContrast"
-                @value-commit="endContinuousEdit('document-effect-contrast')"
-              />
-            </label>
-            <label>
-              Document saturation {{ editor.document.canvas.effects.saturation }}%
-              <Slider
-                :model-value="[editor.document.canvas.effects.saturation]"
-                :min="-100"
-                :max="100"
-                :step="1"
-                @update:model-value="patchDocumentSaturation"
-                @value-commit="endContinuousEdit('document-effect-saturation')"
-              />
-            </label>
+            <InspectorNumberSlider label="Document blur" :model-value="editor.document.canvas.effects.blur" :min="0" :max="40" :step="1" @update:model-value="patchDocumentBlur" @value-commit="endContinuousEdit('document-effect-blur')" />
+            <InspectorNumberSlider label="Document brightness" :model-value="editor.document.canvas.effects.brightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentBrightness" @value-commit="endContinuousEdit('document-effect-brightness')" />
+            <InspectorNumberSlider label="Document contrast" :model-value="editor.document.canvas.effects.contrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentContrast" @value-commit="endContinuousEdit('document-effect-contrast')" />
+            <InspectorNumberSlider label="Document saturation" :model-value="editor.document.canvas.effects.saturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentSaturation" @value-commit="endContinuousEdit('document-effect-saturation')" />
           </div>
           <Separator />
           <ExportPanel

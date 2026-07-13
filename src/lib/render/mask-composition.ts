@@ -163,8 +163,11 @@ async function maskedLayerImageNode(
       return new Konva.Image(maskedImageConfig(layer, masked))
     }
     await seedRuntimeMask(layer.mask, options)
+    await options?.yieldToMainThread?.()
     const fullSource = await renderLayerSourceCanvas(layer, library, cache)
+    await options?.yieldToMainThread?.()
     const { canvas: source, scale } = downsampleCanvasForComposite(fullSource, options?.maxCompositeEdge, layer.id)
+    await options?.yieldToMainThread?.()
     const masked = await measureSpeed('mask-layer-compose', {
       layerId: layer.id,
       maskId: layer.mask.id,
@@ -204,7 +207,9 @@ export async function renderMaskedLayerImage(
       hasProvidedMaskDataUrl: Boolean(options?.maskDataUrls?.[layer.mask.id]),
       providedMaskDataUrlLength: options?.maskDataUrls?.[layer.mask.id]?.length || 0,
     })
+    await options?.yieldToMainThread?.()
     const fullSource = await renderLayerSourceCanvas(layer, library, cache)
+    await options?.yieldToMainThread?.()
     void appendDebugLog('mask', 'render-masked-layer-image-loaded', {
       layerId: layer.id,
       maskId: layer.mask.id,
@@ -212,6 +217,7 @@ export async function renderMaskedLayerImage(
       maskRuntime: editorMaskGpuRuntime.ensureMask(layer.mask),
     })
     const { canvas: source, scale } = downsampleCanvasForComposite(fullSource, options?.maxCompositeEdge, layer.id)
+    await options?.yieldToMainThread?.()
     const result = await measureSpeed('mask-layer-compose', {
       layerId: layer.id,
       maskId: layer.mask.id,

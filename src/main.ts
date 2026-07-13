@@ -17,4 +17,12 @@ app.config.warnHandler = (msg, _instance, _trace) => {
   void appendDebugLog('app', 'vue-warning', { message: String(msg) })
 }
 
+app.config.errorHandler = (error, instance, info) => {
+  const normalized = error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : { message: String(error) }
+  const component = instance?.$options.name ?? instance?.$options.__name ?? 'anonymous'
+  void appendDebugLog('app', 'vue-error', { ...normalized, component, info })
+}
+
 app.use(createPinia()).use(VueKonva).use(VueFinderPlugin, { i18n: {}, locale: 'zhCN' }).mount('#app')

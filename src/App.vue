@@ -8,6 +8,7 @@ import BootSplash from '@/components/BootSplash.vue'
 import EditorTopBar from '@/components/EditorTopBar.vue'
 import ManagerShell from '@/components/ManagerShell.vue'
 import TokenWorkspace from '@/components/token/TokenWorkspace.vue'
+import { tokenEditorContextKey } from '@/components/token/token-editor-context'
 import LeftRail from '@/components/LeftRail.vue'
 import CanvasWorkspace from '@/components/CanvasWorkspace.vue'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -711,15 +712,15 @@ provide('left-rail-context', {
   deleteLayer,
   toggleBackgroundVisibility,
 })
-provide('token-editor-context', {
+provide(tokenEditorContextKey, {
   finderRevision,
-  finderUploadConfig,
-  finderDrivers,
-  tokenAssetContextMenuItems,
-  finderFeaturesForKind,
-  handleFinderPathChange,
-  handleDirectFinderDrop,
-  handleDirectFinderDragover,
+  uploadConfig: finderUploadConfig,
+  assetDriver: finderDrivers.value.asset,
+  assetFeatures: finderFeaturesForKind('asset'),
+  assetContextMenuItems: tokenAssetContextMenuItems.value,
+  onPathChange: (path) => handleFinderPathChange('asset', path),
+  onDrop: (event) => handleDirectFinderDrop('asset', event),
+  onDragover: (event) => handleDirectFinderDragover('asset', event),
 })
 provide('canvas-context', {
   stageFrameRef,

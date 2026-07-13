@@ -1,9 +1,8 @@
-use image::{ExtendedColorType, ImageEncoder, RgbaImage, codecs::png::PngEncoder};
-use jpegxl_rs::encode::{EncoderFrame, EncoderSpeed};
-use jpegxl_sys::encoder::encode::JxlEncoderFrameSettingId;
-use mozjpeg_rs::{Encoder as JpegEncoder, Preset, Subsampling};
-use oxipng::{Deflater, Options, StripChunks, ZopfliOptions, optimize_from_memory};
+use image::RgbaImage;
 
+use crate::services::image_encoding::{
+    ImageEncodingContext, ImageEncodingOptions, WebpEncodingProfile, encode_rgba_image,
+};
 use crate::token::{configuration::ExportConfig, types::TokenParams};
 
 pub fn encode_image(
@@ -11,144 +10,42 @@ pub fn encode_image(
     params: &TokenParams,
     config: &ExportConfig,
 ) -> Result<Vec<u8>, String> {
-    match params.export_format.as_str() {
-        "png" => encode_png(image, params),
-        "jpg" | "jpeg" => encode_jpeg(image, params, config),
-        "webp" => encode_webp(image, params, config),
-        "jxl" => encode_jxl(image, params),
-        _ => Err("导出格式仅支持 png、jpg、webp 或 jxl".into()),
-    }
-}
-
-fn encode_png(image: &RgbaImage, params: &TokenParams) -> Result<Vec<u8>, String> {
-    let mut initial = Vec::new();
-    PngEncoder::new(&mut initial)
-        .write_image(
-            image.as_raw(),
-            image.width(),
-            image.height(),
-            ExtendedColorType::Rgba8,
-        )
-        .map_err(|error| format!("PNG 初始编码失败: {error}"))?;
-    let mut options = Options::from_preset(params.png_optimization_level);
-    options.optimize_alpha = params.png_optimize_alpha;
-    options.strip = if params.png_preserve_metadata {
-        StripChunks::None
-    } else {
-        StripChunks::Safe
+    let options = ImageEncodingOptions {
+        format: params.export_format.clone(),
+        png_optimization_level: params.png_optimization_level,
+        png_optimize_alpha: params.png_optimize_alpha,
+        png_preserve_metadata: params.png_preserve_metadata,
+        png_zopfli: params.png_zopfli,
+        jpeg_quality: params.jpeg_quality,
+        jpeg_progressive: params.jpeg_progressive,
+        jpeg_deringing: params.jpeg_deringing,
+        jpeg_chroma_subsampling: params.jpeg_chroma_subsampling.clone(),
+        webp_quality: params.webp_quality,
+        webp_lossless: params.webp_lossless,
+        webp_encoding_strength: params.webp_encoding_strength.clone(),
+        jxl_lossless: params.jxl_lossless,
+        jxl_distance: params.jxl_distance,
+        jxl_effort: params.jxl_effort,
+        jxl_progressive: params.jxl_progressive,
+        jxl_decoding_speed: params.jxl_decoding_speed,
     };
-    if params.png_zopfli {
-        options.deflater = Deflater::Zopfli(ZopfliOptions::default());
-    }
-    optimize_from_memory(&initial, &options).map_err(|error| format!("OxiPNG 优化失败: {error}"))
-}
-
-fn matte_rgb(value: &str) -> Result<[u8; 3], String> {
-    let hex = value
-        .strip_prefix('#')
-        .ok_or_else(|| "JPEG 哑光颜色必须以 # 开头".to_string())?;
-    if !matches!(hex.len(), 6 | 8) {
-        return Err("JPEG 哑光颜色必须是 #RRGGBB 或 #RRGGBBAA".into());
-    }
-    let channel = |start| {
-        u8::from_str_radix(&hex[start..start + 2], 16)
-            .map_err(|error| format!("JPEG 哑光颜色无效: {error}"))
-    };
-    Ok([channel(0)?, channel(2)?, channel(4)?])
-}
-
-fn encode_jpeg(
-    image: &RgbaImage,
-    params: &TokenParams,
-    config: &ExportConfig,
-) -> Result<Vec<u8>, String> {
-    let matte = matte_rgb(&config.rendering.jpeg_matte_color)?;
-    let mut rgb = Vec::with_capacity(image.width() as usize * image.height() as usize * 3);
-    for pixel in image.pixels() {
-        let alpha = u16::from(pixel[3]);
-        for channel in 0..3 {
-            let value = (u16::from(pixel[channel]) * alpha
-                + u16::from(matte[channel]) * (255 - alpha)
-                + 127)
-                / 255;
-            rgb.push(value as u8);
-        }
-    }
-    let subsampling = match params.jpeg_chroma_subsampling.as_str() {
-        "444" => Subsampling::S444,
-        "422" => Subsampling::S422,
-        "420" => Subsampling::S420,
-        _ => return Err("JPEG 色度抽样仅支持 444、422 或 420".into()),
-    };
-    JpegEncoder::new(Preset::BaselineBalanced)
-        .quality(params.jpeg_quality)
-        .progressive(params.jpeg_progressive)
-        .overshoot_deringing(params.jpeg_deringing)
-        .subsampling(subsampling)
-        .encode_rgb(&rgb, image.width(), image.height())
-        .map_err(|error| format!("MozJPEG 编码失败: {error}"))
-}
-
-fn encode_webp(
-    image: &RgbaImage,
-    params: &TokenParams,
-    config: &ExportConfig,
-) -> Result<Vec<u8>, String> {
-    let profile = config
+    let profiles = config
         .webp_strength_profiles
         .iter()
-        .find(|profile| profile.id == params.webp_encoding_strength)
-        .ok_or_else(|| format!("未知 WebP 编码强度: {}", params.webp_encoding_strength))?;
-    let mut webp_config =
-        webp::WebPConfig::new().map_err(|error| format!("创建 WebP 高级配置失败: {error:?}"))?;
-    webp_config.lossless = i32::from(params.webp_lossless);
-    webp_config.quality = f32::from(params.webp_quality);
-    webp_config.method = i32::from(profile.method);
-    webp_config.pass = i32::from(profile.passes);
-    webp_config.alpha_compression = 1;
-    webp_config.alpha_quality = 100;
-    let encoder = webp::Encoder::from_rgba(image.as_raw(), image.width(), image.height());
-    encoder
-        .encode_advanced(&webp_config)
-        .map(|memory| memory.to_vec())
-        .map_err(|error| format!("WebP 高级编码失败: {error:?}"))
-}
-
-fn encode_jxl(image: &RgbaImage, params: &TokenParams) -> Result<Vec<u8>, String> {
-    let speed = match params.jxl_effort {
-        1 => EncoderSpeed::Lightning,
-        2 => EncoderSpeed::Thunder,
-        3 => EncoderSpeed::Falcon,
-        4 => EncoderSpeed::Cheetah,
-        5 => EncoderSpeed::Hare,
-        6 => EncoderSpeed::Wombat,
-        7 => EncoderSpeed::Squirrel,
-        8 => EncoderSpeed::Kitten,
-        9 => EncoderSpeed::Tortoise,
-        _ => return Err("JXL Effort 必须介于 1 和 9 之间".into()),
-    };
-    let effective_lossless = params.jxl_lossless || params.jxl_distance == 0.0;
-    let mut encoder = jpegxl_rs::encoder_builder()
-        .has_alpha(true)
-        .lossless(effective_lossless)
-        .uses_original_profile(effective_lossless)
-        .quality(params.jxl_distance)
-        .speed(speed)
-        .decoding_speed(i64::from(params.jxl_decoding_speed))
-        .build()
-        .map_err(|error| format!("创建 JPEG XL 编码器失败: {error}"))?;
-    let progressive = i64::from(params.jxl_progressive);
-    encoder
-        .set_frame_option(JxlEncoderFrameSettingId::Responsive, progressive)
-        .map_err(|error| format!("设置 JPEG XL 渐进模式失败: {error}"))?;
-    encoder
-        .set_frame_option(JxlEncoderFrameSettingId::ProgressiveAc, progressive)
-        .map_err(|error| format!("设置 JPEG XL 渐进模式失败: {error}"))?;
-    let frame = EncoderFrame::new(image.as_raw()).num_channels(4);
-    encoder
-        .encode_frame::<u8, u8>(&frame, image.width(), image.height())
-        .map(|encoded| encoded.data)
-        .map_err(|error| format!("JPEG XL 编码失败: {error}"))
+        .map(|profile| WebpEncodingProfile {
+            id: profile.id.clone(),
+            method: profile.method,
+            passes: profile.passes,
+        })
+        .collect::<Vec<_>>();
+    encode_rgba_image(
+        image,
+        &options,
+        &ImageEncodingContext {
+            jpeg_matte_color: &config.rendering.jpeg_matte_color,
+            webp_strength_profiles: &profiles,
+        },
+    )
 }
 
 #[cfg(test)]

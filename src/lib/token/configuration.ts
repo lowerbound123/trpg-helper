@@ -79,14 +79,15 @@ export interface TokenFeatureConfiguration {
     displayTokenSize: number
     minimumWorldSize: number
     worldSizeStep: number
+    renderer: 'webgl'
     antialias: boolean
     devicePixelRatioMax: number
     guide: { dashLength: number; gapLength: number; lineWidth: number; lineColor: string; lineAlpha: number; endpointRadius: number; endpointAlpha: number }
   }
-  layout: { leftWidth: number; rightWidth: number; leftMinWidth: number; centerMinWidth: number; rightMinWidth: number }
+  layout: { leftWidth: number; rightWidth: number; leftMinWidth: number; centerMinWidth: number; rightMinWidth: number; resizeHandleWidth: number }
   files: { thumbnailSize: number; importFormats: string[]; exportFormats: TokenExportSettings['exportFormat'][] }
   history: { maximumEntries: number }
-  rings: { thumbnailSize: number; requestDebounceMs: number; frontendCacheEntries: number; maxUploadBytes: number; maxSourceDimension: number; customScaleMin: number; customScaleMax: number }
+  rings: { thumbnailSize: number; requestDebounceMs: number; frontendCacheEntries: number; backendCacheEntries: number; maxUploadBytes: number; maxSourceDimension: number; customScaleMin: number; customScaleMax: number }
   notifications: { toastDurationMs: number }
 }
 
@@ -131,14 +132,14 @@ export const defaultTokenConfiguration: TokenFeatureConfiguration = {
     ],
   },
   preview: {
-    displayTokenSize: 400, minimumWorldSize: 512, worldSizeStep: 128, antialias: true,
+    displayTokenSize: 400, minimumWorldSize: 512, worldSizeStep: 128, renderer: 'webgl', antialias: true,
     devicePixelRatioMax: 2,
     guide: { dashLength: 6, gapLength: 4, lineWidth: 1, lineColor: '#FFFFFF', lineAlpha: 0.5, endpointRadius: 3, endpointAlpha: 0.7 },
   },
-  layout: { leftWidth: 280, rightWidth: 400, leftMinWidth: 200, centerMinWidth: 400, rightMinWidth: 300 },
+  layout: { leftWidth: 280, rightWidth: 400, leftMinWidth: 200, centerMinWidth: 400, rightMinWidth: 300, resizeHandleWidth: 4 },
   files: { thumbnailSize: 56, importFormats: ['png', 'jpg', 'jpeg', 'webp', 'bmp'], exportFormats: ['png', 'jpg', 'webp', 'jxl'] },
   history: { maximumEntries: 50 },
-  rings: { thumbnailSize: 64, requestDebounceMs: 50, frontendCacheEntries: 32, maxUploadBytes: 33554432, maxSourceDimension: 16384, customScaleMin: 10, customScaleMax: 500 },
+  rings: { thumbnailSize: 64, requestDebounceMs: 50, frontendCacheEntries: 32, backendCacheEntries: 64, maxUploadBytes: 33554432, maxSourceDimension: 16384, customScaleMin: 10, customScaleMax: 500 },
   notifications: { toastDurationMs: 3000 },
 }
 

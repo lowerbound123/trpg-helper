@@ -1,6 +1,21 @@
 # Handout Generator local configuration.
 # Values here are read by the Vue/Tauri app at build time unless noted otherwise.
 
+schema_version = 1
+
+[application]
+title = "Handout Generator"
+
+[window]
+width = 1440
+height = 920
+min_width = 1180
+min_height = 760
+resizable = true
+
+[diagnostics]
+log_directory = "./logs"
+
 [paths]
 data_dir = "./data"
 log_file = "./logs/app.log"
@@ -43,6 +58,69 @@ pointer_idle_grace_ms = 120
 [export]
 default_scale = 1
 min_scale = 0.1
+raw_rgba_ipc_max_bytes = 134217728
+
+[export.defaults]
+format = "png"
+png_optimization_level = 3
+png_optimize_alpha = true
+png_preserve_metadata = false
+png_zopfli = false
+jpeg_quality = 85
+jpeg_progressive = true
+jpeg_deringing = true
+jpeg_chroma_subsampling = "422"
+webp_quality = 90
+webp_lossless = false
+webp_encoding_strength = "balanced"
+jxl_lossless = false
+jxl_distance = 1.0
+jxl_effort = 7
+jxl_progressive = true
+jxl_decoding_speed = 0
+
+[export.limits]
+png_optimization_level_min = 0
+png_optimization_level_max = 6
+jpeg_quality_min = 1
+jpeg_quality_max = 100
+webp_quality_min = 1
+webp_quality_max = 100
+jxl_distance_min = 0.0
+jxl_distance_max = 5.0
+jxl_effort_min = 1
+jxl_effort_max = 9
+jxl_decoding_speed_min = 0
+jxl_decoding_speed_max = 4
+max_canvas_dimension = 16384
+max_canvas_pixels = 67108864
+
+[export.rendering]
+jpeg_matte_color = "#FFFFFFFF"
+
+[[export.webp_strength_profiles]]
+id = "fast"
+label = "快速"
+method = 2
+passes = 1
+
+[[export.webp_strength_profiles]]
+id = "balanced"
+label = "均衡"
+method = 4
+passes = 2
+
+[[export.webp_strength_profiles]]
+id = "strong"
+label = "高压缩"
+method = 5
+passes = 6
+
+[[export.webp_strength_profiles]]
+id = "maximum"
+label = "极限"
+method = 6
+passes = 10
 
 [debug]
 file_log_enabled = true
@@ -132,25 +210,25 @@ minimum_oklab_distance = 0.12
 
 [[token.export.webp_strength_profiles]]
 id = "fast"
-label = "Fast"
+label = "快速"
 method = 2
 passes = 1
 
 [[token.export.webp_strength_profiles]]
 id = "balanced"
-label = "Balanced"
+label = "均衡"
 method = 4
 passes = 2
 
 [[token.export.webp_strength_profiles]]
 id = "strong"
-label = "Strong"
+label = "高压缩"
 method = 5
 passes = 6
 
 [[token.export.webp_strength_profiles]]
 id = "maximum"
-label = "Maximum"
+label = "极限"
 method = 6
 passes = 10
 
@@ -158,6 +236,7 @@ passes = 10
 display_token_size = 400
 minimum_world_size = 512
 world_size_step = 128
+renderer = "webgl"
 antialias = true
 device_pixel_ratio_max = 2.0
 
@@ -176,6 +255,7 @@ right_width = 400
 left_min_width = 200
 center_min_width = 400
 right_min_width = 300
+resize_handle_width = 4
 
 [token.files]
 thumbnail_size = 56
@@ -189,6 +269,7 @@ maximum_entries = 50
 thumbnail_size = 64
 request_debounce_ms = 50
 frontend_cache_entries = 32
+backend_cache_entries = 64
 max_upload_bytes = 33554432
 max_source_dimension = 16384
 custom_scale_min = 10

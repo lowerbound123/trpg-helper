@@ -330,6 +330,7 @@ pub fn read_configuration() -> CommandResult<String> {
 
 #[tauri::command]
 pub fn write_configuration(source: String) -> CommandResult<String> {
+    crate::token::configuration::parse_handout_configuration(&source)?;
     let path = project_root()
         .map_err(String::from)?
         .join("configuration.toml");

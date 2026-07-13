@@ -19,6 +19,9 @@ describe('configuration', () => {
   })
 
   it('loads app configuration defaults from configuration.toml', () => {
+    expect(appConfiguration.schemaVersion).toBe(1)
+    expect(appConfiguration.application.title).toBe('Handout Generator')
+    expect(appConfiguration.window.width).toBe(1440)
     expect(appConfiguration.finder.managerHeightPx).toBe(1080)
     expect(appConfiguration.finder.handoutGridScale).toBe(2)
     expect(appConfiguration.finder.backgroundGridScale).toBe(2)
@@ -30,6 +33,13 @@ describe('configuration', () => {
     expect(appConfiguration.mask.pointerIdleGraceMs).toBe(120)
     expect(appConfiguration.token.defaults.designSize).toBe(512)
     expect(appConfiguration.token.export.webpStrengthProfiles).toHaveLength(4)
+    expect(appConfiguration.token.preview.renderer).toBe('webgl')
+    expect(appConfiguration.token.layout.resizeHandleWidth).toBe(4)
+    expect(appConfiguration.token.rings.backendCacheEntries).toBe(64)
+    expect(appConfiguration.export.defaults.format).toBe('png')
+    expect(appConfiguration.export.defaults.jxlEffort).toBe(7)
+    expect(appConfiguration.export.rawRgbaIpcMaxBytes).toBe(134217728)
+    expect(appConfiguration.export.limits.maxCanvasPixels).toBe(67108864)
   })
 
   it('round-trips editable configuration fields', () => {
@@ -43,7 +53,15 @@ describe('configuration', () => {
         interactiveRefreshDelayMs: 800,
         pointerIdleGraceMs: 90,
       },
-      export: { defaultScale: 2, minScale: 0.2 },
+      application: { title: 'Custom Generator' },
+      window: { ...appConfiguration.window, width: 1500 },
+      diagnostics: { logDirectory: './custom-logs' },
+      export: {
+        ...appConfiguration.export,
+        defaultScale: 2,
+        minScale: 0.2,
+        defaults: { ...appConfiguration.export.defaults, format: 'jxl', jxlEffort: 8 },
+      },
     })
     const parsed = configurationFromToml(source)
     expect(parsed.paths.dataDir).toBe('./custom-data')
@@ -55,6 +73,11 @@ describe('configuration', () => {
     expect(parsed.mask.pointerIdleGraceMs).toBe(90)
     expect(parsed.export.defaultScale).toBe(2)
     expect(parsed.export.minScale).toBe(0.2)
+    expect(parsed.export.defaults.format).toBe('jxl')
+    expect(parsed.export.defaults.jxlEffort).toBe(8)
+    expect(parsed.application.title).toBe('Custom Generator')
+    expect(parsed.window.width).toBe(1500)
+    expect(parsed.diagnostics.logDirectory).toBe('./custom-logs')
     expect(parsed.token.export.webpStrengthProfiles[1]?.id).toBe('balanced')
   })
 

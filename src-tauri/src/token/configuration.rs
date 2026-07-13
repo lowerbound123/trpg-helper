@@ -181,6 +181,53 @@ config_struct!(NotificationsConfig {
 config_struct!(DiagnosticsConfig {
     log_directory: String
 });
+config_struct!(HandoutExportConfig {
+    default_scale: f32,
+    min_scale: f32,
+    raw_rgba_ipc_max_bytes: u64,
+    defaults: HandoutExportDefaults,
+    limits: HandoutExportLimits,
+    rendering: HandoutExportRendering,
+    webp_strength_profiles: Vec<WebpStrengthProfile>
+});
+config_struct!(HandoutExportDefaults {
+    format: String,
+    png_optimization_level: u8,
+    png_optimize_alpha: bool,
+    png_preserve_metadata: bool,
+    png_zopfli: bool,
+    jpeg_quality: u8,
+    jpeg_progressive: bool,
+    jpeg_deringing: bool,
+    jpeg_chroma_subsampling: String,
+    webp_quality: u8,
+    webp_lossless: bool,
+    webp_encoding_strength: String,
+    jxl_lossless: bool,
+    jxl_distance: f32,
+    jxl_effort: u8,
+    jxl_progressive: bool,
+    jxl_decoding_speed: u8
+});
+config_struct!(HandoutExportLimits {
+    png_optimization_level_min: u8,
+    png_optimization_level_max: u8,
+    jpeg_quality_min: u8,
+    jpeg_quality_max: u8,
+    webp_quality_min: u8,
+    webp_quality_max: u8,
+    jxl_distance_min: f32,
+    jxl_distance_max: f32,
+    jxl_effort_min: u8,
+    jxl_effort_max: u8,
+    jxl_decoding_speed_min: u8,
+    jxl_decoding_speed_max: u8,
+    max_canvas_dimension: u32,
+    max_canvas_pixels: u64
+});
+config_struct!(HandoutExportRendering {
+    jpeg_matte_color: String
+});
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -400,6 +447,76 @@ impl AppConfiguration {
     }
 }
 
+impl HandoutExportConfig {
+    fn validate(&self) -> Result<(), String> {
+        let defaults = &self.defaults;
+        let limits = &self.limits;
+        if !self.default_scale.is_finite()
+            || !self.min_scale.is_finite()
+            || self.default_scale < self.min_scale
+            || self.min_scale <= 0.0
+            || self.raw_rgba_ipc_max_bytes == 0
+            || limits.max_canvas_dimension == 0
+            || limits.max_canvas_pixels == 0
+            || limits.png_optimization_level_min > limits.png_optimization_level_max
+            || limits.png_optimization_level_max > 6
+            || limits.jpeg_quality_min == 0
+            || limits.jpeg_quality_min > limits.jpeg_quality_max
+            || limits.jpeg_quality_max > 100
+            || limits.webp_quality_min == 0
+            || limits.webp_quality_min > limits.webp_quality_max
+            || limits.webp_quality_max > 100
+            || !in_range(limits.jxl_distance_min, 0.0, 5.0)
+            || !in_range(limits.jxl_distance_max, limits.jxl_distance_min, 5.0)
+            || limits.jxl_effort_min < 1
+            || limits.jxl_effort_min > limits.jxl_effort_max
+            || limits.jxl_effort_max > 9
+            || limits.jxl_decoding_speed_min > limits.jxl_decoding_speed_max
+            || limits.jxl_decoding_speed_max > 4
+            || defaults.png_optimization_level < limits.png_optimization_level_min
+            || defaults.png_optimization_level > limits.png_optimization_level_max
+            || defaults.jpeg_quality < limits.jpeg_quality_min
+            || defaults.jpeg_quality > limits.jpeg_quality_max
+            || defaults.webp_quality < limits.webp_quality_min
+            || defaults.webp_quality > limits.webp_quality_max
+            || !in_range(
+                defaults.jxl_distance,
+                limits.jxl_distance_min,
+                limits.jxl_distance_max,
+            )
+            || defaults.jxl_effort < limits.jxl_effort_min
+            || defaults.jxl_effort > limits.jxl_effort_max
+            || defaults.jxl_decoding_speed < limits.jxl_decoding_speed_min
+            || defaults.jxl_decoding_speed > limits.jxl_decoding_speed_max
+        {
+            return Err("Handout 导出范围或默认值无效".into());
+        }
+        if !matches!(defaults.format.as_str(), "png" | "jpg" | "webp" | "jxl")
+            || !matches!(
+                defaults.jpeg_chroma_subsampling.as_str(),
+                "444" | "422" | "420"
+            )
+            || !valid_color(&self.rendering.jpeg_matte_color)
+        {
+            return Err("Handout 导出格式或 JPEG 配置无效".into());
+        }
+        let mut profile_ids = std::collections::HashSet::new();
+        if self.webp_strength_profiles.is_empty()
+            || self.webp_strength_profiles.iter().any(|profile| {
+                profile.id.trim().is_empty()
+                    || profile.label.trim().is_empty()
+                    || profile.method > 6
+                    || !(1..=10).contains(&profile.passes)
+                    || !profile_ids.insert(profile.id.as_str())
+            })
+            || !profile_ids.contains(defaults.webp_encoding_strength.as_str())
+        {
+            return Err("Handout WebP 编码强度配置无效".into());
+        }
+        Ok(())
+    }
+}
+
 fn merge_values(base: &mut toml::Value, overlay: toml::Value) {
     match (base, overlay) {
         (toml::Value::Table(base), toml::Value::Table(overlay)) => {
@@ -424,60 +541,42 @@ pub fn parse_configuration(source: &str) -> Result<AppConfiguration, String> {
 }
 
 pub fn parse_handout_configuration(source: &str) -> Result<AppConfiguration, String> {
-    let root: toml::Value = toml::from_str(source)
-        .map_err(|error| format!("Handout TOML 解析失败: {error}"))?;
+    let root: toml::Value =
+        toml::from_str(source).map_err(|error| format!("Handout TOML 解析失败: {error}"))?;
     let token = root
         .get("token")
         .and_then(toml::Value::as_table)
         .ok_or_else(|| "配置缺少 [token.*] 子树".to_string())?;
+    parse_handout_export_configuration(source)?;
     let required = |name: &str| {
         token
             .get(name)
             .cloned()
             .ok_or_else(|| format!("配置缺少 [token.{name}]"))
     };
-    let mut preview = required("preview")?;
-    preview
-        .as_table_mut()
-        .ok_or_else(|| "[token.preview] 必须是表".to_string())?
-        .insert("renderer".into(), toml::Value::String("webgl".into()));
-    let mut layout = required("layout")?;
-    layout
-        .as_table_mut()
-        .ok_or_else(|| "[token.layout] 必须是表".to_string())?
-        .insert("resize_handle_width".into(), toml::Value::Integer(4));
-    let mut rings = required("rings")?;
-    rings
-        .as_table_mut()
-        .ok_or_else(|| "[token.rings] 必须是表".to_string())?
-        .insert("backend_cache_entries".into(), toml::Value::Integer(64));
-
     let mut value = toml::map::Map::new();
-    value.insert("schema_version".into(), toml::Value::Integer(1));
-    value.insert("application".into(), toml::Value::Table(toml::map::Map::from_iter([
-        ("title".into(), toml::Value::String("Handout Generator Tokens".into())),
-    ])));
-    value.insert("window".into(), toml::Value::Table(toml::map::Map::from_iter([
-        ("width".into(), toml::Value::Integer(1520)),
-        ("height".into(), toml::Value::Integer(920)),
-        ("min_width".into(), toml::Value::Integer(1024)),
-        ("min_height".into(), toml::Value::Integer(680)),
-        ("resizable".into(), toml::Value::Boolean(true)),
-    ])));
-    value.insert("token".into(), toml::Value::Table(toml::map::Map::from_iter([
-        ("defaults".into(), required("defaults")?),
-        ("limits".into(), required("limits")?),
-    ])));
+    for name in ["schema_version", "application", "window", "diagnostics"] {
+        value.insert(
+            name.into(),
+            root.get(name)
+                .cloned()
+                .ok_or_else(|| format!("配置缺少 {name}"))?,
+        );
+    }
+    value.insert(
+        "token".into(),
+        toml::Value::Table(toml::map::Map::from_iter([
+            ("defaults".into(), required("defaults")?),
+            ("limits".into(), required("limits")?),
+        ])),
+    );
     value.insert("export".into(), required("export")?);
-    value.insert("preview".into(), preview);
-    value.insert("layout".into(), layout);
+    value.insert("preview".into(), required("preview")?);
+    value.insert("layout".into(), required("layout")?);
     value.insert("files".into(), required("files")?);
-    value.insert("rings".into(), rings);
+    value.insert("rings".into(), required("rings")?);
     value.insert("history".into(), required("history")?);
     value.insert("notifications".into(), required("notifications")?);
-    value.insert("diagnostics".into(), toml::Value::Table(toml::map::Map::from_iter([
-        ("log_directory".into(), toml::Value::String("./logs".into())),
-    ])));
 
     let config: AppConfiguration = toml::Value::Table(value)
         .try_into()
@@ -486,12 +585,32 @@ pub fn parse_handout_configuration(source: &str) -> Result<AppConfiguration, Str
     Ok(config)
 }
 
+pub fn parse_handout_export_configuration(source: &str) -> Result<HandoutExportConfig, String> {
+    let root: toml::Value =
+        toml::from_str(source).map_err(|error| format!("Handout TOML 解析失败: {error}"))?;
+    let export = root
+        .get("export")
+        .cloned()
+        .ok_or_else(|| "配置缺少 [export]".to_string())?;
+    let config: HandoutExportConfig = export
+        .try_into()
+        .map_err(|error| format!("Handout 导出配置结构错误: {error}"))?;
+    config.validate()?;
+    Ok(config)
+}
+
 pub fn merge_and_parse(base: &str, overlay: &str) -> Result<AppConfiguration, String> {
     let mut base: toml::Value =
         toml::from_str(base).map_err(|e| format!("基础 TOML 解析失败: {e}"))?;
+    let handout_root = base.get("paths").is_some() || base.get("mask").is_some();
     let overlay: toml::Value =
         toml::from_str(overlay).map_err(|e| format!("用户 TOML 解析失败: {e}"))?;
     merge_values(&mut base, overlay);
+    if handout_root {
+        return parse_handout_configuration(
+            &toml::to_string(&base).map_err(|e| format!("配置序列化失败: {e}"))?,
+        );
+    }
     let config: AppConfiguration = base.try_into().map_err(|e| format!("配置结构错误: {e}"))?;
     config.validate()?;
     Ok(config)
@@ -502,7 +621,13 @@ pub fn load_from_strings(
     overlay: Option<&str>,
     override_path: &str,
 ) -> Result<ConfigurationResponse, String> {
-    let base_config = parse_configuration(base)?;
+    let base_value: toml::Value =
+        toml::from_str(base).map_err(|e| format!("基础 TOML 解析失败: {e}"))?;
+    let base_config = if base_value.get("paths").is_some() || base_value.get("mask").is_some() {
+        parse_handout_configuration(base)?
+    } else {
+        parse_configuration(base)?
+    };
     let Some(overlay) = overlay else {
         return Ok(ConfigurationResponse {
             configuration: base_config,
@@ -528,7 +653,7 @@ pub fn load_from_strings(
 }
 
 pub fn load_configuration(user_path: PathBuf) -> Result<ConfigurationResponse, String> {
-    let base = include_str!("../../configuration.toml");
+    let base = include_str!("../../../configuration.toml");
     let overlay = match fs::read_to_string(&user_path) {
         Ok(value) => Some(value),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -557,6 +682,7 @@ pub fn write_warnings(response: &ConfigurationResponse) {
 }
 
 static ACTIVE_CONFIGURATION: OnceLock<AppConfiguration> = OnceLock::new();
+static ACTIVE_HANDOUT_EXPORT_CONFIGURATION: OnceLock<HandoutExportConfig> = OnceLock::new();
 
 pub fn set_active_configuration(configuration: AppConfiguration) -> Result<(), String> {
     ACTIVE_CONFIGURATION
@@ -571,6 +697,21 @@ pub fn active_configuration() -> &'static AppConfiguration {
     })
 }
 
+pub fn set_active_handout_export_configuration(
+    configuration: HandoutExportConfig,
+) -> Result<(), String> {
+    ACTIVE_HANDOUT_EXPORT_CONFIGURATION
+        .set(configuration)
+        .map_err(|_| "Handout 导出配置已经初始化".into())
+}
+
+pub fn active_handout_export_configuration() -> &'static HandoutExportConfig {
+    ACTIVE_HANDOUT_EXPORT_CONFIGURATION.get_or_init(|| {
+        parse_handout_export_configuration(include_str!("../../../configuration.toml"))
+            .expect("项目 configuration.toml 的 [export.*] 必须有效")
+    })
+}
+
 #[tauri::command]
 pub fn get_configuration(state: tauri::State<'_, ConfigurationResponse>) -> ConfigurationResponse {
     state.inner().clone()
@@ -579,7 +720,7 @@ pub fn get_configuration(state: tauri::State<'_, ConfigurationResponse>) -> Conf
 #[cfg(test)]
 mod tests {
     use super::*;
-    const BASE: &str = include_str!("../../configuration.toml");
+    const BASE: &str = include_str!("../../../configuration.toml");
 
     #[test]
     fn handout_token_subtree_is_strictly_valid() {
@@ -591,7 +732,7 @@ mod tests {
     }
     #[test]
     fn bundled_configuration_parses_and_matches_current_defaults() {
-        let c = parse_configuration(BASE).unwrap();
+        let c = parse_handout_configuration(BASE).unwrap();
         assert_eq!(c.schema_version, 1);
         assert_eq!(c.token.defaults.design_size, 512);
         assert_eq!(c.token.defaults.ring_inner_radius, 225);
@@ -616,7 +757,7 @@ mod tests {
 
     #[test]
     fn bundled_configuration_contains_advanced_encoder_settings() {
-        let c = parse_configuration(BASE).unwrap();
+        let c = parse_handout_configuration(BASE).unwrap();
         let value = serde_json::to_value(c.export).unwrap();
         assert_eq!(value["defaults"]["pngOptimizationLevel"], 3);
         assert_eq!(value["defaults"]["jpegQuality"], 85);
@@ -629,37 +770,81 @@ mod tests {
     }
 
     #[test]
+    fn handout_export_configuration_is_strict_and_validated() {
+        let configuration = parse_handout_export_configuration(BASE).unwrap();
+        assert_eq!(configuration.raw_rgba_ipc_max_bytes, 134_217_728);
+        assert_eq!(configuration.limits.max_canvas_dimension, 16_384);
+        assert_eq!(configuration.limits.max_canvas_pixels, 67_108_864);
+        assert_eq!(configuration.webp_strength_profiles.len(), 4);
+
+        let invalid_limit = BASE.replace("max_canvas_pixels = 67108864", "max_canvas_pixels = 0");
+        assert!(parse_handout_export_configuration(&invalid_limit).is_err());
+        let invalid_profile = BASE.replace(
+            "webp_encoding_strength = \"balanced\"",
+            "webp_encoding_strength = \"missing\"",
+        );
+        assert!(parse_handout_export_configuration(&invalid_profile).is_err());
+        let unknown_field = BASE.replace(
+            "raw_rgba_ipc_max_bytes = 134217728",
+            "raw_rgba_ipc_max_bytes = 134217728\nunknown_export_key = 1",
+        );
+        assert!(parse_handout_export_configuration(&unknown_field).is_err());
+    }
+
+    #[test]
     fn rejects_invalid_jxl_defaults_and_limits() {
-        assert!(merge_and_parse(BASE, "[export.defaults]\njxl_effort=10").is_err());
-        assert!(merge_and_parse(BASE, "[export.defaults]\njxl_distance=5.01").is_err());
-        assert!(merge_and_parse(BASE, "[export.limits]\njxl_effort_min=0").is_err());
+        assert!(merge_and_parse(BASE, "[token.export.defaults]\njxl_effort=10").is_err());
+        assert!(merge_and_parse(BASE, "[token.export.defaults]\njxl_distance=5.01").is_err());
+        assert!(merge_and_parse(BASE, "[token.export.limits]\njxl_effort_min=0").is_err());
     }
 
     #[test]
     fn rejects_invalid_encoder_profiles_and_defaults() {
-        assert!(merge_and_parse(BASE, "[export.defaults]\npng_optimization_level=7").is_err());
-        assert!(merge_and_parse(BASE, "[export.defaults]\njpeg_quality=0").is_err());
-        assert!(merge_and_parse(BASE, "[export.defaults]\njpeg_chroma_subsampling='411'").is_err());
         assert!(
-            merge_and_parse(BASE, "[export.defaults]\nwebp_encoding_strength='missing'").is_err()
+            merge_and_parse(BASE, "[token.export.defaults]\npng_optimization_level=7").is_err()
         );
-        assert!(merge_and_parse(BASE, "[export.defaults]\njxl_decoding_speed=5").is_err());
-    }
-    #[test]
-    fn rejects_invalid_random_color_configuration() {
-        assert!(merge_and_parse(BASE, "[export.random_colors]\npalette=['#000000']").is_err());
+        assert!(merge_and_parse(BASE, "[token.export.defaults]\njpeg_quality=0").is_err());
         assert!(
             merge_and_parse(
                 BASE,
-                "[export.random_colors]\npalette=['#000000', '#GGGGGG']"
+                "[token.export.defaults]\njpeg_chroma_subsampling='411'"
             )
             .is_err()
         );
         assert!(
-            merge_and_parse(BASE, "[export.random_colors]\nminimum_contrast_ratio=22.0").is_err()
+            merge_and_parse(
+                BASE,
+                "[token.export.defaults]\nwebp_encoding_strength='missing'"
+            )
+            .is_err()
+        );
+        assert!(merge_and_parse(BASE, "[token.export.defaults]\njxl_decoding_speed=5").is_err());
+    }
+    #[test]
+    fn rejects_invalid_random_color_configuration() {
+        assert!(
+            merge_and_parse(BASE, "[token.export.random_colors]\npalette=['#000000']").is_err()
         );
         assert!(
-            merge_and_parse(BASE, "[export.random_colors]\nminimum_oklab_distance=1.1").is_err()
+            merge_and_parse(
+                BASE,
+                "[token.export.random_colors]\npalette=['#000000', '#GGGGGG']"
+            )
+            .is_err()
+        );
+        assert!(
+            merge_and_parse(
+                BASE,
+                "[token.export.random_colors]\nminimum_contrast_ratio=22.0"
+            )
+            .is_err()
+        );
+        assert!(
+            merge_and_parse(
+                BASE,
+                "[token.export.random_colors]\nminimum_oklab_distance=1.1"
+            )
+            .is_err()
         );
     }
     #[test]
@@ -670,7 +855,7 @@ mod tests {
 width=1200
 [token.defaults]
 ring_color="#11223344"
-[files]
+[token.files]
 import_formats=["png"]"##,
         )
         .unwrap();
@@ -683,7 +868,7 @@ import_formats=["png"]"##,
     fn invalid_override_falls_back_with_warning() {
         let c = load_from_strings(BASE, Some("[window]\nwidth=-1"), "/tmp/user.toml").unwrap();
         assert!(!c.user_override_loaded);
-        assert_eq!(c.configuration.window.width, 1520);
+        assert_eq!(c.configuration.window.width, 1440);
         assert_eq!(c.warnings.len(), 1);
     }
     #[test]

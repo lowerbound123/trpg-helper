@@ -165,10 +165,10 @@ export const useTokenStore = defineStore('token-projects', () => {
   }
 
   function addAssets(assets: LibraryRecord[]) {
-    if (!document.value) return
+    if (!document.value) return 0
     const existing = new Set(document.value.items.map((item) => item.assetId).filter(Boolean))
     const added = assets.filter((asset) => asset.mediaType.startsWith('image/') && !existing.has(asset.id))
-    if (!added.length) return
+    if (!added.length) return 0
     const before = snapshot()
     const nextItems = added.map(itemFromAsset)
     document.value.items.push(...nextItems)
@@ -176,6 +176,7 @@ export const useTokenStore = defineStore('token-projects', () => {
     checkedItemIds.value.push(...nextItems.map((item) => item.id))
     selectedItemId.value = nextItems[0]?.id
     pushHistory(before)
+    return nextItems.length
   }
 
   function removeItem(itemId: string) {
@@ -241,6 +242,42 @@ export const useTokenStore = defineStore('token-projects', () => {
     pushHistory(before)
   }
 
+  function toggleAllChecked() {
+    const allChecked = items.value.length > 0 && items.value.every((item) => checkedItemIds.value.includes(item.id))
+    checkedItemIds.value = allChecked ? [] : items.value.map((item) => item.id)
+  }
+
+  function clearItems() {
+    if (!document.value || document.value.items.length === 0) return
+    const before = snapshot()
+    document.value.items = []
+    resolvedSources.value = {}
+    selectedItemId.value = undefined
+    checkedItemIds.value = []
+    pushHistory(before)
+  }
+
+  function resetSelectedStyle() {
+    const item = selectedItem.value
+    if (!item) return
+    const before = snapshot()
+    item.style = createDefaultTokenVisualStyle()
+    pushHistory(before)
+  }
+
+  function replaceMissingRingReferences(availableRingStyles: ReadonlySet<string>) {
+    if (!document.value) return 0
+    const before = snapshot()
+    let replaced = 0
+    for (const item of document.value.items) {
+      if (!item.style.ringStyle.startsWith('asset:') || availableRingStyles.has(item.style.ringStyle)) continue
+      item.style.ringStyle = 'solid'
+      replaced += 1
+    }
+    if (replaced > 0) pushHistory(before)
+    return replaced
+  }
+
   async function deleteEntries(entries: { ids: string[]; folders: string[] }) {
     folders.value = await deleteTokenProjectEntries(entries)
     await refreshProjects()
@@ -250,7 +287,8 @@ export const useTokenStore = defineStore('token-projects', () => {
     projects, folders, document, resolvedSources, selectedItemId, checkedItemIds, status, dirty,
     items, selectedItem, canUndo, canRedo, refreshProjects, addFolder, createFromAssets, addAssets, removeItem, open, save,
     close, updateVisualStyle, updateExportSetting, beginEdit, commitEdit, undo, redo,
-    applyCurrentStyleToChecked, deleteEntries,
+    applyCurrentStyleToChecked, toggleAllChecked, clearItems, resetSelectedStyle,
+    replaceMissingRingReferences, deleteEntries,
     visualStyleKeys: TOKEN_VISUAL_STYLE_KEYS,
     exportSettingKeys: TOKEN_EXPORT_SETTING_KEYS,
   }

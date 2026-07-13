@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { LatestPreviewLoad, findAlphaBounds, mimeTypeForPath } from './imageLoader'
+import { LatestPreviewLoad, findAlphaBounds, mimeTypeForPath, previewImageUrl } from './imageLoader'
 
 function pixels(width: number, height: number, opaque: Array<[number, number]>): Uint8ClampedArray {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -51,5 +51,12 @@ describe('preview image loading helpers', () => {
     expect(loads.isCurrent(second)).toBe(true)
     loads.invalidate()
     expect(loads.isCurrent(second)).toBe(false)
+  })
+
+  it('loads project sources through the Tauri asset URL resolver', () => {
+    const resolve = (path: string) => `asset://localhost/${encodeURIComponent(path)}`
+
+    expect(previewImageUrl('/data/token-projects/a/sources/avatar.png', resolve))
+      .toBe('asset://localhost/%2Fdata%2Ftoken-projects%2Fa%2Fsources%2Favatar.png')
   })
 })

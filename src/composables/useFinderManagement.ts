@@ -85,6 +85,30 @@ export function isImageFinderEntry(entry?: DirEntry | null) {
   return entry?.type === 'file' && Boolean(entry.mime_type?.startsWith('image/'))
 }
 
+export function normalizeFinderFolder(value?: string) {
+  if (!value) return ''
+  return value.replace(/^[^:]+:\/\//, '').replace(/^\/+|\/+$/g, '')
+}
+
+export function collectImageAssetsForFinderEntries(entries: DirEntry[], records: LibraryRecord[]) {
+  const ids = new Set<string>()
+  const folders: string[] = []
+  for (const entry of entries) {
+    if (entry.type === 'dir') {
+      folders.push(normalizeFinderFolder(entry.path))
+      continue
+    }
+    const id = normalizeFinderFolder(entry.path).split('/').at(-1)?.replace('__asset-', '')
+    if (id) ids.add(id)
+  }
+  return records.filter((record) => {
+    if (!record.mediaType.startsWith('image/')) return false
+    if (ids.has(record.id)) return true
+    const folder = normalizeFinderFolder(record.folder)
+    return folders.some((candidate) => folder === candidate || folder.startsWith(`${candidate}/`))
+  })
+}
+
 export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, options: UseFinderOptions) {
   const tokenStore = useTokenStore()
   function foldersForKind(kind: 'background' | 'asset' | 'font') {
@@ -118,11 +142,6 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
 
   function finderRoot(kind: FinderKind) {
     return `${finderStorages[kind]}://`
-  }
-
-  function normalizeFinderFolder(value?: string) {
-    if (!value) return ''
-    return value.replace(/^[^:]+:\/\//, '').replace(/^\/+|\/+$/g, '')
   }
 
   function finderPath(kind: FinderKind, folder = '', id?: string) {
@@ -511,6 +530,31 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     asset: createImageHandoutContextMenu('asset'),
   }))
 
+  function createTokenAssetContextMenu(): Item[] {
+    let contextTarget: DirEntry | null = null
+    const addItem: Item = {
+      id: 'add_assets_to_token_project',
+      title: () => '添加到当前 Token 项目',
+      order: 44,
+      show(_app, context) {
+        contextTarget = context.target
+        return Boolean(tokenStore.document && contextTarget && (contextTarget.type === 'dir' || isImageFinderEntry(contextTarget)))
+      },
+      action(_app, selectedItems) {
+        if (!contextTarget) return
+        const targets = selectedItems.some((entry) => entry.path === contextTarget?.path)
+          ? selectedItems
+          : [contextTarget]
+        const assets = collectImageAssetsForFinderEntries(targets, editor.library.assets)
+        const added = tokenStore.addAssets(assets)
+        tokenStore.status = `已添加 ${added} 个 Asset，跳过 ${Math.max(0, assets.length - added)} 个重复项`
+      },
+    }
+    return [...defaultContextMenuItems, addItem]
+  }
+
+  const tokenAssetContextMenuItems = computed(() => createTokenAssetContextMenu())
+
   function createHandoutContextMenu(): Item[] {
     let contextTarget: DirEntry | null = null
     const exportItem: Item = {
@@ -591,6 +635,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     handleFinderPathChange,
     handoutContextMenuItems,
     tokenContextMenuItems,
+    tokenAssetContextMenuItems,
     imageHandoutContextMenuItems,
     imageRecordFromFinderEntry,
     projectPreviewUrl,

@@ -35,15 +35,18 @@ export interface PreviewInteractionHandlers {
   onScaleChange(scale: number): void
 }
 
+export type PreviewRendererPreference = 'webgl' | 'webgpu'
+
 export function createPixiApplicationOptions(
   width: number,
   height: number,
   pixelRatio: number,
+  preference: PreviewRendererPreference = 'webgl',
 ): Partial<ApplicationOptions> {
   return {
     width,
     height,
-    preference: 'webgl',
+    preference,
     backgroundAlpha: 0,
     antialias: PREVIEW_ANTIALIAS,
     resolution: Math.min(Math.max(pixelRatio, 1), PREVIEW_DPR_MAX),
@@ -194,6 +197,7 @@ export function createPreviewScene(): PreviewScene {
 }
 
 export class PixiTokenRenderer {
+  private readonly preference: PreviewRendererPreference
   private app: Application | null = null
   private mountPromise: Promise<void> | null = null
   private destroyRequested = false
@@ -237,8 +241,12 @@ export class PixiTokenRenderer {
 
   private readonly handlers: PreviewInteractionHandlers
 
-  constructor(handlers: PreviewInteractionHandlers) {
+  constructor(
+    handlers: PreviewInteractionHandlers,
+    preference: PreviewRendererPreference = 'webgl',
+  ) {
     this.handlers = handlers
+    this.preference = preference
   }
 
   async mount(host: HTMLElement): Promise<void> {
@@ -266,6 +274,7 @@ export class PixiTokenRenderer {
           initialViewport.width,
           initialViewport.height,
           globalThis.devicePixelRatio ?? 1,
+          this.preference,
         ),
       )
     } catch (error) {

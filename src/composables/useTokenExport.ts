@@ -19,8 +19,21 @@ export type TokenExportScope = 'current' | 'checked' | 'all'
 export function useTokenExport() {
   const token = useTokenStore()
   const editor = useEditorStore()
-  const progress = reactive({ running: false, completed: 0, total: 0, phase: '', error: '' })
-  const percentage = computed(() => progress.total ? Math.round(progress.completed / progress.total * 100) : 0)
+  const progress = reactive({
+    running: false,
+    completed: 0,
+    total: 0,
+    phase: '',
+    currentInput: '',
+    itemProgress: 0,
+    successCount: 0,
+    failureCount: 0,
+    status: 'idle' as 'idle' | 'running' | 'finished' | 'failed',
+    error: '',
+  })
+  const percentage = computed(() => progress.total
+    ? Math.round((progress.completed + progress.itemProgress) / progress.total * 100)
+    : 0)
 
   function paramsForItem(item: TokenProjectItem): TokenParams {
     const customAssetId = item.style.ringStyle.startsWith('asset:')
@@ -67,14 +80,22 @@ export function useTokenExport() {
     }
     if (message.event === 'itemProgress') {
       progress.phase = message.data.phase
+      progress.currentInput = message.data.input
+      progress.itemProgress = Math.max(0, Math.min(1, message.data.itemProgress))
       return
     }
     if (message.event === 'itemFinished') {
       progress.completed = message.data.completed
+      progress.itemProgress = 0
+      if (message.data.success) progress.successCount += 1
+      else progress.failureCount += 1
       return
     }
     progress.completed = message.data.completed
     progress.total = message.data.total
+    progress.successCount = message.data.successCount
+    progress.failureCount = message.data.failureCount
+    progress.status = 'finished'
   }
 
   async function exportScope(scope: TokenExportScope) {
@@ -91,6 +112,11 @@ export function useTokenExport() {
     progress.completed = 0
     progress.total = items.length
     progress.phase = 'preparing'
+    progress.currentInput = ''
+    progress.itemProgress = 0
+    progress.successCount = 0
+    progress.failureCount = 0
+    progress.status = 'running'
     progress.error = ''
     const startedAt = performance.now()
     const onProgress = new Channel<TokenExportProgressEvent>()
@@ -110,6 +136,7 @@ export function useTokenExport() {
       void appendDebugLog('render', 'token-export-results', { scope, outputDir, results })
       return results
     } catch (error) {
+      progress.status = 'failed'
       progress.error = String(error)
       token.status = `Token export failed: ${String(error)}`
       void appendDebugLog('token', 'token-export-failed', { scope, error: String(error) })

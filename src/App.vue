@@ -148,8 +148,7 @@ const { imageElements, imageSize, loadImage, previewUrl, syncImages } = useResou
 const {
   exportProgress,
   exportScale,
-  exportFormat,
-  exportQuality,
+  exportEncoding,
   exportLog,
   isExportingCurrent,
   exportCurrentImage,
@@ -514,6 +513,7 @@ const {
   handleFinderPathChange,
   handoutContextMenuItems,
   tokenContextMenuItems,
+  tokenAssetContextMenuItems,
   imageHandoutContextMenuItems,
   imageRecordFromFinderEntry,
   projectFromFinderEntry,
@@ -710,6 +710,16 @@ provide('left-rail-context', {
   flattenSelectedLayers,
   deleteLayer,
   toggleBackgroundVisibility,
+})
+provide('token-editor-context', {
+  finderRevision,
+  finderUploadConfig,
+  finderDrivers,
+  tokenAssetContextMenuItems,
+  finderFeaturesForKind,
+  handleFinderPathChange,
+  handleDirectFinderDrop,
+  handleDirectFinderDragover,
 })
 provide('canvas-context', {
   stageFrameRef,
@@ -1287,8 +1297,7 @@ watch(
     <ResizablePanel :default-size="20" :min-size="16" :max-size="34" class="shell-panel">
     <RightInspector
       v-model:export-scale="exportScale"
-      v-model:export-format="exportFormat"
-      v-model:export-quality="exportQuality"
+      v-model:export-encoding="exportEncoding"
       :is-exporting="isExportingCurrent"
       :export-log="exportLog"
       :export-progress="exportProgress"

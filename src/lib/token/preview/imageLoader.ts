@@ -1,4 +1,4 @@
-import { readFile } from '@tauri-apps/plugin-fs'
+import { fileUrl } from '@/lib/backend'
 
 export interface PreviewImageSource {
   source: HTMLCanvasElement
@@ -79,47 +79,45 @@ function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
 async function decodeImage(url: string): Promise<HTMLImageElement> {
   return await new Promise((resolve, reject) => {
     const image = new Image()
+    image.crossOrigin = 'anonymous'
     image.onload = () => resolve(image)
     image.onerror = () => reject(new Error('无法解码预览图片'))
     image.src = url
   })
 }
 
+export function previewImageUrl(path: string, resolve: (value: string) => string = fileUrl): string {
+  return resolve(path)
+}
+
 export async function loadPreviewImage(path: string): Promise<PreviewImageSource> {
-  const bytes = await readFile(path)
-  const url = URL.createObjectURL(new Blob([bytes], { type: mimeTypeForPath(path) }))
+  const image = await decodeImage(previewImageUrl(path))
+  const source = document.createElement('canvas')
+  source.width = image.naturalWidth
+  source.height = image.naturalHeight
+  const sourceContext = context2d(source)
+  sourceContext.drawImage(image, 0, 0)
 
-  try {
-    const image = await decodeImage(url)
-    const source = document.createElement('canvas')
-    source.width = image.naturalWidth
-    source.height = image.naturalHeight
-    const sourceContext = context2d(source)
-    sourceContext.drawImage(image, 0, 0)
-
-    const imageData = sourceContext.getImageData(0, 0, source.width, source.height)
-    const bounds = findAlphaBounds(imageData.data, source.width, source.height)
-    if (!bounds) {
-      return { source, width: source.width, height: source.height }
-    }
-
-    const trimmed = document.createElement('canvas')
-    trimmed.width = bounds.width
-    trimmed.height = bounds.height
-    context2d(trimmed).drawImage(
-      source,
-      bounds.x,
-      bounds.y,
-      bounds.width,
-      bounds.height,
-      0,
-      0,
-      bounds.width,
-      bounds.height,
-    )
-
-    return { source: trimmed, width: trimmed.width, height: trimmed.height }
-  } finally {
-    URL.revokeObjectURL(url)
+  const imageData = sourceContext.getImageData(0, 0, source.width, source.height)
+  const bounds = findAlphaBounds(imageData.data, source.width, source.height)
+  if (!bounds) {
+    return { source, width: source.width, height: source.height }
   }
+
+  const trimmed = document.createElement('canvas')
+  trimmed.width = bounds.width
+  trimmed.height = bounds.height
+  context2d(trimmed).drawImage(
+    source,
+    bounds.x,
+    bounds.y,
+    bounds.width,
+    bounds.height,
+    0,
+    0,
+    bounds.width,
+    bounds.height,
+  )
+
+  return { source: trimmed, width: trimmed.width, height: trimmed.height }
 }

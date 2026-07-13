@@ -108,4 +108,38 @@ describe('token project store', () => {
     expect(store.selectedItemId).toBe('two')
     expect(store.checkedItemIds).toEqual(['two'])
   })
+
+  it('groups select-all, clear, reset style and missing-ring repair as store operations', () => {
+    const store = useTokenStore()
+    const now = new Date().toISOString()
+    store.document = {
+      schemaVersion: 1,
+      id: 'project',
+      title: 'Token',
+      items: [
+        { id: 'one', assetId: 'a', name: 'a.png', mediaType: 'image/png', sourcePath: '/assets/a.png', style: { scale: 180, offsetX: 10, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'asset:missing', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
+        { id: 'two', assetId: 'b', name: 'b.png', mediaType: 'image/png', sourcePath: '/assets/b.png', style: { scale: 100, offsetX: 0, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'solid', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
+      ],
+      exportSettings: createDefaultTokenExportSettings(),
+      createdAt: now,
+      updatedAt: now,
+    }
+    store.selectedItemId = 'one'
+
+    store.toggleAllChecked()
+    expect(store.checkedItemIds).toEqual(['one', 'two'])
+    store.toggleAllChecked()
+    expect(store.checkedItemIds).toEqual([])
+
+    expect(store.replaceMissingRingReferences(new Set(['solid']))).toBe(1)
+    expect(store.items[0]?.style.ringStyle).toBe('solid')
+
+    store.resetSelectedStyle()
+    expect(store.items[0]?.style.scale).toBe(100)
+    expect(store.canUndo).toBe(true)
+
+    store.clearItems()
+    expect(store.items).toEqual([])
+    expect(store.selectedItemId).toBeUndefined()
+  })
 })

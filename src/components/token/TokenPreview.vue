@@ -14,6 +14,9 @@ import { useTokenStore } from '@/stores/token'
 const token = useTokenStore()
 const editor = useEditorStore()
 const container = ref<HTMLDivElement>()
+const loading = ref(false)
+const errorMessage = ref('')
+const ringWarning = ref('')
 const loads = new LatestPreviewLoad()
 const ringProvider = new AppFrontendRingProvider(appConfiguration.token, descriptorForRing)
 let renderer: PixiTokenRenderer | undefined
@@ -80,8 +83,12 @@ async function refreshImage(path: string) {
   if (!renderer) return
   if (!path) {
     renderer.setImage(null)
+    loading.value = false
+    errorMessage.value = '当前项目项缺少可用图片来源'
     return
   }
+  loading.value = true
+  errorMessage.value = ''
   try {
     const image = await loadPreviewImage(path)
     if (disposed || !loads.isCurrent(generation)) return
@@ -89,7 +96,10 @@ async function refreshImage(path: string) {
     if (params.value) renderer.update(params.value)
   } catch (error) {
     if (loads.isCurrent(generation)) renderer.setImage(null)
+    if (loads.isCurrent(generation)) errorMessage.value = `无法加载 Token 图片：${String(error)}`
     void appendDebugLog('token', 'token-preview-image-failed', { path, error: String(error) })
+  } finally {
+    if (loads.isCurrent(generation)) loading.value = false
   }
 }
 
@@ -101,7 +111,10 @@ async function refreshRing(value?: TokenParams) {
       const descriptor = descriptorForRing(value.ringStyle)
       if (!descriptor?.assetPath) throw new Error('Custom ring asset is missing')
       const image = await loadPreviewImage(descriptor.assetPath)
-      if (!disposed && version === ringVersion) renderer.setCustomRingImage(image)
+      if (!disposed && version === ringVersion) {
+        ringWarning.value = ''
+        renderer.setCustomRingImage(image)
+      }
       return
     }
     const targetSize = Math.max(256, Math.round(appConfiguration.token.preview.displayTokenSize))
@@ -112,9 +125,26 @@ async function refreshRing(value?: TokenParams) {
       innerRadius: value.ringInnerRadius,
       outerRadius: value.ringOuterRadius,
     })
-    if (!disposed && version === ringVersion) renderer.setBuiltinRingImage(image)
+    if (!disposed && version === ringVersion) {
+      ringWarning.value = ''
+      renderer.setBuiltinRingImage(image)
+    }
   } catch (error) {
-    renderer.clearRingImage()
+    try {
+      const fallback = await ringProvider.renderBuiltin({
+        id: 'solid',
+        designSize: value.size,
+        targetSize: Math.max(256, Math.round(appConfiguration.token.preview.displayTokenSize)),
+        innerRadius: value.ringInnerRadius,
+        outerRadius: value.ringOuterRadius,
+      })
+      if (!disposed && version === ringVersion) {
+        ringWarning.value = `圆环 ${value.ringStyle} 不可用，已回退为 solid`
+        renderer.setBuiltinRingImage(fallback)
+      }
+    } catch {
+      renderer.clearRingImage()
+    }
     void appendDebugLog('token', 'token-preview-ring-failed', {
       ringStyle: value.ringStyle,
       error: String(error),
@@ -146,7 +176,7 @@ onMounted(async () => {
       token.updateVisualStyle('scale', scale)
       token.commitEdit()
     },
-  })
+  }, appConfiguration.token.preview.renderer)
   renderer = instance
   try {
     await instance.mount(container.value)
@@ -154,6 +184,7 @@ onMounted(async () => {
     if (params.value) instance.update(params.value)
     await Promise.all([refreshImage(sourcePath.value), refreshRing(params.value)])
   } catch (error) {
+    errorMessage.value = `Token 预览初始化失败：${String(error)}`
     void appendDebugLog('token', 'token-preview-init-failed', { error: String(error) })
     instance.destroy()
   }
@@ -173,5 +204,16 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="container" class="h-full min-h-0 min-w-0 bg-neutral-950" />
+  <div class="relative h-full min-h-0 min-w-0 bg-neutral-950">
+    <div ref="container" class="h-full min-h-0 min-w-0" />
+    <div v-if="loading" class="pointer-events-none absolute inset-x-0 top-3 text-center text-xs text-neutral-300">
+      正在加载 Token 图片…
+    </div>
+    <div v-if="errorMessage" class="absolute inset-x-4 top-4 border border-destructive/40 bg-background/95 p-3 text-xs text-destructive shadow-sm">
+      {{ errorMessage }}
+    </div>
+    <div v-else-if="ringWarning" class="absolute inset-x-4 top-4 border border-border bg-background/95 p-3 text-xs text-muted-foreground shadow-sm">
+      {{ ringWarning }}
+    </div>
+  </div>
 </template>

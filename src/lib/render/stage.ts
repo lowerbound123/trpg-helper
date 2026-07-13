@@ -48,22 +48,40 @@ export async function renderHandoutToBlob(
   options?: RenderMaskOptions,
 ) {
   const startedAt = performance.now()
+  const canvas = await renderHandoutToCanvas(document, library, scale, cache, options)
+  const blob = await canvasToBlob(canvas, mimeType, quality)
+  appendSpeedLog('handout-render-blob', {
+    canvasWidth: document.canvas.width,
+    canvasHeight: document.canvas.height,
+    mimeType,
+    pixelRatio: Math.max(0.1, Number(scale) || 1),
+    bytes: blob.size,
+    durationMs: Math.round(performance.now() - startedAt),
+  })
+  return blob
+}
+
+export async function renderHandoutToCanvas(
+  document: HandoutDocument,
+  library: LibraryIndex,
+  scale = 1,
+  cache: ImageCache = {},
+  options?: RenderMaskOptions,
+) {
+  const startedAt = performance.now()
   const { stage, destroy } = await renderHandoutStage(document, library, cache, options)
   try {
     const pixelRatio = Math.max(0.1, Number(scale) || 1)
     const canvas = stage.toCanvas({
       pixelRatio,
     })
-    const blob = await canvasToBlob(canvas, mimeType, quality)
-    appendSpeedLog('handout-render-blob', {
+    appendSpeedLog('handout-render-canvas', {
       canvasWidth: document.canvas.width,
       canvasHeight: document.canvas.height,
-      mimeType,
       pixelRatio,
-      bytes: blob.size,
       durationMs: Math.round(performance.now() - startedAt),
     })
-    return blob
+    return canvas
   } finally {
     destroy()
   }

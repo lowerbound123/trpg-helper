@@ -3,6 +3,14 @@ import { BaseDirectory, writeFile } from '@tauri-apps/plugin-fs'
 
 import { appConfiguration, runtimeConfigurationToml, storeRuntimeConfigurationOverride } from './configuration'
 import type { HandoutDocument } from './handout'
+import {
+  buildHandoutExportEnvelope,
+  canvasToPngBlob,
+  chooseHandoutTransport,
+  validateHandoutExportDimensions,
+  type HandoutEncodingOptions,
+  type HandoutExportResult,
+} from './handout-export'
 import type {
   TokenProjectDocument,
   TokenProjectPayload,
@@ -541,6 +549,55 @@ export async function writeEncodedImageBlobToDownloads(
     durationMs: Math.round(performance.now() - writeStartedAt),
   })
   return path
+}
+
+export async function encodeHandoutCanvasToDownloads(
+  fileName: string,
+  canvas: HTMLCanvasElement,
+  options: HandoutEncodingOptions,
+): Promise<HandoutExportResult> {
+  if (!isTauriRuntime()) throw new Error('Rust Handout 编码仅在桌面应用中可用')
+  const config = appConfiguration.export
+  validateHandoutExportDimensions(
+    canvas.width,
+    canvas.height,
+    config.limits.maxCanvasDimension,
+    config.limits.maxCanvasPixels,
+  )
+  const inputEncoding = chooseHandoutTransport(canvas.width, canvas.height, config.rawRgbaIpcMaxBytes)
+  const payloadStartedAt = performance.now()
+  let payload: Uint8Array
+  if (inputEncoding === 'rgba8') {
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) throw new Error('无法读取 Handout 导出像素')
+    payload = new Uint8Array(context.getImageData(0, 0, canvas.width, canvas.height).data.buffer)
+  } else {
+    payload = new Uint8Array(await (await canvasToPngBlob(canvas)).arrayBuffer())
+  }
+  void appendDebugLog('speed', 'handout-export-transport-prepared', {
+    inputEncoding,
+    width: canvas.width,
+    height: canvas.height,
+    bytes: payload.length,
+    durationMs: Math.round(performance.now() - payloadStartedAt),
+  })
+  const envelope = buildHandoutExportEnvelope({
+    fileName,
+    width: canvas.width,
+    height: canvas.height,
+    inputEncoding,
+    options,
+    jpegMatteColor: config.rendering.jpegMatteColor,
+    webpStrengthProfiles: config.webpStrengthProfiles,
+  }, payload)
+  const ipcStartedAt = performance.now()
+  const result = await invoke<HandoutExportResult>('encode_handout_image_to_downloads', envelope)
+  void appendDebugLog('speed', 'handout-export-rust-complete', {
+    ...result,
+    inputEncoding,
+    ipcDurationMs: Math.round(performance.now() - ipcStartedAt),
+  })
+  return result
 }
 
 export async function saveProjectPreview(projectId: string, dataUrl: string): Promise<string> {

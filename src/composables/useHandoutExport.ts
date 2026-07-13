@@ -1,16 +1,18 @@
 import { ref, reactive } from 'vue'
 
 import {
+  encodeHandoutCanvasToDownloads,
   openManagedProject,
   writeEncodedImageBlobToDownloads,
   type LibraryRecord,
   type ProjectSummary,
 } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
-import { exportExtension, exportMimeType, exportQualityValue, type ExportFormat } from '@/lib/export-options'
+import { browserQualityForEncoding, exportExtension, exportMimeType } from '@/lib/export-options'
 import type { HandoutDocument, LayerMask } from '@/lib/handout'
+import { canvasToPngBlob, type HandoutEncodingOptions } from '@/lib/handout-export'
 import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
-import { downloadFileName, renderHandoutToBlob } from '@/lib/render'
+import { downloadFileName, renderHandoutToCanvas } from '@/lib/render'
 import { isImageLayer, useEditorStore } from '@/stores/editor'
 import { useExportProgress } from './useExportProgress'
 
@@ -25,8 +27,7 @@ export function useHandoutExport(options: {
   logExport: ExportLog
 }) {
   const exportScale = ref(appConfiguration.export.defaultScale)
-  const exportFormat = ref<ExportFormat>('png')
-  const exportQuality = ref(90)
+  const exportEncoding = ref<HandoutEncodingOptions>(structuredClone(appConfiguration.export.defaults))
   const exportLog = ref('')
   const isExportingCurrent = ref(false)
   const exportingHandoutIds = reactive(new Set<string>())
@@ -69,6 +70,32 @@ export function useHandoutExport(options: {
     return maskDataUrls
   }
 
+  async function browserCanvasBlob(canvas: HTMLCanvasElement, options: HandoutEncodingOptions) {
+    if (options.format === 'jxl') throw new Error('JPEG XL 仅在 Tauri 桌面应用中支持')
+    if (options.format === 'png') return canvasToPngBlob(canvas)
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error(`无法编码 ${options.format.toUpperCase()}`)),
+        exportMimeType(options.format),
+        browserQualityForEncoding(options),
+      )
+    })
+  }
+
+  async function encodeCanvas(fileName: string, canvas: HTMLCanvasElement, encoding: HandoutEncodingOptions) {
+    const desktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+    if (desktop) return await encodeHandoutCanvasToDownloads(fileName, canvas, encoding)
+    const blob = await browserCanvasBlob(canvas, encoding)
+    return {
+      path: await writeEncodedImageBlobToDownloads(fileName, blob),
+      inputBytes: blob.size,
+      outputBytes: blob.size,
+      decodeMs: 0,
+      encodeMs: 0,
+      writeMs: 0,
+    }
+  }
+
   async function exportCurrentImage() {
     if (isExportingCurrent.value) return
     const clickedAt = performance.now()
@@ -80,8 +107,8 @@ export function useHandoutExport(options: {
     options.logExport('export current start', {
       title: options.editor.document.title,
       scale: exportScale.value,
-      format: exportFormat.value,
-      quality: exportQuality.value,
+      format: exportEncoding.value.format,
+      encoding: exportEncoding.value,
       clickToProgressMs,
     })
     try {
@@ -91,8 +118,7 @@ export function useHandoutExport(options: {
       const signature = JSON.stringify({
         document: options.editor.document,
         scale: exportScale.value,
-        format: exportFormat.value,
-        quality: exportQuality.value,
+        encoding: exportEncoding.value,
       })
       const signatureMs = Math.round(performance.now() - signatureStartedAt)
       if (lastCurrentExport.value?.signature === signature) {
@@ -110,15 +136,11 @@ export function useHandoutExport(options: {
       await setExportProgress(42)
       const renderStartedAt = performance.now()
       const maskDataUrls = await currentMaterializedMaskDataUrls(options.editor.document)
-      const mimeType = exportMimeType(exportFormat.value)
-      const quality = exportQualityValue(exportFormat.value, exportQuality.value)
-      const blob = await renderHandoutToBlob(
+      const canvas = await renderHandoutToCanvas(
         options.editor.document,
         options.editor.library,
         exportScale.value,
         options.imageElements,
-        mimeType,
-        quality,
         {
           projectTarget: {
             projectId: options.editor.currentProjectId,
@@ -130,20 +152,22 @@ export function useHandoutExport(options: {
         },
       )
       const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
-      options.logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, bytes: blob.size })
-      exportLog.value = `Writing ${exportFormat.value.toUpperCase()} to Downloads...`
+      options.logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, width: canvas.width, height: canvas.height })
+      exportLog.value = `Encoding ${exportEncoding.value.format.toUpperCase()} and writing to Downloads...`
       await setExportProgress(86)
       const writeStartedAt = performance.now()
-      const path = await writeEncodedImageBlobToDownloads(
-        downloadFileName(options.editor.document.title, new Date(), exportExtension(exportFormat.value)),
-        blob,
+      const result = await encodeCanvas(
+        downloadFileName(options.editor.document.title, new Date(), exportExtension(exportEncoding.value.format)),
+        canvas,
+        exportEncoding.value,
       )
       const writeMs = Math.round(performance.now() - writeStartedAt)
+      const path = result.path
       lastCurrentExport.value = { signature, path }
       exportLog.value = `Exported image to ${path}`
       options.logExport('export current complete', {
         path,
-        bytes: blob.size,
+        bytes: result.outputBytes,
         clickToProgressMs,
         signatureMs,
         imageLoadMs,
@@ -186,7 +210,7 @@ export function useHandoutExport(options: {
       await ensureDocumentImages(payload.document)
       const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
       const renderStartedAt = performance.now()
-      const blob = await renderHandoutToBlob(payload.document, options.editor.library, 1, options.imageElements, 'image/png', undefined, {
+      const canvas = await renderHandoutToCanvas(payload.document, options.editor.library, 1, options.imageElements, {
         projectTarget: { projectId: project.id },
         masksEnabled: appConfiguration.mask.enabled,
         maskRenderMode: 'export-deterministic',
@@ -198,17 +222,20 @@ export function useHandoutExport(options: {
         signatureMs,
         imageLoadMs,
         konvaRenderMs,
-        bytes: blob.size,
+        width: canvas.width,
+        height: canvas.height,
       })
       const writeStartedAt = performance.now()
-      const path = await writeEncodedImageBlobToDownloads(downloadFileName(payload.document.title), blob)
+      const pngEncoding = { ...structuredClone(appConfiguration.export.defaults), format: 'png' as const }
+      const result = await encodeCanvas(downloadFileName(payload.document.title), canvas, pngEncoding)
+      const path = result.path
       const writeMs = Math.round(performance.now() - writeStartedAt)
       lastHandoutExports.set(project.id, { signature, path })
       exportLog.value = `Exported image to ${path}`
       options.logExport('export handout complete', {
         projectId: project.id,
         path,
-        bytes: blob.size,
+        bytes: result.outputBytes,
         clickToProgressMs,
         openDurationMs,
         signatureMs,
@@ -232,8 +259,7 @@ export function useHandoutExport(options: {
 
   return {
     exportScale,
-    exportFormat,
-    exportQuality,
+    exportEncoding,
     exportLog,
     exportProgress,
     isExportingCurrent,

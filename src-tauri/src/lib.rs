@@ -1,8 +1,8 @@
 mod commands;
 mod errors;
 mod services;
-mod types;
 mod token;
+mod types;
 
 // Re-exports needed by already-extracted command modules (export_commands.rs,
 // mask_commands.rs) that reference these via `crate::` paths.
@@ -17,8 +17,9 @@ pub(crate) use services::path_service::reset_debug_log;
 // Import commands for `generate_handler!` in `run()`.
 use commands::asset_commands::*;
 use commands::export_commands::{
-    export_image, export_image_bytes_to_downloads, export_image_file_to_downloads,
-    export_image_to_downloads, write_encoded_image_bytes_to_downloads,
+    encode_handout_image_to_downloads, export_image, export_image_bytes_to_downloads,
+    export_image_file_to_downloads, export_image_to_downloads,
+    write_encoded_image_bytes_to_downloads,
 };
 use commands::mask_commands::{
     delete_project_mask, read_project_file_data_url, save_project_mask, save_project_mask_cache,
@@ -26,6 +27,7 @@ use commands::mask_commands::{
 use commands::preview_commands::{save_project_asset, save_project_preview};
 use commands::project_commands::*;
 use commands::token_project_commands::*;
+use tauri::{LogicalSize, Manager};
 use token::commands::generate_token_batch;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -35,9 +37,28 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             reset_debug_log();
-            token::configuration::set_active_configuration(
-                token::configuration::parse_handout_configuration(include_str!("../../configuration.toml"))
-                    .map_err(std::io::Error::other)?,
+            let source = include_str!("../../configuration.toml");
+            let configuration = token::configuration::parse_handout_configuration(source)
+                .map_err(std::io::Error::other)?;
+            let handout_export_configuration =
+                token::configuration::parse_handout_export_configuration(source)
+                    .map_err(std::io::Error::other)?;
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_title(&configuration.application.title)?;
+                window.set_size(LogicalSize::new(
+                    f64::from(configuration.window.width),
+                    f64::from(configuration.window.height),
+                ))?;
+                window.set_min_size(Some(LogicalSize::new(
+                    f64::from(configuration.window.min_width),
+                    f64::from(configuration.window.min_height),
+                )))?;
+                window.set_resizable(configuration.window.resizable)?;
+            }
+            token::configuration::set_active_configuration(configuration)
+                .map_err(std::io::Error::other)?;
+            token::configuration::set_active_handout_export_configuration(
+                handout_export_configuration,
             )
             .map_err(std::io::Error::other)?;
             if cfg!(debug_assertions) {
@@ -61,6 +82,7 @@ pub fn run() {
             delete_library_entries,
             delete_project_entries,
             delete_token_project_entries,
+            encode_handout_image_to_downloads,
             delete_project_mask,
             export_image,
             export_image_bytes_to_downloads,

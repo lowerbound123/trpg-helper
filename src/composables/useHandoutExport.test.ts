@@ -1,18 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const renderHandoutToBlobMock = vi.hoisted(() => vi.fn(async () => new Blob(['encoded'], { type: 'image/jpeg' })))
+const renderHandoutToCanvasMock = vi.hoisted(() => vi.fn(async () => ({ width: 800, height: 600 } as HTMLCanvasElement)))
+const encodeHandoutCanvasToDownloadsMock = vi.hoisted(() => vi.fn(async () => ({ path: '/Downloads/Handout.jpg', inputBytes: 8, outputBytes: 4, decodeMs: 1, encodeMs: 2, writeMs: 1 })))
 const writeEncodedImageBlobToDownloadsMock = vi.hoisted(() => vi.fn(async () => '/Downloads/handout.jpg'))
 const exportImageBlobToDownloadsMock = vi.hoisted(() => vi.fn(async () => '/Downloads/fallback.jpg'))
 const materializeMaskDataUrlMock = vi.hoisted(() => vi.fn(() => 'data:image/png;base64,RUNTIME'))
 
 vi.mock('@/lib/render', () => ({
-  renderHandoutToBlob: renderHandoutToBlobMock,
+  renderHandoutToCanvas: renderHandoutToCanvasMock,
   downloadFileName: vi.fn((title: string, _date?: Date, extension = 'png') => `${title}.${extension}`),
 }))
 
 vi.mock('@/lib/backend', () => ({
   exportImageBlobToDownloads: exportImageBlobToDownloadsMock,
   writeEncodedImageBlobToDownloads: writeEncodedImageBlobToDownloadsMock,
+  encodeHandoutCanvasToDownloads: encodeHandoutCanvasToDownloadsMock,
   openManagedProject: vi.fn(),
 }))
 
@@ -122,7 +124,9 @@ function documentWithMask(): HandoutDocument {
 
 describe('useHandoutExport', () => {
   beforeEach(() => {
-    renderHandoutToBlobMock.mockClear()
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    renderHandoutToCanvasMock.mockClear()
+    encodeHandoutCanvasToDownloadsMock.mockClear()
     writeEncodedImageBlobToDownloadsMock.mockClear()
     exportImageBlobToDownloadsMock.mockClear()
     materializeMaskDataUrlMock.mockClear()
@@ -145,22 +149,22 @@ describe('useHandoutExport', () => {
       loadImage: vi.fn(async () => ({} as HTMLImageElement)),
       logExport: vi.fn(),
     })
-    exportApi.exportFormat.value = 'jpeg'
-    exportApi.exportQuality.value = 82
+    exportApi.exportEncoding.value = { ...exportApi.exportEncoding.value, format: 'jpg', jpegQuality: 82 }
 
     await exportApi.exportCurrentImage()
 
-    expect(renderHandoutToBlobMock).toHaveBeenCalledTimes(1)
-    const renderCall = renderHandoutToBlobMock.mock.calls[0] as unknown[]
-    expect(renderCall[4]).toBe('image/jpeg')
-    expect(renderCall[5]).toBe(0.82)
-    expect(renderCall[6]).toMatchObject({
+    expect(renderHandoutToCanvasMock).toHaveBeenCalledTimes(1)
+    const renderCall = renderHandoutToCanvasMock.mock.calls[0] as unknown[]
+    expect(renderCall[4]).toMatchObject({
       maskRenderMode: 'export-deterministic',
       maskDataUrls: { 'mask-1': 'data:image/png;base64,RUNTIME' },
     })
-    expect(writeEncodedImageBlobToDownloadsMock).toHaveBeenCalledTimes(1)
-    const writeCall = writeEncodedImageBlobToDownloadsMock.mock.calls[0] as unknown[]
-    expect(writeCall[0]).toBe('Handout.jpg')
+    expect(encodeHandoutCanvasToDownloadsMock).toHaveBeenCalledWith(
+      'Handout.jpg',
+      expect.objectContaining({ width: 800, height: 600 }),
+      expect.objectContaining({ format: 'jpg', jpegQuality: 82 }),
+    )
+    expect(writeEncodedImageBlobToDownloadsMock).not.toHaveBeenCalled()
     expect(exportImageBlobToDownloadsMock).not.toHaveBeenCalled()
   })
 })

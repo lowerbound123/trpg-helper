@@ -4,6 +4,7 @@ import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, FlipHorizontal,
 
 import { Button } from '@/components/ui/button'
 import ExportPanel from '@/components/editor/ExportPanel.vue'
+import type { HandoutEncodingOptions } from '@/lib/handout-export'
 import NumericSliderField from '@/components/controls/NumericSliderField.vue'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -17,8 +18,7 @@ import { isPaintLayer, isShapeLayer, isTextLayer, useEditorStore } from '@/store
 import type { BrushKind } from '@/lib/handout'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
-const exportFormat = defineModel<'png' | 'jpeg' | 'webp'>('exportFormat', { required: true })
-const exportQuality = defineModel<number>('exportQuality', { required: true })
+const exportEncoding = defineModel<HandoutEncodingOptions>('exportEncoding', { required: true })
 
 const props = defineProps<{
   isExporting?: boolean
@@ -525,8 +525,7 @@ function patchDocumentSaturation(value: number) {
           <Separator />
           <ExportPanel
             v-model:export-scale="exportScale"
-            v-model:export-format="exportFormat"
-            v-model:export-quality="exportQuality"
+            v-model:export-encoding="exportEncoding"
             :is-exporting="isExporting"
             :export-log="exportLog"
             :export-progress="exportProgress"

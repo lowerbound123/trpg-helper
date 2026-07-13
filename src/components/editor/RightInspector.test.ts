@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { EditorTool } from '@/lib/editor-tools'
 import { useEditorStore } from '@/stores/editor'
+import { appConfiguration } from '@/lib/configuration'
 
 import NumericSliderField from '@/components/controls/NumericSliderField.vue'
 import RightInspector from './RightInspector.vue'
@@ -14,11 +15,9 @@ function mountInspector(activeTool: EditorTool) {
     props: {
       activeTool,
       exportScale: 1,
-      exportFormat: 'png',
-      exportQuality: 90,
+      exportEncoding: structuredClone(appConfiguration.export.defaults),
       'onUpdate:exportScale': () => undefined,
-      'onUpdate:exportFormat': () => undefined,
-      'onUpdate:exportQuality': () => undefined,
+      'onUpdate:exportEncoding': () => undefined,
     },
     global: {
       stubs: {

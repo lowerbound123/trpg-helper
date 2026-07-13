@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use tauri::AppHandle;
 
 use crate::errors::{AppError, CommandResult};
@@ -19,15 +19,36 @@ pub fn clean_file_name(file_name: &str) -> String {
         .and_then(|value| value.to_str())
         .unwrap_or(fallback);
 
-    name.chars()
+    let cleaned = name
+        .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
-                ch
-            } else {
+            if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            {
                 '_'
+            } else {
+                ch
             }
         })
-        .collect()
+        .collect::<String>();
+    let cleaned = cleaned.trim().trim_end_matches(['.', ' ']);
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        fallback.to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_file_name;
+
+    #[test]
+    fn clean_file_name_preserves_unicode_and_removes_path_characters() {
+        assert_eq!(clean_file_name("中文讲义.png"), "中文讲义.png");
+        assert_eq!(clean_file_name("bad:name?.png"), "bad_name_.png");
+        assert_eq!(clean_file_name("../safe.png"), "safe.png");
+        assert_eq!(clean_file_name("..."), "resource.bin");
+    }
 }
 
 pub(crate) fn app_root(_app: &AppHandle) -> Result<PathBuf, AppError> {
@@ -204,7 +225,14 @@ pub(crate) fn write_debug_log(scope: &str, line: &str) -> CommandResult<String> 
 pub(crate) fn reset_debug_log() {
     if let Ok(path) = project_root().map(|root| root.join("logs")) {
         let _ = fs::create_dir_all(&path);
-        for file_name in ["app.log", "mask.log", "render.log", "speed.log", "text.log", "upload.log"] {
+        for file_name in [
+            "app.log",
+            "mask.log",
+            "render.log",
+            "speed.log",
+            "text.log",
+            "upload.log",
+        ] {
             let _ = fs::write(path.join(file_name), "");
         }
     }

@@ -22,9 +22,9 @@ function setColor(event: Event) {
 </script>
 
 <template>
-  <div class="grid gap-2 border p-2">
+  <div class="grid gap-2 rounded-md border border-border p-2">
     <div class="flex items-center gap-2">
-      <label class="relative h-7 w-7 overflow-hidden border border-input" :style="{ backgroundColor: rgb }">
+      <label class="relative h-7 w-7 overflow-hidden rounded-sm border border-input" :style="{ backgroundColor: rgb }">
         <input type="color" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" :value="rgb" :disabled="disabled" :aria-label="`${label}颜色`" @change="setColor" />
       </label>
       <span class="text-xs text-muted-foreground">{{ label }}颜色</span>

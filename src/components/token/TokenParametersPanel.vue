@@ -3,8 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { RotateCcw } from '@lucide/vue'
 
 import NumericSliderField from '@/components/controls/NumericSliderField.vue'
+import BooleanSettingField from '@/components/controls/BooleanSettingField.vue'
 import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
 import { updateTokenRingConfig, type LibraryRecord } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
 import type { TokenRingConfig, TokenVisualStyle } from '@/lib/token'
@@ -49,8 +49,8 @@ watch(selectedCustomRing, (asset) => {
           <NumericSliderField label="圆环纵向拉伸" :model-value="style.ringStretchY" :min="appConfiguration.token.limits.ringStretchMin" :max="appConfiguration.token.limits.ringStretchMax" :step="0.01" @edit-start="token.beginEdit()" @update:model-value="update('ringStretchY', $event)" @commit="token.commitEdit()" />
         </div>
 
-        <div v-if="ringDraft && selectedCustomRing" class="space-y-2 border p-2">
-          <p class="text-[11px] font-medium uppercase text-muted-foreground">自定义圆环几何</p>
+        <div v-if="ringDraft && selectedCustomRing" class="space-y-2 rounded-md border border-border p-2">
+          <p class="text-[11px] font-medium text-muted-foreground">自定义圆环几何</p>
           <NumericSliderField label="设计尺寸" :model-value="ringDraft.designSize" :min="64" :max="4096" unit="px" @update:model-value="ringDraft!.designSize = $event" />
           <NumericSliderField label="环内径" :model-value="ringDraft.innerRadius" :min="0" :max="Math.max(0, ringDraft.outerRadius - 1)" unit="px" @update:model-value="ringDraft!.innerRadius = $event" />
           <NumericSliderField label="环外径" :model-value="ringDraft.outerRadius" :min="ringDraft.innerRadius + 1" :max="ringDraft.designSize / 2" unit="px" @update:model-value="ringDraft!.outerRadius = $event" />
@@ -64,8 +64,14 @@ watch(selectedCustomRing, (asset) => {
         <TokenColorPicker label="背景" :model-value="style.background" @edit-start="token.beginEdit()" @update:model-value="update('background', $event)" @commit="token.commitEdit()" />
         <TokenRingSelector />
 
-        <div class="space-y-2 border p-3">
-          <div class="flex items-center justify-between"><span class="text-xs font-medium">出框模式</span><Switch :checked="style.splitRing" @update:checked="update('splitRing', $event); token.commitEdit()" /></div>
+        <div class="space-y-2 rounded-md border border-border p-3">
+          <BooleanSettingField
+            id="token-split-ring"
+            label="出框模式"
+            description="允许头像在分割线指定的一侧越过圆环；另一侧仍限制在圆形内部。"
+            :model-value="style.splitRing"
+            @update:model-value="update('splitRing', $event); token.commitEdit()"
+          />
           <template v-if="style.splitRing">
             <NumericSliderField label="分割线角度" :model-value="style.splitAngle" :min="appConfiguration.token.limits.splitAngleMin" :max="appConfiguration.token.limits.splitAngleMax" unit="°" @edit-start="token.beginEdit()" @update:model-value="update('splitAngle', $event)" @commit="token.commitEdit()" />
             <NumericSliderField label="分割线高度" :model-value="style.splitHeight" :min="appConfiguration.token.limits.splitHeightMin" :max="appConfiguration.token.limits.splitHeightMax" unit="%" @edit-start="token.beginEdit()" @update:model-value="update('splitHeight', $event)" @commit="token.commitEdit()" />
@@ -73,7 +79,7 @@ watch(selectedCustomRing, (asset) => {
         </div>
 
         <div class="space-y-2">
-          <p class="text-[11px] font-medium uppercase text-muted-foreground">微调</p>
+          <p class="text-[11px] font-medium text-muted-foreground">微调</p>
           <NumericSliderField label="缩放" :model-value="style.scale" :min="appConfiguration.token.limits.scaleMin" :max="appConfiguration.token.limits.scaleMax" :step="appConfiguration.token.limits.scaleStep" unit="%" @edit-start="token.beginEdit()" @update:model-value="update('scale', $event)" @commit="token.commitEdit()" />
           <NumericSliderField label="水平偏移" :model-value="style.offsetX" :min="appConfiguration.token.limits.offsetMin" :max="appConfiguration.token.limits.offsetMax" unit="%" @edit-start="token.beginEdit()" @update:model-value="update('offsetX', $event)" @commit="token.commitEdit()" />
           <NumericSliderField label="垂直偏移" :model-value="style.offsetY" :min="appConfiguration.token.limits.offsetMin" :max="appConfiguration.token.limits.offsetMax" unit="%" @edit-start="token.beginEdit()" @update:model-value="update('offsetY', $event)" @commit="token.commitEdit()" />

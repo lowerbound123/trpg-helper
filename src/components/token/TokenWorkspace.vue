@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ArrowLeft, Redo2, Save, Undo2 } from '@lucide/vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { ArrowLeft, Download, FolderOpen, Layers, List, Redo2, Save, Undo2 } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -18,6 +18,19 @@ const token = useTokenStore()
 const leftTab = ref('items')
 const rightTab = ref('parameters')
 const preview = ref<InstanceType<typeof TokenPreview>>()
+const workspaceWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
+const layout = appConfiguration.token.layout
+const panelPercent = (pixels: number) => Math.max(1, pixels / workspaceWidth.value * 100)
+const leftDefaultSize = computed(() => panelPercent(layout.leftWidth))
+const rightDefaultSize = computed(() => panelPercent(layout.rightWidth))
+const centerDefaultSize = computed(() => Math.max(panelPercent(layout.centerMinWidth), 100 - leftDefaultSize.value - rightDefaultSize.value))
+
+function syncWorkspaceWidth() {
+  workspaceWidth.value = window.innerWidth
+}
+
+onMounted(() => window.addEventListener('resize', syncWorkspaceWidth))
+onUnmounted(() => window.removeEventListener('resize', syncWorkspaceWidth))
 
 async function saveProject() {
   await token.save()
@@ -52,27 +65,38 @@ async function leaveEditor() {
       </div>
     </header>
 
-    <ResizablePanelGroup direction="horizontal" class="min-h-0 flex-1">
-      <ResizablePanel :default-size="appConfiguration.token.layout.leftWidth / 15.2" :min-size="14" :max-size="32" class="min-w-0">
-        <Tabs v-model="leftTab" class="flex h-full min-h-0 flex-col">
-          <TabsList class="m-2 mb-0 grid grid-cols-2"><TabsTrigger value="items">Items</TabsTrigger><TabsTrigger value="assets">Assets</TabsTrigger></TabsList>
-          <TabsContent value="items" class="min-h-0 flex-1 overflow-hidden"><TokenItemsPanel /></TabsContent>
-          <TabsContent value="assets" class="min-h-0 flex-1 overflow-hidden"><TokenAssetFinder /></TabsContent>
+    <ResizablePanelGroup direction="horizontal" class="min-h-0 flex-1 overflow-hidden">
+      <ResizablePanel :default-size="leftDefaultSize" :min-size="panelPercent(layout.leftMinWidth)" :max-size="40" class="min-w-0 border-r border-border">
+        <Tabs v-model="leftTab" class="flex h-full min-h-0 flex-col gap-0">
+          <div class="token-panel-heading"><p>文件列表</p></div>
+          <TabsList class="token-underline-tabs grid grid-cols-2">
+            <TabsTrigger value="items" class="token-underline-tab"><List />Items</TabsTrigger>
+            <TabsTrigger value="assets" class="token-underline-tab"><FolderOpen />Assets</TabsTrigger>
+          </TabsList>
+          <TabsContent value="items" class="mt-0 min-h-0 flex-1 overflow-hidden"><TokenItemsPanel /></TabsContent>
+          <TabsContent value="assets" class="mt-0 min-h-0 flex-1 overflow-hidden"><TokenAssetFinder /></TabsContent>
         </Tabs>
       </ResizablePanel>
 
       <ResizableHandle with-handle />
-      <ResizablePanel :default-size="54" :min-size="30" class="min-w-0"><TokenPreview ref="preview" /></ResizablePanel>
+      <ResizablePanel :default-size="centerDefaultSize" :min-size="panelPercent(layout.centerMinWidth)" class="min-w-0">
+        <section class="flex h-full min-h-0 flex-col bg-background">
+          <div class="token-panel-heading"><p>实时预览</p></div>
+          <div class="min-h-0 flex-1 overflow-hidden p-2"><TokenPreview ref="preview" /></div>
+          <p class="shrink-0 pb-2 text-center text-[11px] text-muted-foreground">拖动预览区域可移动 Token，滚轮可缩放</p>
+        </section>
+      </ResizablePanel>
       <ResizableHandle with-handle />
 
-      <ResizablePanel :default-size="appConfiguration.token.layout.rightWidth / 15.2" :min-size="20" :max-size="40" class="min-w-0">
-        <Tabs v-model="rightTab" class="flex h-full min-h-0 flex-col">
-          <div class="border-b p-3 pb-0">
-            <p class="mb-2 text-sm font-semibold">控制面板</p>
-            <TabsList class="grid grid-cols-2"><TabsTrigger value="parameters">参数调整</TabsTrigger><TabsTrigger value="export">导出</TabsTrigger></TabsList>
-          </div>
-          <TabsContent value="parameters" class="min-h-0 flex-1 overflow-auto"><TokenParametersPanel /></TabsContent>
-          <TabsContent value="export" class="min-h-0 flex-1 overflow-auto"><TokenExportPanel /></TabsContent>
+      <ResizablePanel :default-size="rightDefaultSize" :min-size="panelPercent(layout.rightMinWidth)" :max-size="45" class="min-w-0 border-l border-border">
+        <Tabs v-model="rightTab" class="flex h-full min-h-0 flex-col gap-0">
+          <div class="token-panel-heading"><p>控制面板</p></div>
+          <TabsList class="token-underline-tabs grid grid-cols-2">
+            <TabsTrigger value="parameters" class="token-underline-tab"><Layers />参数调整</TabsTrigger>
+            <TabsTrigger value="export" class="token-underline-tab"><Download />导出</TabsTrigger>
+          </TabsList>
+          <TabsContent value="parameters" class="mt-0 min-h-0 flex-1 overflow-auto"><TokenParametersPanel /></TabsContent>
+          <TabsContent value="export" class="mt-0 min-h-0 flex-1 overflow-auto"><TokenExportPanel /></TabsContent>
         </Tabs>
       </ResizablePanel>
     </ResizablePanelGroup>

@@ -164,7 +164,7 @@ watch(open, (value) => {
           <label><span>Window height</span><Input v-model.number="draft.window.height" type="number" min="1" /></label>
           <label><span>Minimum width</span><Input v-model.number="draft.window.minWidth" type="number" min="1" /></label>
           <label><span>Minimum height</span><Input v-model.number="draft.window.minHeight" type="number" min="1" /></label>
-          <label class="configuration-switch"><span><strong>Resizable</strong><em>Applied after restarting the desktop app.</em></span><Switch v-model:checked="draft.window.resizable" /></label>
+          <label class="configuration-switch"><span><strong>Resizable</strong><em>Applied after restarting the desktop app.</em></span><Switch v-model="draft.window.resizable" /></label>
         </section>
 
         <section class="configuration-section">
@@ -243,14 +243,14 @@ watch(open, (value) => {
               <strong>Enable masks</strong>
               <em>Turns all mask UI and rendering on or off.</em>
             </span>
-            <Switch v-model:checked="draft.mask.enabled" />
+            <Switch v-model="draft.mask.enabled" />
           </label>
           <label class="configuration-switch">
             <span>
               <strong>Use Pixi preview</strong>
               <em>Only affects low-frequency preview composition.</em>
             </span>
-            <Switch v-model:checked="draft.mask.usePixiPreview" :disabled="!draft.mask.enabled" />
+            <Switch v-model="draft.mask.usePixiPreview" :disabled="!draft.mask.enabled" />
           </label>
           <label>
             <span>Stroke preview min opacity</span>
@@ -303,14 +303,14 @@ watch(open, (value) => {
               <strong>File log</strong>
               <em>Write debug logs to the configured log file.</em>
             </span>
-            <Switch v-model:checked="draft.debug.fileLogEnabled" />
+            <Switch v-model="draft.debug.fileLogEnabled" />
           </label>
           <label class="configuration-switch">
             <span>
               <strong>Render perf log</strong>
               <em>Include mask/export/render timing logs.</em>
             </span>
-            <Switch v-model:checked="draft.debug.renderPerfLogEnabled" />
+            <Switch v-model="draft.debug.renderPerfLogEnabled" />
           </label>
         </section>
 
@@ -334,7 +334,7 @@ watch(open, (value) => {
           <label><span>World size step</span><Input v-model.number="draft.token.preview.worldSizeStep" type="number" min="1" /></label>
           <label><span>Preview renderer</span><Input v-model="draft.token.preview.renderer" /></label>
           <label><span>Device pixel ratio max</span><Input v-model.number="draft.token.preview.devicePixelRatioMax" type="number" min="1" step="0.25" /></label>
-          <label class="configuration-switch"><span><strong>Antialias</strong></span><Switch v-model:checked="draft.token.preview.antialias" /></label>
+          <label class="configuration-switch"><span><strong>Antialias</strong></span><Switch v-model="draft.token.preview.antialias" /></label>
           <label><span>Guide line color</span><Input v-model="draft.token.preview.guide.lineColor" /></label>
           <label><span>Guide line alpha</span><Input v-model.number="draft.token.preview.guide.lineAlpha" type="number" min="0" max="1" step="0.05" /></label>
         </section>
@@ -379,11 +379,11 @@ watch(open, (value) => {
           <label><span>JXL distance</span><Input v-model.number="draft.export.defaults.jxlDistance" type="number" min="0" max="5" step="0.01" /></label>
           <label><span>JXL effort</span><Input v-model.number="draft.export.defaults.jxlEffort" type="number" min="1" max="9" /></label>
           <label><span>JPEG matte</span><Input v-model="draft.export.rendering.jpegMatteColor" /></label>
-          <label class="configuration-switch"><span><strong>PNG alpha optimization</strong></span><Switch v-model:checked="draft.export.defaults.pngOptimizeAlpha" /></label>
-          <label class="configuration-switch"><span><strong>PNG Zopfli</strong></span><Switch v-model:checked="draft.export.defaults.pngZopfli" /></label>
-          <label class="configuration-switch"><span><strong>Progressive JPEG</strong></span><Switch v-model:checked="draft.export.defaults.jpegProgressive" /></label>
-          <label class="configuration-switch"><span><strong>Lossless WebP</strong></span><Switch v-model:checked="draft.export.defaults.webpLossless" /></label>
-          <label class="configuration-switch"><span><strong>Lossless JXL</strong></span><Switch v-model:checked="draft.export.defaults.jxlLossless" /></label>
+          <label class="configuration-switch"><span><strong>PNG alpha optimization</strong></span><Switch v-model="draft.export.defaults.pngOptimizeAlpha" /></label>
+          <label class="configuration-switch"><span><strong>PNG Zopfli</strong></span><Switch v-model="draft.export.defaults.pngZopfli" /></label>
+          <label class="configuration-switch"><span><strong>Progressive JPEG</strong></span><Switch v-model="draft.export.defaults.jpegProgressive" /></label>
+          <label class="configuration-switch"><span><strong>Lossless WebP</strong></span><Switch v-model="draft.export.defaults.webpLossless" /></label>
+          <label class="configuration-switch"><span><strong>Lossless JXL</strong></span><Switch v-model="draft.export.defaults.jxlLossless" /></label>
         </section>
 
         <section class="configuration-section">
@@ -461,30 +461,6 @@ watch(open, (value) => {
 .configuration-switch {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-}
-
-.configuration-switch :deep([data-slot="switch"]) {
-  width: 42px;
-  height: 24px;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--muted));
-  box-shadow: inset 0 0 0 1px hsl(222 31% 11% / 0.08);
-}
-
-.configuration-switch :deep([data-slot="switch"][data-state="checked"]) {
-  border-color: hsl(var(--accent));
-  background: hsl(var(--accent));
-}
-
-.configuration-switch :deep([data-slot="switch-thumb"]) {
-  width: 20px;
-  height: 20px;
-  background: hsl(var(--card));
-  box-shadow: 0 1px 4px hsl(222 31% 11% / 0.3);
-}
-
-.configuration-switch :deep([data-slot="switch"][data-state="checked"] [data-slot="switch-thumb"]) {
-  background: hsl(var(--accent-foreground));
 }
 
 .configuration-switch strong {

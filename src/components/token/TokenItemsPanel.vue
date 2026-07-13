@@ -46,7 +46,6 @@ async function onDrop(event: DragEvent) {
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <div class="space-y-2 border-b p-3">
-      <p class="text-sm font-semibold">项目图片</p>
       <div class="flex gap-1">
         <Button size="sm" variant="outline" class="flex-1 text-xs" @click="fileInput?.click()">
           <Plus data-icon="inline-start" />添加图片
@@ -72,7 +71,7 @@ async function onDrop(event: DragEvent) {
 
     <div class="min-h-0 flex-1 overflow-auto">
       <div
-        class="m-2 border-2 border-dashed p-4 text-center text-xs text-muted-foreground transition-colors"
+        class="m-2 rounded-lg border-2 border-dashed p-4 text-center text-xs text-muted-foreground transition-colors"
         :class="dragging ? 'border-primary bg-primary/5 text-primary' : 'border-border'"
         @dragenter.prevent="dragging = true"
         @dragover.prevent="dragging = true"
@@ -86,12 +85,12 @@ async function onDrop(event: DragEvent) {
           v-for="item in token.items"
           :key="item.id"
           type="button"
-          class="grid w-full grid-cols-[auto_40px_minmax(0,1fr)_auto] items-center gap-2 border p-2 text-left text-xs transition-colors"
-          :class="item.id === token.selectedItemId ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'"
+          class="grid w-full grid-cols-[auto_40px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 text-left text-xs transition-colors"
+          :class="item.id === token.selectedItemId ? 'border-primary bg-primary/10 ring-1 ring-primary' : 'border-border hover:bg-muted'"
           @click="token.selectedItemId = item.id"
         >
-          <input type="checkbox" :checked="token.checkedItemIds.includes(item.id)" :aria-label="`勾选 ${item.name}`" @click.stop @change="setChecked(item.id, ($event.target as HTMLInputElement).checked)" />
-          <img class="h-10 w-10 object-contain" :src="fileUrl(token.resolvedSources[item.id] || item.sourcePath)" alt="" />
+          <input class="h-4 w-4 accent-primary" type="checkbox" :checked="token.checkedItemIds.includes(item.id)" :aria-label="`勾选 ${item.name}`" @click.stop @change="setChecked(item.id, ($event.target as HTMLInputElement).checked)" />
+          <img class="h-10 w-10 rounded-sm bg-muted object-contain" :src="fileUrl(token.resolvedSources[item.id] || item.sourcePath)" alt="" />
           <span class="truncate">{{ item.name }}</span>
           <Button size="icon" variant="ghost" title="移除" @click.stop="token.removeItem(item.id)"><Trash2 /></Button>
         </button>

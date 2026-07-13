@@ -1175,6 +1175,67 @@ textarea {
   width: var(--token-resize-handle-width, 4px);
 }
 
+.token-panel-heading {
+  display: flex;
+  min-height: 44px;
+  flex: 0 0 44px;
+  align-items: center;
+  border-bottom: 1px solid hsl(var(--border));
+  padding: 0 12px;
+}
+
+.token-panel-heading p {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.token-underline-tabs {
+  width: 100%;
+  min-height: 42px;
+  flex: 0 0 42px;
+  gap: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  border-radius: 0;
+  background: transparent;
+  padding: 0 10px;
+}
+
+.token-underline-tab {
+  height: 42px;
+  gap: 6px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.token-underline-tab[data-state='active'] {
+  border-bottom-color: hsl(var(--primary));
+  background: transparent;
+  color: hsl(var(--foreground));
+  box-shadow: none;
+}
+
+.token-underline-tab svg {
+  width: 14px;
+  height: 14px;
+}
+
+.token-asset-finder,
+.token-asset-finder > .vuefinder,
+.token-asset-finder .vuefinder,
+.token-asset-finder .vuefinder__main,
+.token-asset-finder .vuefinder__explorer {
+  min-height: 0;
+  height: 100%;
+}
+
+.token-asset-finder .vuefinder__explorer {
+  overflow: auto;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

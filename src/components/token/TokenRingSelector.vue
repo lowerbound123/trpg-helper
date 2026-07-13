@@ -55,8 +55,9 @@ async function removeRing(assetId: string) {
         v-for="id in builtinIds"
         :key="id"
         type="button"
-        class="flex h-11 w-11 shrink-0 items-center justify-center border-2 bg-transparent transition-colors"
-        :class="token.selectedItem?.style.ringStyle === id ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/40'"
+        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :class="token.selectedItem?.style.ringStyle === id ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/40 hover:bg-muted'"
+        :aria-pressed="token.selectedItem?.style.ringStyle === id"
         :title="id"
         @click="selectRing(id)"
       ><img class="h-9 w-9 object-contain" :src="svgUrl(id)" alt="" /></button>
@@ -64,13 +65,14 @@ async function removeRing(assetId: string) {
         v-for="ring in customRings"
         :key="ring.id"
         type="button"
-        class="relative flex h-11 w-11 shrink-0 items-center justify-center border-2 bg-transparent transition-colors"
-        :class="token.selectedItem?.style.ringStyle === `asset:${ring.id}` ? 'border-primary bg-primary/5' : 'border-border hover:border-foreground/40'"
+        class="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 bg-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :class="token.selectedItem?.style.ringStyle === `asset:${ring.id}` ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/40 hover:bg-muted'"
+        :aria-pressed="token.selectedItem?.style.ringStyle === `asset:${ring.id}`"
         :title="ring.name"
         @click="selectRing(`asset:${ring.id}`)"
       >
         <img class="h-9 w-9 object-contain" :src="fileUrl(ring.thumbnailPath || ring.path)" alt="" />
-        <span v-if="deleteMode" class="absolute inset-0 bg-destructive/20" />
+        <span v-if="deleteMode" class="absolute inset-0 rounded-sm bg-destructive/20" />
       </button>
       <Button size="icon" variant="outline" class="h-11 w-11 border-dashed" title="导入自定义圆环" @click="input?.click()"><Plus /></Button>
       <Button size="icon" variant="outline" class="h-11 w-11" :class="deleteMode ? 'border-destructive text-destructive' : ''" title="删除自定义圆环" @click="deleteMode = !deleteMode"><Trash2 /></Button>

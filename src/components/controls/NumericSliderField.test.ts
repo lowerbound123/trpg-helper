@@ -79,6 +79,6 @@ describe('NumericSliderField', () => {
         step: 0.01,
       },
     })
-    expect(wrapper.get('[data-parameter-label="true"]').attributes('aria-label')).toBe('Explain JXL Distance')
+    expect(wrapper.get('[data-parameter-label="true"]').attributes('aria-label')).toBe('解释 JXL Distance')
   })
 })

@@ -204,15 +204,15 @@ defineExpose({
 </script>
 
 <template>
-  <div class="relative h-full min-h-0 min-w-0 bg-neutral-950">
+  <div class="relative h-full min-h-0 min-w-0 overflow-hidden rounded-md border border-border bg-background">
     <div ref="container" class="h-full min-h-0 min-w-0" />
-    <div v-if="loading" class="pointer-events-none absolute inset-x-0 top-3 text-center text-xs text-neutral-300">
+    <div v-if="loading" class="pointer-events-none absolute inset-x-0 top-3 text-center text-xs text-muted-foreground">
       正在加载 Token 图片…
     </div>
-    <div v-if="errorMessage" class="absolute inset-x-4 top-4 border border-destructive/40 bg-background/95 p-3 text-xs text-destructive shadow-sm">
+    <div v-if="errorMessage" class="absolute inset-x-4 top-4 rounded-md border border-destructive/40 bg-background/95 p-3 text-xs text-destructive shadow-sm">
       {{ errorMessage }}
     </div>
-    <div v-else-if="ringWarning" class="absolute inset-x-4 top-4 border border-border bg-background/95 p-3 text-xs text-muted-foreground shadow-sm">
+    <div v-else-if="ringWarning" class="absolute inset-x-4 top-4 rounded-md border border-border bg-background/95 p-3 text-xs text-muted-foreground shadow-sm">
       {{ ringWarning }}
     </div>
   </div>

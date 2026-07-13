@@ -67,8 +67,8 @@
 | serde / serde_json | 1.0 | 序列化 |
 | image | 0.25.6 | 图像解码/缩放/编码 |
 | webp | 0.3.1 | WebP 编码 |
-| oxipng / mozjpeg-rs | 10.1.1 / 0.9.2 | Token PNG 与 JPEG 高质量编码 |
-| jpegxl-rs / jpegxl-sys | 0.15.0 / 0.13.0 | JPEG XL 编码（GPL-3.0-or-later 约束） |
+| oxipng / mozjpeg-rs | 10.1.1 / 0.9.2 | Token 与 Handout 共享的 PNG/JPEG 高质量编码 |
+| jpegxl-rs / jpegxl-sys | 0.15.0 / 0.13.0 | Token 与 Handout 共享 JPEG XL 编码（GPL-3.0-or-later 约束） |
 | resvg / usvg / tiny-skia | 0.47 / 0.47 / 0.12 | 11 个内置 SVG Token 环渲染 |
 | base64 | 0.22.1 | data URL 编解码 |
 | uuid | 1.20.0 | UUIDv4 生成 |
@@ -231,6 +231,12 @@ handout-generator/
 
 | 段 | 键 | 默认值 | 说明 |
 |---|---|---|---|
+| 根 | `schema_version` | `1` | 配置 schema 版本，Rust 只接受已支持版本 |
+| `[application]` | `title` | `Handout Generator` | 应用和主窗口标题 |
+| `[window]` | `width` / `height` | `1440` / `920` | 启动时应用的窗口尺寸 |
+| | `min_width` / `min_height` | `1180` / `760` | 最小窗口尺寸 |
+| | `resizable` | `true` | 是否允许调整窗口 |
+| `[diagnostics]` | `log_directory` | `./logs` | 统一日志目录 |
 | `[paths]` | `data_dir` | `./data` | 数据目录 |
 | | `log_file` | `./logs/app.log` | 默认应用日志文件 |
 | `[uploads]` | `max_file_size` | `100mb` | 上传文件大小上限 |
@@ -251,10 +257,13 @@ handout-generator/
 | | `pointer_idle_grace_ms` | `120` | pointer down/drag 后 secondary/full mask 工作的空闲等待时间；不阻塞目标图层刷新或光标更新 |
 | `[export]` | `default_scale` | `1` | 默认导出缩放 |
 | | `min_scale` | `0.1` | 最小导出缩放 |
+| | `raw_rgba_ipc_max_bytes` | `134217728` | RGBA raw IPC 阈值；超过后前端以无损 PNG 传输 |
+| `[export.limits]` | `max_canvas_dimension` | `16384` | Handout 导出单边上限 |
+| | `max_canvas_pixels` | `67108864` | Handout 导出总像素上限（64 MP） |
 | `[debug]` | `file_log_enabled` | `true` | 文件日志开关 |
 | | `render_perf_log_enabled` | `true` | 渲染性能日志开关 |
 
-`[token.*]` 是独立的完整 Token 配置命名空间，包含 `defaults`、`limits`、`export.defaults`、`export.limits`、`export.webp_strength_profiles`、`export.rendering`、`export.naming`、`export.random_colors`、`preview`、`layout`、`files`、`rings`、`history` 和 `notifications`。前端由 `js-toml` 完整往返；Rust 启动时读取同一子树并严格校验，不再维护运行时第二份 Token 配置。
+`[export.defaults]` / `[export.limits]` / `[export.rendering]` / `[[export.webp_strength_profiles]]` 是 Handout 编码配置；`[token.*]` 是独立的完整 Token 配置命名空间，包含 `defaults`、`limits`、`export.*`、`preview`、`layout`、`files`、`rings`、`history` 和 `notifications`。前端由 `js-toml` 完整往返；Rust 在启动和 Settings 写入前严格校验 Token 与 Handout 导出配置。根目录 `configuration.toml` 是唯一配置文件，`src-tauri/configuration.toml` 已移除。
 
 > `configuration.toml` 可被 localStorage（key: `handout-generator.configuration.toml`）覆盖，实现运行时配置覆盖而无需改源文件。
 
@@ -313,7 +322,7 @@ handout-generator/
 | 文件 | 用途 |
 |---|---|
 | `RightInspector.vue` | 右侧检视栏（756 行）。三个标签页：**Inspect**（选中图层属性、样式、效果、mask 开关）、**Brush**（brush/eraser 宽度、透明度滑条、tension、颜色等绘制设置）、**Document**（文档类型、画布、效果与嵌套 ExportPanel）。`scheduleContinuousEditEnd` 用 `continuousEditCommitDelayMs` 延迟合并历史。所有控件直接调用 `useEditorStore` 的 patch 方法 |
-| `ExportPanel.vue` | 导出面板（73 行）。`defineModel` 绑定 scale/format/quality；按钮 emit `exportImage`；带进度条与日志区 |
+| `ExportPanel.vue` | Handout 高级导出面板。绑定 scale 与四格式编码设置；分别提供 OxiPNG、MozJPEG、WebP profile 和 JPEG XL 参数；浏览器环境禁用 JXL |
 
 #### 6.4.2 新建讲义对话框（`handout/`）
 
@@ -325,7 +334,7 @@ handout-generator/
 
 | 文件 | 用途 |
 |---|---|
-| `ConfigurationDialog.vue` | 330 行。编辑 `configuration.toml`。表单分组：Paths / Uploads & previews / Finder / Editor / Mask / Export & debug。保存时序列化 TOML 并写入，提示需重启 |
+| `ConfigurationDialog.vue` | 编辑唯一根 `configuration.toml`。分组覆盖 Application/Window、Diagnostics、Handout Export、Token Defaults/Preview/Layout/Files/History/Rings/Notifications/Export；写入前由 Rust 严格校验，需重启生效 |
 
 #### 6.4.4 应用骨架组件（根目录）
 
@@ -333,7 +342,7 @@ handout-generator/
 |---|---|---|
 | `BootSplash.vue` | 11 | 启动加载画面（三点跳动动画 + "Handout Generator" 标题） |
 | `EditorTopBar.vue` | 61 | 编辑器顶栏：Save 按钮 + ButtonGroup 工具切换（Select/Brush/Eraser/Polygon）+ ButtonGroup Undo/Redo。Props: `activeTool`/`canUndo`/`canRedo`；Emits: `save`/`set-tool`/`undo`/`redo` |
-| `ManagerShell.vue` | 206 | 管理器视图：三标签页（Handouts/Assets/Fonts）+ VueFinder 实例 + Create/Clone/Export 操作 + CreateHandoutDialog + ConfigurationDialog。通过 `inject('manager-context')` 获取 33 个共享值 |
+| `ManagerShell.vue` | 管理器视图：Handouts/Tokens/Assets/Fonts 四标签 VueFinder，包含 Handout/Token 创建、Clone、Export 与 Settings |
 | `LeftRail.vue` | 402 | 编辑器左栏：四标签页（Assets/Fonts/Graph/Layers）+ VueFinder + 搜索 + 可拖拽素材/字体列表 + SVG 形状预览（含 Polygon 入口）+ 图层/分组列表（拖拽排序、mask 预览、可见性切换、Merge/Flat/Move/Delete）。通过 `inject('left-rail-context')` 获取 57 个共享值 |
 | `CanvasWorkspace.vue` | 446 | Konva 画布工作区：`<v-stage>` 含背景层 + 所有图层节点分支（masked image/raw image/text/rect/line/ellipse/polygon/curve/line group/paint）+ 曲线编辑手柄 + polygon draft overlay + brush cursor overlay + draftStroke + mask 编辑代理 + snap guideLines + marquee selectionBox + Transformer。通过 `inject('canvas-context')` 获取 65+ 共享值含 Konva refs |
 
@@ -346,8 +355,8 @@ handout-generator/
 | `useCanvasViewport.ts` | 168 | Konva 视口管理：`fitScale`/`canvasZoom`/`canvasPan`/`stageScale`/`fitCanvasView`/`zoomCanvas in/out`、滚轮缩放（以鼠标为锚）、中键拖拽平移。zoom 限制 0.1–8 |
 | `useEditorDragPayloads.ts` | 80 | HTML5 拖拽 payload 统一管理：`draggedAssetId`/`draggedFontId`/`draggedShapeKind` 及各 `start*/clear*` 函数 |
 | `useExportProgress.ts` | 56 | 模拟导出进度条：`beginExportProgress`（90ms 渐增到 95）、`prepareExportProgress`（等待 nextTick + RAF + setTimeout 让 UI 先绘制） |
-| `useFinderManagement.ts` | 531 | 把 Pinia store 包装成 VueFinder 的 Driver 接口，使 VueFinder 能管理 backgrounds/assets/fonts/handouts 四种"虚拟存储"。路径编码：`<storage>://<folder>/__<kind>-<id>`。注入右键菜单项 |
-| `useHandoutExport.ts` | 222 | 导出当前文档或项目为 PNG/JPEG/WebP。`exportCurrentImage` 流程：签名去重 → `ensureDocumentImages` → materialize 当前 mask → `renderHandoutToBlob` → `writeEncodedImageBlobToDownloads` |
+| `useFinderManagement.ts` | 将 Pinia store 包装为 Handout/Token/Assets/Fonts VueFinder Driver。Token Assets 右键菜单支持单文件、多选和目录递归加入当前项目，过滤非图片并按 `assetId` 去重 |
+| `useHandoutExport.ts` | 导出当前文档或 Manager 项目。签名去重 → 加载图片 → materialize mask → `renderHandoutToCanvas` → 自适应 RGBA/PNG raw IPC → Rust 四格式编码并直写 Downloads |
 | `useResourceImages.ts` | 68 | 图片预加载与缓存管理。`previewUrl(record)` 优先 thumbnailPath，回退 fileUrl |
 
 #### 从 App.vue 抽取的 composables（18 个）
@@ -529,7 +538,7 @@ handout-generator/
 | 文件 | 用途 |
 |---|---|
 | `src/main.rs` | 6 行。二进制入口，release 模式隐藏 Windows 控制台，调用 `app_lib::run()` |
-| `src/lib.rs` | 89 行。模块声明 + `run()` 构建 Tauri 应用并注册全部 39 个命令处理器 |
+| `src/lib.rs` | Tauri 入口：解析根配置、应用窗口标题/尺寸/最小尺寸/resizable，初始化 Token 与 Handout 导出配置，注册所有 IPC 命令 |
 
 #### 模块结构（staged module split 已完成）
 
@@ -541,7 +550,7 @@ handout-generator/
 | `src/commands/asset_commands.rs` | 311 | 15 个库/config 命令 |
 | `src/commands/project_commands.rs` | 324 | 13 个项目命令 |
 | `src/commands/preview_commands.rs` | 68 | `save_project_preview` + `save_project_asset` |
-| `src/commands/export_commands.rs` | 201 | 5 个导出命令：兼容旧 `export_image*`/转码命令 + `write_encoded_image_bytes_to_downloads` raw bytes 直写 Downloads |
+| `src/commands/export_commands.rs` | 兼容旧导出命令，并提供 `encode_handout_image_to_downloads`：解析 HGE1 二进制 envelope、验证尺寸/payload/编码参数、`spawn_blocking` 编码、文件名避让和 Downloads 直写 |
 | `src/commands/mask_commands.rs` | 87 | 4 个遮罩/项目文件 I/O 命令 |
 | `src/services/mod.rs` | 5 | 模块声明 |
 | `src/services/path_service.rs` | 182 | 路径/文件夹/fs/data-url/debug log |
@@ -549,6 +558,7 @@ handout-generator/
 | `src/services/project_service.rs` | 144 | 项目文件 I/O + folder index |
 | `src/services/asset_service.rs` | 311 | 库 I/O + 字体解析 + import pipeline |
 | `src/services/image_codec.rs` | 104 | 图像转码核心（PNG/JPEG/WebP） |
+| `src/services/image_encoding.rs` | Token/Handout 共享编码服务：OxiPNG、MozJPEG、libwebp、jpegxl-rs，统一 `ImageEncodingOptions` 边界校验 |
 | `src/services/export_service.rs` | 1 | 占位（逻辑在 `export_commands.rs`） |
 | `src/editor/mod.rs` | 5 | 编辑器领域占位 |
 
@@ -587,12 +597,15 @@ handout-generator/
 3. 转 RGBA8
 4. `webp::Encoder::from_rgba` 编码（quality 80）
 
-#### 导出管线（`services/image_codec.rs`）
+#### 共享最终编码管线（`services/image_encoding.rs`）
 
-`encode_export_image(input, format, quality)`：
-- **PNG** — `image.write_to(cursor, Png)`（无损）
-- **JPEG** — `to_rgb8()` + `JpegEncoder::new_with_quality`（quality 1-100，默认 90；丢弃 alpha）
-- **WebP** — `to_rgba8()` + `webp::Encoder::from_rgba`（quality 1-100，默认 90）
+`encode_rgba_image(image, options, context)` 由 Token adapter 和 Handout raw command 共用：
+- **PNG** — 基础 PNG 后经 OxiPNG，支持 optimization level、alpha optimization、metadata 和 Zopfli。
+- **JPEG** — alpha 先合成到可配 matte，再用 MozJPEG 编码，支持 progressive、deringing 和 444/422/420。
+- **WebP** — libwebp advanced config，支持 lossy/lossless、quality、method 和 passes profile。
+- **JXL** — jpegxl-rs，支持 lossless/distance/effort/progressive/decoding speed。
+
+`services/image_codec.rs` 仅保留旧 PNG/JPEG/WebP 转码命令的兼容实现，不是 Handout/Token 新导出主路径。
 
 ---
 
@@ -699,7 +712,7 @@ data/
 |---|---|
 | `save_project_asset` | 保存项目内嵌素材 |
 
-### 导出（5）
+### 导出
 
 | 命令 | 用途 |
 |---|---|
@@ -708,6 +721,7 @@ data/
 | `export_image_bytes_to_downloads` | 转码 inline bytes 后导出到下载目录 |
 | `export_image_file_to_downloads` | 转码 staging 文件后导出到下载目录（删除 staging） |
 | `write_encoded_image_bytes_to_downloads` | 已编码 PNG/JPEG/WebP bytes raw body 直写下载目录；文件名通过 `x-file-name` header 传入 |
+| `encode_handout_image_to_downloads` | 接收 HGE1 raw envelope，根据 `rgba8`/`png` transport 解码，使用共享 Rust 编码器输出 PNG/JPG/WebP/JXL，直写 Downloads 并返回分段耗时 |
 
 ### 预览（2）
 
@@ -723,7 +737,7 @@ data/
 | `read_file_data_url` | 读取任意文件为 data URL |
 | `append_debug_log(scope, line)` | 按 scope 追加调试日志到 `logs/*.log` |
 | `read_configuration` | 读取 configuration.toml |
-| `write_configuration` | 写入 configuration.toml |
+| `write_configuration` | 严格解析并校验 Token/Handout 配置后写入根 `configuration.toml` |
 
 ### 通信机制
 
@@ -784,14 +798,17 @@ Document 标签 → ExportPanel exportImage emit → exportCurrentImage()
   ├─ 签名去重（相同文档+参数不重复导出）
   ├─ ensureDocumentImages()
   ├─ materialize 当前 enabled masks（优先 MaskGpuRuntime，回退 loadMaskDataUrl）
-  ├─ renderHandoutToBlob(document, library, scale, imageElements, mimeType, quality, {maskDataUrls, projectTarget, masksEnabled})
-  │   ├─ 构造离屏 Konva.Stage
-  │   ├─ 按 zIndex 渲染背景 + 所有可见图层
-  │   ├─ 带遮罩走 applyLayerMaskToCanvas（Canvas2D 确定性路径，不走 Pixi）
-  │   └─ stage.toCanvas → canvas.toBlob
-  └─ writeEncodedImageBlobToDownloads()
-      ├─ Tauri: blob.arrayBuffer → Uint8Array raw invoke('write_encoded_image_bytes_to_downloads') → Rust 直写 Downloads
-      └─ 浏览器: <a download>
+  ├─ renderHandoutToCanvas(document, library, scale, imageElements, {maskDataUrls, projectTarget, masksEnabled})
+│   ├─ 构造离屏 Konva.Stage
+│   ├─ 按 zIndex 渲染背景 + 所有可见图层
+│   ├─ 带遮罩走 applyLayerMaskToCanvas（Canvas2D 确定性路径，不走 Pixi）
+│   └─ stage.toCanvas → HTMLCanvasElement
+  └─ encodeHandoutCanvasToDownloads()
+      ├─ 校验 16384px / 64MP 上限
+      ├─ <=128MiB: getImageData RGBA8；超过阈值: canvas.toBlob(image/png)
+      ├─ HGE1 envelope + raw invoke('encode_handout_image_to_downloads')
+      ├─ Rust: 解码（必要时）→ 共享编码器 → Downloads
+      └─ 浏览器: canvas.toBlob PNG/JPEG/WebP；JXL 明确禁用
 ```
 
 ---
@@ -821,9 +838,9 @@ Document 标签 → ExportPanel exportImage emit → exportCurrentImage()
 
 编辑器逻辑（`lib/handout/*`）是纯函数，store 只是包装历史 + 选择 + 副作用调度。这使得文档操作可测试、可序列化、可回放。
 
-### 11.6 Raw bytes 导出优先
+### 11.6 自适应 raw bytes 导出
 
-导出路径优先在前端按用户选择的 MIME 生成 Blob，再通过 Tauri raw `Uint8Array` body 传给 Rust 直写 Downloads。这样避免 `Array.from(Uint8Array)` 的 JSON 大数组复制，也避免 staging 文件读回、解码、重编码。旧 staging 转码命令保留为兼容路径。
+Handout 在 WebView 内只生成最终 Canvas，格式编码交给 Rust。RGBA 小于 `raw_rgba_ipc_max_bytes` 时直接通过 Tauri raw body 传输；大图先生成无损 PNG，避免巨型 RGBA IPC 分配。Rust 在 blocking worker 中编码并直写 Downloads，返回 decode/encode/write 分段耗时。
 
 ### 11.7 路径安全
 
@@ -862,8 +879,8 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 
 ### 12.3 三栏编辑器
 
-- 左栏 `Items / Assets`：当前项、勾选项、删除项、将当前样式应用到勾选项、从 Assets 或外部文件/文件夹追加图片。
-- 中栏：长期持有的 `PixiTokenRenderer`，支持头像拖动、滚轮缩放、响应式取景、出框参考线、快速切图令牌、纹理释放和完整 dispose。
+- 左栏 `Items / Assets`：Items 提供外部图片/文件夹导入、拖放、全选/取消、样式批量应用、清空和紧凑项列表；Assets 是完整 VueFinder，支持上传、目录、移动、重命名、删除、搜索、多选，并可右键递归加入文件/目录。
+- 中栏：长期持有的 `PixiTokenRenderer`，支持头像拖动、滚轮缩放、响应式取景、出框参考线、快速切图 freshness token、纹理释放和完整 dispose。Asset/项目 fallback/自定义环通过 Tauri asset protocol URL 加载，不请求 plugin-fs 读取 capability；加载错误可见且写入 `logs/token.log`。
 - 右栏 `参数 / 导出`：头像缩放/偏移、背景、环样式/颜色/半径/拉伸、分割角度与高度、自定义环几何，以及 PNG/JPEG/WebP/JXL 参数和导出范围。
 
 连续滑块编辑通过 `edit-start -> update:modelValue -> commit` 合并为一条历史。显式 Save 和返回 Manager 都会保存；Save 使用当前预览写入 `preview.webp`。`NumericSliderField` 是 Handout 与 Token 共享的唯一滑块精确输入控件，支持点击数字编辑、clamp、step、单位、Mixed 和禁用状态。
@@ -872,9 +889,9 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 
 11 个内置 SVG 位于 `src-tauri/src/token/rings/`，Rust 文件是素材唯一来源，前端通过 Vite `?raw` 复用。`RingTextureProvider` 在 Worker 中进行径向映射并带 LRU 风格缓存；自定义环保留原始 RGB，仅乘环颜色 alpha。环 Asset 缺失时预览和导出均回退 solid，并写入 `logs/token.log`。
 
-### 12.5 Rust 批量导出
+### 12.5 Rust 批量导出与共享编码
 
-`generate_token_batch` 使用 Tauri `Channel<ExportProgressEvent>` 报告 preparing、decoding、rendering、compositing、encoding。每项冻结独立视觉参数与共享导出参数，单项失败不会终止后续项，重复文件名按配置避让。
+`generate_token_batch` 使用 Tauri `Channel<ExportProgressEvent>` 报告 preparing、decoding、rendering、compositing、encoding。每项冻结独立视觉参数与共享导出参数，单项失败不会终止后续项，重复文件名按配置避让。`token/encoding.rs` 现仅负责将 `TokenParams` 适配到 `services/image_encoding.rs`，Token 和 Handout 不再各自维护编码器实现。
 
 - PNG：OxiPNG，支持优化级别、alpha、metadata 和 Zopfli。
 - JPEG：MozJPEG，支持质量、progressive、deringing 和 444/422/420。
@@ -885,11 +902,10 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 
 ### 12.6 当前验证基线
 
-- `pnpm exec vitest run`：35 个测试文件、170 项测试。
+- `pnpm exec vitest run`：37 个测试文件、176 项测试。
 - `pnpm run typecheck`：通过。
 - `pnpm run build`：通过，无构建 warning。
-- `cargo test --manifest-path src-tauri/Cargo.toml`：55 项 Rust 测试通过，覆盖项目源图副本、配置、几何、内置/自定义环、随机配色及四种编码器。
-- Playwright：验证主界面四标签、Tokens VueFinder 和 Assets 多选操作组，浏览器 console 0 errors / 0 warnings；验证后开发服务器已关闭。
+- `cargo test --manifest-path src-tauri/Cargo.toml`：61 项 Rust 测试通过，覆盖项目源图副本、Token/Handout 配置、几何、内置/自定义环、四种编码器、HGE1 envelope、中文文件名和重名避让。
 
 ---
 

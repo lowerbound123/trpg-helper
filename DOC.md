@@ -310,7 +310,7 @@ handout-generator/
 | `sheet` | 10 文件 | 侧滑抽屉族 |
 | `slider` | `Slider.vue` | 滑块（被 RightInspector 使用） |
 | `sonner` | `Sonner.vue` | Toast 通知（注入 Lucide 图标） |
-| `switch` | `Switch.vue` | 开关（被 ConfigurationDialog 使用） |
+| `switch` | `Switch.vue` | 基于 Reka UI `modelValue` / `update:modelValue` 的高对比开关；Configuration、Token 和 Handout Export 共用 |
 | `tabs` | 4 文件 | 标签页族 |
 | `textarea` | `Textarea.vue` | 多行输入 |
 | `tooltip` | 4 文件 | 工具提示族 |
@@ -883,6 +883,10 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 - 中栏：长期持有的 `PixiTokenRenderer`，支持头像拖动、滚轮缩放、响应式取景、出框参考线、快速切图 freshness token、纹理释放和完整 dispose。Asset/项目 fallback/自定义环通过 Tauri asset protocol URL 加载，不请求 plugin-fs 读取 capability；加载错误可见且写入 `logs/token.log`。
 - 右栏 `参数 / 导出`：头像缩放/偏移、背景、环样式/颜色/半径/拉伸、分割角度与高度、自定义环几何，以及 PNG/JPEG/WebP/JXL 参数和导出范围。
 
+三栏标题、下划线标签、列表密度、选择态和控制面板顺序与独立 Token Generator 保持一致，同时继续使用集成应用的 shadcn-vue 中性主题。左侧 Assets 通过 `TokenEditorContext` 注入已解析的 plain VueFinder driver、features 和 context menu，不能把嵌套 `ComputedRef` 直接传给 VueFinder；资源浏览器及其 explorer 使用完整高度和独立滚动区。
+
+所有布尔参数使用共享 `BooleanSettingField`，内部遵循 Reka UI `Switch` 的 `modelValue` / `update:modelValue` 契约。选中轨道使用高对比 primary 色；分割环、PNG Alpha/Metadata/Zopfli、JPEG、WebP、JXL 等高级参数均提供可聚焦的悬停说明。导出格式、色度采样和 WebP 编码强度使用 `aria-pressed` 暴露选中状态，并以实心 primary 样式显示当前选项。
+
 连续滑块编辑通过 `edit-start -> update:modelValue -> commit` 合并为一条历史。显式 Save 和返回 Manager 都会保存；Save 使用当前预览写入 `preview.webp`。`NumericSliderField` 是 Handout 与 Token 共享的唯一滑块精确输入控件，支持点击数字编辑、clamp、step、单位、Mixed 和禁用状态。
 
 ### 12.4 圆环与 Pixi 预览
@@ -902,7 +906,7 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 
 ### 12.6 当前验证基线
 
-- `pnpm exec vitest run`：37 个测试文件、176 项测试。
+- `pnpm exec vitest run`：42 个测试文件、182 项测试。
 - `pnpm run typecheck`：通过。
 - `pnpm run build`：通过，无构建 warning。
 - `cargo test --manifest-path src-tauri/Cargo.toml`：61 项 Rust 测试通过，覆盖项目源图副本、Token/Handout 配置、几何、内置/自定义环、四种编码器、HGE1 envelope、中文文件名和重名避让。

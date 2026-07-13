@@ -26,7 +26,17 @@ pub(crate) fn ensure_library(app: &AppHandle) -> Result<(), AppError> {
 
     let path = index_path(app)?;
     if !path.exists() {
-        fs::write(path, serde_json::to_vec_pretty(&LibraryIndex::default())?)?;
+        let mut index = LibraryIndex::default();
+        index.asset_folders = vec!["rings".to_string(), "token-tmp".to_string()];
+        fs::write(path, serde_json::to_vec_pretty(&index)?)?;
+    } else {
+        let mut index: LibraryIndex = serde_json::from_slice(&fs::read(&path)?)?;
+        let previous = index.asset_folders.len();
+        ensure_folder(&mut index.asset_folders, "rings");
+        ensure_folder(&mut index.asset_folders, "token-tmp");
+        if index.asset_folders.len() != previous {
+            fs::write(path, serde_json::to_vec_pretty(&index)?)?;
+        }
     }
 
     Ok(())
@@ -257,6 +267,19 @@ pub(crate) fn import_record(
         media_type,
         created_at: now,
         updated_at: now,
+        token_ring: if bucket == "assets" && folder == "rings" {
+            Some(crate::types::TokenRingConfig {
+                revision: 1,
+                design_size: 512.0,
+                inner_radius: 225.0,
+                outer_radius: 250.0,
+                asset_scale: 1.0,
+                offset_x: 0.0,
+                offset_y: 0.0,
+            })
+        } else {
+            None
+        },
     };
 
     let mut index = read_index(app)?;

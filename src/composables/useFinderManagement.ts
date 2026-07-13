@@ -1,10 +1,20 @@
 import { computed, type Ref } from 'vue'
 import { contextMenuItems as defaultContextMenuItems, type DirEntry, type Driver, type FsData, type Item } from 'vuefinder'
 
-import { fileUrl, type LibraryRecord, type ProjectSummary } from '@/lib/backend'
+import {
+  fileUrl,
+  copyTokenProject,
+  moveTokenProject,
+  renameTokenProject,
+  renameTokenProjectFolder,
+  type LibraryRecord,
+  type ProjectSummary,
+} from '@/lib/backend'
+import type { TokenProjectSummary } from '@/lib/token'
 import { useEditorStore } from '@/stores/editor'
+import { useTokenStore } from '@/stores/token'
 
-export type FinderKind = 'handout' | 'background' | 'asset' | 'font'
+export type FinderKind = 'handout' | 'token' | 'background' | 'asset' | 'font'
 
 export const finderFeatures = {
   archive: false,
@@ -30,7 +40,7 @@ export const finderFeatures = {
 export function finderFeaturesForKind(kind: FinderKind) {
   return {
     ...finderFeatures,
-    upload: kind !== 'handout',
+    upload: kind !== 'handout' && kind !== 'token',
   }
 }
 
@@ -43,6 +53,7 @@ type UseFinderOptions = {
   previewUrl: (record: LibraryRecord) => string
   selectedFolders: {
     handout: Ref<string>
+    token: Ref<string>
     background: Ref<string>
     asset: Ref<string>
     font: Ref<string>
@@ -51,6 +62,7 @@ type UseFinderOptions = {
 
 const finderStorages: Record<FinderKind, string> = {
   handout: 'handouts',
+  token: 'tokens',
   background: 'backgrounds',
   asset: 'assets',
   font: 'fonts',
@@ -74,6 +86,7 @@ export function isImageFinderEntry(entry?: DirEntry | null) {
 }
 
 export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, options: UseFinderOptions) {
+  const tokenStore = useTokenStore()
   function foldersForKind(kind: 'background' | 'asset' | 'font') {
     if (kind === 'background') return editor.library.backgroundFolders
     if (kind === 'asset') return editor.library.assetFolders
@@ -91,6 +104,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
 
   function allFoldersForKind(kind: FinderKind) {
     if (kind === 'handout') return editor.projectFolders
+    if (kind === 'token') return tokenStore.folders
     return foldersForKind(kind)
   }
 
@@ -193,17 +207,18 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
       })
   }
 
-  function recordsForKindWithoutSearch(kind: Exclude<FinderKind, 'handout'>) {
+  function recordsForKindWithoutSearch(kind: 'background' | 'asset' | 'font') {
     if (kind === 'background') return editor.library.backgrounds
     if (kind === 'asset') return editor.library.assets
     return editor.library.fonts
   }
 
   function finderFilesAt(kind: FinderKind, currentFolder: string) {
-    if (kind === 'handout') {
-      return editor.latestProjects
-        .filter((project: ProjectSummary) => folderMatches(project.folder, currentFolder))
-        .map((project: ProjectSummary) =>
+    if (kind === 'handout' || kind === 'token') {
+      const projects = kind === 'handout' ? editor.latestProjects : tokenStore.projects
+      return projects
+        .filter((project: ProjectSummary | TokenProjectSummary) => folderMatches(project.folder, currentFolder))
+        .map((project: ProjectSummary | TokenProjectSummary) =>
           makeFileEntry(
             kind,
             project.folder,
@@ -211,7 +226,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
             project.title,
             'image/png',
             project.updatedAt,
-            projectPreviewUrl(project),
+            kind === 'handout' ? projectPreviewUrl(project) : fileUrl(project.previewPath),
           ),
         )
     }
@@ -296,6 +311,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     const parent = normalizeFinderFolder(parentPath)
     const folder = [parent, name.trim()].filter(Boolean).join('/')
     if (kind === 'handout') await editor.addProjectFolder(folder)
+    else if (kind === 'token') await tokenStore.addFolder(folder)
     else await editor.createResourceFolder(kind, folder)
   }
 
@@ -307,6 +323,10 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     if (basename.startsWith(`__${kind}-`)) {
       const id = idFromFinderPath(kind, itemPath)
       if (kind === 'handout') await editor.renameProject(id, params.name)
+      else if (kind === 'token') {
+        await renameTokenProject(id, params.name)
+        await tokenStore.refreshProjects()
+      }
       else await editor.renameResource(kind, id, params.name)
       return
     }
@@ -314,6 +334,10 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     const oldFolder = normalizeFinderFolder(itemPath)
     const newFolder = [entryFolder(oldFolder), params.name.trim()].filter(Boolean).join('/')
     if (kind === 'handout') await editor.renameProjectFolderPath(oldFolder, newFolder)
+    else if (kind === 'token') {
+      await renameTokenProjectFolder(oldFolder, newFolder)
+      await tokenStore.refreshProjects()
+    }
     else await editor.renameResourceFolder(kind, oldFolder, newFolder)
     if (selectedFolderForFinder(kind) === oldFolder) setSelectedFolderForFinder(kind, newFolder)
   }
@@ -325,6 +349,10 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
       if (basename.startsWith(`__${kind}-`)) {
         const id = idFromFinderPath(kind, source)
         if (kind === 'handout') await editor.moveProjectToFolder(id, destination)
+        else if (kind === 'token') {
+          await moveTokenProject(id, destination)
+          await tokenStore.refreshProjects()
+        }
         else await editor.moveResourceToFolder(kind, id, destination)
         continue
       }
@@ -332,6 +360,10 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
       const oldFolder = normalizeFinderFolder(source)
       const nextFolder = [destination, entryBase(oldFolder)].filter(Boolean).join('/')
       if (kind === 'handout') await editor.renameProjectFolderPath(oldFolder, nextFolder)
+      else if (kind === 'token') {
+        await renameTokenProjectFolder(oldFolder, nextFolder)
+        await tokenStore.refreshProjects()
+      }
       else await editor.renameResourceFolder(kind, oldFolder, nextFolder)
       if (selectedFolderForFinder(kind) === oldFolder) setSelectedFolderForFinder(kind, nextFolder)
     }
@@ -350,6 +382,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     }
 
     if (kind === 'handout') await editor.deleteProjectEntriesFromLibrary({ ids, folders })
+    else if (kind === 'token') await tokenStore.deleteEntries({ ids, folders })
     else await editor.deleteResourceEntries(kind, { ids, folders })
     if (folders.some((folder) => folderIsOrDescendant(selectedFolderForFinder(kind), folder))) {
       setSelectedFolderForFinder(kind, '')
@@ -367,7 +400,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
 
     return {
       configureUploader(uppy, context) {
-        if (kind === 'handout') return
+        if (kind === 'handout' || kind === 'token') return
         uppy.addUploader(async (fileIDs: string[]) => {
           const files = fileIDs
             .map((id) => uppy.getFile(id))
@@ -426,6 +459,10 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
           const project = editor.projects.find((item) => item.id === id)
           return project ? projectPreviewUrl(project) : ''
         }
+        if (kind === 'token') {
+          const project = tokenStore.projects.find((item) => item.id === id)
+          return project ? fileUrl(project.previewPath) : ''
+        }
         const record = recordsForKindWithoutSearch(kind).find((item) => item.id === id)
         return record ? options.previewUrl(record) : ''
       },
@@ -444,6 +481,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
 
   const finderDrivers = computed<Record<FinderKind, Driver>>(() => ({
     handout: createFinderDriver('handout'),
+    token: createFinderDriver('token'),
     background: createFinderDriver('background'),
     asset: createFinderDriver('asset'),
     font: createFinderDriver('font'),
@@ -506,6 +544,28 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
 
   const handoutContextMenuItems = computed(() => createHandoutContextMenu())
 
+  function createTokenContextMenu(): Item[] {
+    let contextTarget: DirEntry | null = null
+    const cloneItem: Item = {
+      id: 'clone_token_project',
+      title: () => 'Clone token project',
+      order: 45,
+      show(_app, context) {
+        contextTarget = context.target
+        return Boolean(contextTarget?.type === 'file')
+      },
+      action(_app, selectedItems) {
+        const entry = selectedItems.find((item) => item.type === 'file') || contextTarget
+        if (!entry) return
+        const id = idFromFinderEntry('token', entry)
+        void copyTokenProject(id).then(() => tokenStore.refreshProjects())
+      },
+    }
+    return [...defaultContextMenuItems, cloneItem]
+  }
+
+  const tokenContextMenuItems = computed(() => createTokenContextMenu())
+
   function handleFinderPathChange(kind: FinderKind, path: string) {
     setSelectedFolderForFinder(kind, normalizeFinderFolder(path))
   }
@@ -515,6 +575,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     event.preventDefault()
     const id = idFromFinderPath(kind, event.item.path)
     if (kind === 'handout') void editor.openManagedHandout(id)
+    if (kind === 'token') void tokenStore.open(id)
     if (kind === 'asset') {
       const asset = editor.resolveAsset(id)
       if (asset) void options.addAssetToCanvas(asset)
@@ -529,6 +590,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     handleFinderFileDoubleClick,
     handleFinderPathChange,
     handoutContextMenuItems,
+    tokenContextMenuItems,
     imageHandoutContextMenuItems,
     imageRecordFromFinderEntry,
     projectPreviewUrl,

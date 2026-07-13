@@ -3,6 +3,12 @@ import { BaseDirectory, writeFile } from '@tauri-apps/plugin-fs'
 
 import { appConfiguration, runtimeConfigurationToml, storeRuntimeConfigurationOverride } from './configuration'
 import type { HandoutDocument } from './handout'
+import type {
+  TokenProjectDocument,
+  TokenProjectPayload,
+  TokenProjectSummary,
+  TokenRingConfig,
+} from './token'
 
 export interface LibraryRecord {
   id: string
@@ -16,6 +22,7 @@ export interface LibraryRecord {
   mediaType: string
   createdAt: string
   updatedAt: string
+  tokenRing?: TokenRingConfig | null
 }
 
 export interface LibraryIndex {
@@ -91,6 +98,7 @@ export function logFileNameForScope(scope: string) {
   if (normalized === 'text') return 'text.log'
   if (RENDER_LOG_SCOPES.has(normalized)) return 'render.log'
   if (normalized === 'upload') return 'upload.log'
+  if (normalized === 'token') return 'token.log'
   return 'app.log'
 }
 
@@ -218,6 +226,14 @@ export async function importAsset(file: File, tags: string[], folder = ''): Prom
     folder,
     mediaType: file.type || 'application/octet-stream',
   })
+}
+
+export async function updateTokenRingConfig(
+  id: string,
+  expectedRevision: number,
+  config: TokenRingConfig,
+): Promise<LibraryIndex> {
+  return invoke<LibraryIndex>('update_token_ring_config', { id, expectedRevision, config })
 }
 
 export async function importBackground(file: File, tags: string[], folder = ''): Promise<ImportResult> {
@@ -392,6 +408,65 @@ export async function saveManagedProject(
     }
   }
   return invoke<ProjectPayload>('save_managed_project', { projectId, document })
+}
+
+export async function createTokenProject(
+  document: TokenProjectDocument,
+  folder = '',
+): Promise<TokenProjectPayload> {
+  return invoke<TokenProjectPayload>('create_token_project', { document, folder })
+}
+
+export async function listTokenProjects(): Promise<TokenProjectSummary[]> {
+  if (!isTauriRuntime()) return []
+  return invoke<TokenProjectSummary[]>('list_token_projects')
+}
+
+export async function listTokenProjectFolders(): Promise<string[]> {
+  if (!isTauriRuntime()) return []
+  return invoke<string[]>('list_token_project_folders')
+}
+
+export async function createTokenProjectFolder(folder: string): Promise<string[]> {
+  return invoke<string[]>('create_token_project_folder', { folder })
+}
+
+export async function openTokenProject(projectId: string): Promise<TokenProjectPayload> {
+  return invoke<TokenProjectPayload>('open_token_project', { projectId })
+}
+
+export async function saveTokenProject(
+  projectId: string,
+  document: TokenProjectDocument,
+): Promise<TokenProjectPayload> {
+  return invoke<TokenProjectPayload>('save_token_project', { projectId, document })
+}
+
+export async function renameTokenProject(
+  projectId: string,
+  title: string,
+): Promise<TokenProjectPayload> {
+  return invoke<TokenProjectPayload>('rename_token_project', { projectId, title })
+}
+
+export async function moveTokenProject(projectId: string, folder: string): Promise<TokenProjectPayload> {
+  return invoke<TokenProjectPayload>('move_token_project', { projectId, folder })
+}
+
+export async function copyTokenProject(projectId: string): Promise<TokenProjectPayload> {
+  return invoke<TokenProjectPayload>('copy_token_project', { projectId })
+}
+
+export async function renameTokenProjectFolder(oldFolder: string, newFolder: string): Promise<string[]> {
+  return invoke<string[]>('rename_token_project_folder', { oldFolder, newFolder })
+}
+
+export async function deleteTokenProjectEntries(entries: { ids: string[]; folders: string[] }): Promise<string[]> {
+  return invoke<string[]>('delete_token_project_entries', { entries })
+}
+
+export async function saveTokenProjectPreview(projectId: string, dataUrl: string): Promise<string> {
+  return invoke<string>('save_token_project_preview', { projectId, dataUrl })
 }
 
 export async function exportImage(filePath: string, dataUrl: string): Promise<string> {

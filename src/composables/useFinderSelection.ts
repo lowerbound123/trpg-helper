@@ -8,7 +8,7 @@ import { useEditorStore } from '@/stores/editor'
 type EditorStore = ReturnType<typeof useEditorStore>
 type DebugLog = (message: string, data?: Record<string, unknown>) => void
 type FinderRevision = Reactive<Record<'background' | 'asset' | 'font', number>>
-type SelectedFinderItems = Reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>
+type SelectedFinderItems = Reactive<Record<'handout' | 'token' | 'background' | 'asset' | 'font', DirEntry[]>>
 
 export function useFinderSelection(options: {
   editor: EditorStore
@@ -105,7 +105,7 @@ export function useFinderSelection(options: {
     return previewUrl(font)
   }
 
-  function handleFinderSelect(kind: 'handout' | 'background' | 'asset' | 'font', items: DirEntry[]) {
+  function handleFinderSelect(kind: 'handout' | 'token' | 'background' | 'asset' | 'font', items: DirEntry[]) {
     selectedFinderItems[kind] = items
   }
 

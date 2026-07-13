@@ -26,11 +26,11 @@ const isLoading = ref(false)
 const isSaving = ref(false)
 const status = ref('')
 
-function cloneConfiguration(config: AppConfiguration): AppConfiguration {
-  return JSON.parse(JSON.stringify(config)) as AppConfiguration
+function cloneValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
-const draft = reactive<AppConfiguration>(cloneConfiguration(appConfiguration))
+const draft = reactive<AppConfiguration>(cloneValue(appConfiguration))
 
 function replaceDraft(next: AppConfiguration) {
   Object.assign(draft.paths, next.paths)
@@ -41,6 +41,7 @@ function replaceDraft(next: AppConfiguration) {
   Object.assign(draft.mask, next.mask)
   Object.assign(draft.export, next.export)
   Object.assign(draft.debug, next.debug)
+  Object.assign(draft.token, cloneValue(next.token))
 }
 
 function normalizeNumber(value: number, fallback: number, min?: number) {
@@ -65,6 +66,13 @@ function normalizeDraft() {
   draft.mask.pointerIdleGraceMs = normalizeNumber(draft.mask.pointerIdleGraceMs, appConfiguration.mask.pointerIdleGraceMs, 0)
   draft.export.defaultScale = normalizeNumber(draft.export.defaultScale, appConfiguration.export.defaultScale, 0.1)
   draft.export.minScale = normalizeNumber(draft.export.minScale, appConfiguration.export.minScale, 0.01)
+  draft.token.defaults.designSize = normalizeNumber(draft.token.defaults.designSize, appConfiguration.token.defaults.designSize, 1)
+  draft.token.defaults.scale = normalizeNumber(draft.token.defaults.scale, appConfiguration.token.defaults.scale, draft.token.limits.scaleMin)
+  draft.token.defaults.ringInnerRadius = normalizeNumber(draft.token.defaults.ringInnerRadius, appConfiguration.token.defaults.ringInnerRadius, 0)
+  draft.token.defaults.ringOuterRadius = normalizeNumber(draft.token.defaults.ringOuterRadius, appConfiguration.token.defaults.ringOuterRadius, 1)
+  draft.token.export.defaults.size = normalizeNumber(draft.token.export.defaults.size, appConfiguration.token.export.defaults.size, draft.token.export.limits.sizeMin)
+  draft.token.preview.displayTokenSize = normalizeNumber(draft.token.preview.displayTokenSize, appConfiguration.token.preview.displayTokenSize, 1)
+  draft.token.history.maximumEntries = normalizeNumber(draft.token.history.maximumEntries, appConfiguration.token.history.maximumEntries, 1)
 }
 
 async function loadConfiguration() {
@@ -252,6 +260,17 @@ watch(open, (value) => {
             </span>
             <Switch v-model:checked="draft.debug.renderPerfLogEnabled" />
           </label>
+        </section>
+
+        <section class="configuration-section">
+          <h3>Token defaults</h3>
+          <label><span>Design size</span><Input v-model.number="draft.token.defaults.designSize" type="number" min="1" /></label>
+          <label><span>Avatar scale</span><Input v-model.number="draft.token.defaults.scale" type="number" :min="draft.token.limits.scaleMin" :max="draft.token.limits.scaleMax" /></label>
+          <label><span>Ring inner radius</span><Input v-model.number="draft.token.defaults.ringInnerRadius" type="number" min="0" /></label>
+          <label><span>Ring outer radius</span><Input v-model.number="draft.token.defaults.ringOuterRadius" type="number" min="1" /></label>
+          <label><span>Default export size</span><Input v-model.number="draft.token.export.defaults.size" type="number" :min="draft.token.export.limits.sizeMin" :max="draft.token.export.limits.sizeMax" /></label>
+          <label><span>Preview token size</span><Input v-model.number="draft.token.preview.displayTokenSize" type="number" min="1" /></label>
+          <label><span>History entries</span><Input v-model.number="draft.token.history.maximumEntries" type="number" min="1" /></label>
         </section>
       </div>
 

@@ -28,6 +28,8 @@ describe('configuration', () => {
     expect(appConfiguration.mask.strokePreviewMinOpacity).toBe(0.3)
     expect(appConfiguration.mask.interactiveRefreshDelayMs).toBe(1000)
     expect(appConfiguration.mask.pointerIdleGraceMs).toBe(120)
+    expect(appConfiguration.token.defaults.designSize).toBe(512)
+    expect(appConfiguration.token.export.webpStrengthProfiles).toHaveLength(4)
   })
 
   it('round-trips editable configuration fields', () => {
@@ -53,5 +55,25 @@ describe('configuration', () => {
     expect(parsed.mask.pointerIdleGraceMs).toBe(90)
     expect(parsed.export.defaultScale).toBe(2)
     expect(parsed.export.minScale).toBe(0.2)
+    expect(parsed.token.export.webpStrengthProfiles[1]?.id).toBe('balanced')
+  })
+
+  it('round-trips nested token tables and arrays of tables', () => {
+    const source = serializeConfigurationToml({
+      ...appConfiguration,
+      token: {
+        ...appConfiguration.token,
+        defaults: { ...appConfiguration.token.defaults, scale: 125 },
+        export: {
+          ...appConfiguration.token.export,
+          webpStrengthProfiles: [{ id: 'custom', label: 'Custom', method: 6, passes: 4 }],
+        },
+      },
+    })
+    const parsed = configurationFromToml(source)
+    expect(parsed.token.defaults.scale).toBe(125)
+    expect(parsed.token.export.webpStrengthProfiles).toEqual([
+      { id: 'custom', label: 'Custom', method: 6, passes: 4 },
+    ])
   })
 })

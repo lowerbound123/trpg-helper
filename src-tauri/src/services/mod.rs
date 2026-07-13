@@ -3,3 +3,4 @@ pub mod image_codec;
 pub mod path_service;
 pub mod preview_service;
 pub mod project_service;
+pub mod token_project_service;

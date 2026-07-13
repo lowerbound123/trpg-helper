@@ -7,6 +7,7 @@ import RightInspector from '@/components/editor/RightInspector.vue'
 import BootSplash from '@/components/BootSplash.vue'
 import EditorTopBar from '@/components/EditorTopBar.vue'
 import ManagerShell from '@/components/ManagerShell.vue'
+import TokenWorkspace from '@/components/token/TokenWorkspace.vue'
 import LeftRail from '@/components/LeftRail.vue'
 import CanvasWorkspace from '@/components/CanvasWorkspace.vue'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
@@ -53,6 +54,8 @@ import { createAppShortcutHandler } from '@/app/AppShortcuts'
 import { appConfiguration } from '@/lib/configuration'
 import { partitionUploadFiles } from '@/lib/upload-validation'
 import { isPaintLayer, useEditorStore } from '@/stores/editor'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { useTokenStore } from '@/stores/token'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
@@ -61,6 +64,8 @@ Konva.dragButtons = [0]
 const PREVIEW_TARGET_BYTES = 512 * 1024
 
 const editor = useEditorStore()
+const workspace = useWorkspaceStore()
+const tokenStore = useTokenStore()
 const stageFrameRef = ref<HTMLElement>()
 const stageRef = ref<{ getNode: () => Konva.Stage }>()
 const transformerRef = ref<{ getNode: () => Konva.Transformer }>()
@@ -82,12 +87,14 @@ const activeRailTab = ref<'assets' | 'fonts' | 'graph' | 'layers'>('assets')
 const assetSearch = ref('')
 const fontSearch = ref('')
 const selectedProjectFolder = ref('')
+const selectedTokenProjectFolder = ref('')
 const selectedBackgroundFolder = ref('')
 const selectedAssetFolder = ref('')
 const selectedFontFolder = ref('')
 const isBooting = ref(true)
-const selectedFinderItems = reactive<Record<'handout' | 'background' | 'asset' | 'font', DirEntry[]>>({
+const selectedFinderItems = reactive<Record<'handout' | 'token' | 'background' | 'asset' | 'font', DirEntry[]>>({
   handout: [],
+  token: [],
   background: [],
   asset: [],
   font: [],
@@ -506,6 +513,7 @@ const {
   handleFinderFileDoubleClick,
   handleFinderPathChange,
   handoutContextMenuItems,
+  tokenContextMenuItems,
   imageHandoutContextMenuItems,
   imageRecordFromFinderEntry,
   projectFromFinderEntry,
@@ -520,11 +528,22 @@ const {
   uploadFiles,
   selectedFolders: {
     handout: selectedProjectFolder,
+    token: selectedTokenProjectFolder,
     background: selectedBackgroundFolder,
     asset: selectedAssetFolder,
     font: selectedFontFolder,
   },
 })
+
+function selectedTokenAssets() {
+  return selectedFinderItems.asset
+    .map((entry) => imageRecordFromFinderEntry('asset', entry))
+    .filter((record): record is LibraryRecord => Boolean(record))
+}
+
+async function createTokenFromSelectedAssets() {
+  await tokenStore.createFromAssets(selectedTokenAssets())
+}
 const {
   handleCanvasDrop,
   handleCanvasDragOver,
@@ -613,6 +632,7 @@ provide('manager-context', {
   handleFinderPathChange,
   handleFinderSelect,
   handoutContextMenuItems,
+  tokenContextMenuItems,
   imageHandoutContextMenuItems,
   handleDirectFinderDrop,
   handleDirectFinderDragover,
@@ -631,6 +651,9 @@ provide('manager-context', {
   fontFamily,
   filteredFonts,
   finderFeaturesForKind,
+  tokenStore,
+  createTokenFromSelectedAssets,
+  selectedTokenAssets,
 })
 provide('left-rail-context', {
   activeRailTab,
@@ -763,7 +786,7 @@ provide('canvas-context', {
   fitEditorCanvas,
 })
 const handleGlobalKeydown = createAppShortcutHandler({
-  isEditorView: () => editor.view === 'editor',
+  isEditorView: () => workspace.activeView === 'handout-editor',
   hasSelectedLayer: () => Boolean(editor.selectedLayerId),
   saveProject: () => { void saveProject() },
   undo: () => editor.undo(),
@@ -791,7 +814,7 @@ function fontFamily(font: LibraryRecord) {
 function logViewport(message: string, data?: Record<string, unknown>) {
   writeDebugLog('viewport', message, {
     ...data,
-    view: editor.view,
+    view: workspace.activeView,
     viewport: { ...stageViewport },
     fitScale: fitScale.value,
     canvasZoom: canvasZoom.value,
@@ -1110,7 +1133,7 @@ onMounted(async () => {
   try {
     resetKonvaDragButtons()
     void appendDebugLog('app', 'boot start')
-    await Promise.all([editor.refreshLibrary(), editor.refreshProjects()])
+    await Promise.all([editor.refreshLibrary(), editor.refreshProjects(), tokenStore.refreshProjects()])
     void syncImages(editor.library)
     window.addEventListener('keydown', handleGlobalKeydown)
     // Use window-level capture so font drops are intercepted before any
@@ -1158,8 +1181,8 @@ watch(selectedLayerRenderSignature, () => {
   if (editor.selectedLayerId) void refreshLayerEffectCacheAfterUpdate(editor.selectedLayerId)
 })
 watch(textLayerRenderSignature, () => {
-  if (editor.view === 'editor') void autoResizeTextLayerHeights()
-  if (editor.view === 'editor') void logTextLayerMetrics('text-signature-change')
+  if (workspace.activeView === 'handout-editor') void autoResizeTextLayerHeights()
+  if (workspace.activeView === 'handout-editor') void logTextLayerMetrics('text-signature-change')
 }, { flush: 'post' })
 watch(layerEffectsSignature, (nextSignature, previousSignature) => {
   scheduleLayerEffectCacheRefresh(changedEffectLayerIds(nextSignature, previousSignature))
@@ -1209,7 +1232,7 @@ watch(backgroundMaskRenderSignature, () => {
 watch(
   backgroundRenderSignature,
   () => {
-    if (editor.view !== 'editor') return
+    if (workspace.activeView !== 'handout-editor') return
     void nextTick(() => logBackgroundRender('render-signature-change'))
   },
   { flush: 'post' },
@@ -1221,9 +1244,9 @@ watch(
   },
 )
 watch(
-  () => editor.view,
+  () => workspace.activeView,
   () => {
-    if (editor.view === 'editor') {
+    if (workspace.activeView === 'handout-editor') {
       void fitEditorCanvas('enter-editor')
       scheduleMaskCompositeRefresh('enter-editor')
     }
@@ -1234,9 +1257,9 @@ watch(
 <template>
   <BootSplash v-if="isBooting" />
 
-  <ManagerShell v-else-if="editor.view === 'manager'" />
+  <ManagerShell v-else-if="workspace.activeView === 'manager'" />
 
-  <ResizablePanelGroup v-else direction="horizontal" class="app-shell">
+  <ResizablePanelGroup v-else-if="workspace.activeView === 'handout-editor'" direction="horizontal" class="app-shell">
     <ResizablePanel :default-size="23" :min-size="16" :max-size="36" class="shell-panel">
       <LeftRail />
     </ResizablePanel>
@@ -1274,4 +1297,6 @@ watch(
     />
     </ResizablePanel>
   </ResizablePanelGroup>
+
+  <TokenWorkspace v-else-if="workspace.activeView === 'token-editor'" />
 </template>

@@ -19,6 +19,7 @@ import {
   type ProjectSummary,
 } from '@/lib/backend'
 import { createDefaultHandout, type HandoutDocument } from '@/lib/handout'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 export function createProjectStore(deps: {
   document: ComputedRef<HandoutDocument>
@@ -28,9 +29,10 @@ export function createProjectStore(deps: {
   status: Ref<string>
   persistProjectMasks: () => Promise<void>
 }) {
+  const workspace = useWorkspaceStore()
   const projectDir = ref('')
   const currentProjectId = ref<string>()
-  const view = ref<'manager' | 'editor'>('manager')
+  const view = computed(() => workspace.activeView === 'handout-editor' ? 'editor' : 'manager')
   const projects = ref<ProjectSummary[]>([])
   const projectFolders = ref<string[]>([])
   const latestProjects = computed(() => projects.value)
@@ -112,7 +114,7 @@ export function createProjectStore(deps: {
     const payload = await openProject(path.trim())
     deps.replaceDocument(payload.document, path.trim())
     currentProjectId.value = undefined
-    view.value = 'editor'
+    workspace.openHandoutEditor()
     deps.status.value = `Opened project from ${path.trim()}`
   }
 
@@ -136,7 +138,7 @@ export function createProjectStore(deps: {
     const payload = await createProject(next.title, next, options?.folder ?? '')
     deps.replaceDocument(payload.document)
     currentProjectId.value = String(payload.metadata.id ?? '')
-    view.value = 'editor'
+    workspace.openHandoutEditor()
     await refreshProjects()
     deps.status.value = `Created project ${payload.document.title}`
   }
@@ -177,7 +179,7 @@ export function createProjectStore(deps: {
     const payload = await openManagedProject(projectId)
     deps.replaceDocument(payload.document)
     currentProjectId.value = projectId
-    view.value = 'editor'
+    workspace.openHandoutEditor()
     deps.status.value = `Opened project ${payload.document.title}`
   }
 
@@ -187,7 +189,7 @@ export function createProjectStore(deps: {
     }
     deps.selectedLayerId.value = undefined
     deps.selectedLayerIds.value = []
-    view.value = 'manager'
+    workspace.openManager()
   }
 
   return {

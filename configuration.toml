@@ -47,3 +47,152 @@ min_scale = 0.1
 [debug]
 file_log_enabled = true
 render_perf_log_enabled = true
+
+[token.defaults]
+design_size = 512
+scale = 100
+offset_x = 0
+offset_y = 0
+background_color = "#000000FF"
+ring_inner_radius = 225
+ring_outer_radius = 250
+ring_color = "#F6C75BFF"
+ring_style = "solid"
+ring_stretch_x = 1.0
+ring_stretch_y = 1.0
+split_ring = false
+split_angle = 0
+split_height = 0
+
+[token.limits]
+scale_min = 10
+scale_max = 500
+scale_step = 5
+offset_min = -100
+offset_max = 100
+ring_stretch_min = 0.01
+ring_stretch_max = 4.0
+split_angle_min = 0
+split_angle_max = 359
+split_height_min = -100
+split_height_max = 100
+
+[token.export.defaults]
+format = "png"
+size = 512
+png_optimization_level = 3
+png_optimize_alpha = true
+png_preserve_metadata = false
+png_zopfli = false
+jpeg_quality = 85
+jpeg_progressive = true
+jpeg_deringing = true
+jpeg_chroma_subsampling = "422"
+webp_quality = 90
+webp_lossless = false
+webp_encoding_strength = "balanced"
+jxl_lossless = false
+jxl_distance = 1.0
+jxl_effort = 7
+jxl_progressive = true
+jxl_decoding_speed = 0
+random_background = false
+random_ring_color = false
+
+[token.export.limits]
+size_min = 64
+size_max = 2048
+png_optimization_level_min = 0
+png_optimization_level_max = 6
+jpeg_quality_min = 1
+jpeg_quality_max = 100
+webp_quality_min = 1
+webp_quality_max = 100
+jxl_distance_min = 0.0
+jxl_distance_max = 5.0
+jxl_effort_min = 1
+jxl_effort_max = 9
+jxl_decoding_speed_min = 0
+jxl_decoding_speed_max = 4
+max_canvas_size = 4096
+
+[token.export.rendering]
+resample_filter = "lanczos3"
+trim_transparent_bounds = true
+jpeg_matte_color = "#FFFFFFFF"
+
+[token.export.naming]
+collision_separator = "_"
+collision_start = 2
+
+[token.export.random_colors]
+palette = ["#0B1020", "#102A43", "#3B0A57", "#5A0B2E", "#5B1A00", "#064E3B", "#164E63", "#3F3F46", "#F8FAFC", "#FFF3BF", "#FFD166", "#FF8FAB", "#FF6B6B", "#C4B5FD", "#7DD3FC", "#5EEAD4", "#86EFAC", "#FDE68A"]
+minimum_contrast_ratio = 4.5
+minimum_oklab_distance = 0.12
+
+[[token.export.webp_strength_profiles]]
+id = "fast"
+label = "Fast"
+method = 2
+passes = 1
+
+[[token.export.webp_strength_profiles]]
+id = "balanced"
+label = "Balanced"
+method = 4
+passes = 2
+
+[[token.export.webp_strength_profiles]]
+id = "strong"
+label = "Strong"
+method = 5
+passes = 6
+
+[[token.export.webp_strength_profiles]]
+id = "maximum"
+label = "Maximum"
+method = 6
+passes = 10
+
+[token.preview]
+display_token_size = 400
+minimum_world_size = 512
+world_size_step = 128
+antialias = true
+device_pixel_ratio_max = 2.0
+
+[token.preview.guide]
+dash_length = 6
+gap_length = 4
+line_width = 1
+line_color = "#FFFFFF"
+line_alpha = 0.5
+endpoint_radius = 3
+endpoint_alpha = 0.7
+
+[token.layout]
+left_width = 280
+right_width = 400
+left_min_width = 200
+center_min_width = 400
+right_min_width = 300
+
+[token.files]
+thumbnail_size = 56
+import_formats = ["png", "jpg", "jpeg", "webp", "bmp"]
+export_formats = ["png", "jpg", "webp", "jxl"]
+
+[token.history]
+maximum_entries = 50
+
+[token.rings]
+thumbnail_size = 64
+request_debounce_ms = 50
+frontend_cache_entries = 32
+max_upload_bytes = 33554432
+max_source_dimension = 16384
+custom_scale_min = 10
+custom_scale_max = 500
+
+[token.notifications]
+toast_duration_ms = 3000

@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
 import ConfigurationDialog from '@/components/settings/ConfigurationDialog.vue'
 import { useEditorStore } from '@/stores/editor'
+import { useTokenStore } from '@/stores/token'
 import type { LibraryRecord } from '@/lib/backend'
 
 const editor = useEditorStore()
@@ -34,6 +35,7 @@ const handleFinderFileDoubleClick = ctx.handleFinderFileDoubleClick as (kind: st
 const handleFinderPathChange = ctx.handleFinderPathChange as (kind: string, path: string) => void
 const handleFinderSelect = ctx.handleFinderSelect as (kind: string, items: unknown[]) => void
 const handoutContextMenuItems = ctx.handoutContextMenuItems as any
+const tokenContextMenuItems = ctx.tokenContextMenuItems as any
 const imageHandoutContextMenuItems = ctx.imageHandoutContextMenuItems as Record<string, any>
 const handleDirectFinderDrop = ctx.handleDirectFinderDrop as (kind: string, event: DragEvent) => void
 const handleDirectFinderDragover = ctx.handleDirectFinderDragover as (kind: string, event: DragEvent) => void
@@ -52,6 +54,9 @@ const fontPreviewSource = ctx.fontPreviewSource as (font: LibraryRecord) => stri
 const fontFamily = ctx.fontFamily as (font: LibraryRecord) => string
 const filteredFonts = ctx.filteredFonts as LibraryRecord[]
 const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
+const tokenStore = ctx.tokenStore as ReturnType<typeof useTokenStore>
+const createTokenFromSelectedAssets = ctx.createTokenFromSelectedAssets as () => Promise<void>
+const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
 </script>
 
 <template>
@@ -73,6 +78,7 @@ const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
     <Tabs default-value="handouts" class="manager-tabs">
       <TabsList class="manager-tab-list">
         <TabsTrigger value="handouts">Handouts</TabsTrigger>
+        <TabsTrigger value="tokens">Tokens</TabsTrigger>
         <TabsTrigger value="assets">Assets</TabsTrigger>
         <TabsTrigger value="fonts">Fonts</TabsTrigger>
       </TabsList>
@@ -128,6 +134,29 @@ const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
         </VueFinder>
       </TabsContent>
 
+      <TabsContent value="tokens" class="manager-tab-content">
+        <VueFinder
+          id="token-finder"
+          class="manager-finder large-grid-finder"
+          :style="handoutFinderStyle"
+          :driver="finderDrivers.token"
+          :features="finderFeaturesForKind('token')"
+          :config="finderUploadConfig"
+          :context-menu-items="tokenContextMenuItems"
+          selection-mode="multiple"
+          selection-filter-type="both"
+          @select="(items) => handleFinderSelect('token', items)"
+          @path-change="(path) => handleFinderPathChange('token', path)"
+          @file-dclick="(event) => handleFinderFileDoubleClick('token', event)"
+        >
+          <template #status-bar="{ count }">
+            <div class="finder-status-bar">
+              <span>{{ count }} items · {{ tokenStore.projects.length }} token projects</span>
+            </div>
+          </template>
+        </VueFinder>
+      </TabsContent>
+
       <TabsContent value="assets" class="manager-tab-content">
         <VueFinder
           :key="`asset-${finderRevision.asset}`"
@@ -137,7 +166,7 @@ const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
           :features="finderFeaturesForKind('asset')"
           :config="finderUploadConfig"
           :context-menu-items="imageHandoutContextMenuItems.asset"
-          selection-mode="single"
+          selection-mode="multiple"
           selection-filter-type="both"
           @select="(items) => handleFinderSelect('asset', items)"
           @path-change="(path) => handleFinderPathChange('asset', path)"
@@ -148,14 +177,21 @@ const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
               <span>{{ count }} items · {{ selectedImageStatus('asset') }}</span>
-              <Button
-                size="sm"
-                :disabled="!selectedImageRecord('asset')"
-                @click="createHandoutFromFinderImage('asset')"
-              >
-                <Plus data-icon="inline-start" />
-                Create handout
-              </Button>
+              <ButtonGroup aria-label="Selected asset actions">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  :disabled="!selectedImageRecord('asset')"
+                  @click="createHandoutFromFinderImage('asset')"
+                >
+                  <Plus data-icon="inline-start" />
+                  Create handout
+                </Button>
+                <Button size="sm" :disabled="!selectedTokenAssets().length" @click="createTokenFromSelectedAssets">
+                  <Plus data-icon="inline-start" />
+                  Create token
+                </Button>
+              </ButtonGroup>
             </div>
           </template>
         </VueFinder>

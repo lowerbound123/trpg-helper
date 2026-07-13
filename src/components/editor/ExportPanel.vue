@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { appConfiguration } from '@/lib/configuration'
 
-import InspectorNumberSlider from './InspectorNumberSlider.vue'
+import NumericSliderField from '@/components/controls/NumericSliderField.vue'
 
 const exportScale = defineModel<number>('exportScale', { required: true })
 const exportFormat = defineModel<'png' | 'jpeg' | 'webp'>('exportFormat', { required: true })
@@ -24,7 +24,7 @@ defineEmits<{
 
 <template>
   <div class="panel-stack inspector-panel">
-    <InspectorNumberSlider
+    <NumericSliderField
       label="Export scale"
       :model-value="exportScale"
       :min="appConfiguration.export.minScale"
@@ -43,7 +43,7 @@ defineEmits<{
         </SelectContent>
       </Select>
     </label>
-    <InspectorNumberSlider
+    <NumericSliderField
       v-if="exportFormat !== 'png'"
       label="Quality"
       :model-value="exportQuality"

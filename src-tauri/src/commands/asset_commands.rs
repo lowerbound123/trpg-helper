@@ -15,7 +15,7 @@ use crate::services::path_service::{
     rename_folder_value, write_debug_log,
 };
 use crate::services::preview_service::{encode_webp_thumbnail_bytes, thumbnail_path};
-use crate::types::{DeleteEntries, ImportResult, LibraryIndex};
+use crate::types::{DeleteEntries, ImportResult, LibraryIndex, TokenRingConfig};
 
 #[tauri::command]
 pub fn get_library(app: AppHandle) -> CommandResult<LibraryIndex> {
@@ -118,6 +118,35 @@ pub fn move_library_record(
             .ok_or_else(|| "unknown library folder kind".to_string())?;
         ensure_folder(folders, &folder);
     }
+    write_index(&app, &index).map_err(String::from)?;
+    Ok(index)
+}
+
+#[tauri::command]
+pub fn update_token_ring_config(
+    app: AppHandle,
+    id: String,
+    expected_revision: u64,
+    mut config: TokenRingConfig,
+) -> CommandResult<LibraryIndex> {
+    if config.design_size <= 0.0
+        || config.inner_radius < 0.0
+        || config.outer_radius <= config.inner_radius
+        || config.outer_radius > config.design_size / 2.0
+        || !(0.1..=5.0).contains(&config.asset_scale)
+    {
+        return Err("invalid token ring geometry".to_string());
+    }
+    let mut index = read_index(&app).map_err(String::from)?;
+    let record = index.assets.iter_mut().find(|record| record.id == id)
+        .ok_or_else(|| "ring asset not found".to_string())?;
+    let revision = record.token_ring.as_ref().map_or(0, |ring| ring.revision);
+    if revision != expected_revision {
+        return Err(format!("token ring revision conflict: expected {expected_revision}, current {revision}"));
+    }
+    config.revision = revision + 1;
+    record.token_ring = Some(config);
+    record.updated_at = Utc::now();
     write_index(&app, &index).map_err(String::from)?;
     Ok(index)
 }

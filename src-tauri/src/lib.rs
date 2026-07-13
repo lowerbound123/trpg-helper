@@ -2,6 +2,7 @@ mod commands;
 mod errors;
 mod services;
 mod types;
+mod token;
 
 // Re-exports needed by already-extracted command modules (export_commands.rs,
 // mask_commands.rs) that reference these via `crate::` paths.
@@ -24,6 +25,8 @@ use commands::mask_commands::{
 };
 use commands::preview_commands::{save_project_asset, save_project_preview};
 use commands::project_commands::*;
+use commands::token_project_commands::*;
+use token::commands::generate_token_batch;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,6 +35,11 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             reset_debug_log();
+            token::configuration::set_active_configuration(
+                token::configuration::parse_handout_configuration(include_str!("../../configuration.toml"))
+                    .map_err(std::io::Error::other)?,
+            )
+            .map_err(std::io::Error::other)?;
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -48,23 +56,31 @@ pub fn run() {
             create_library_folder,
             create_project,
             create_project_folder,
+            create_token_project,
+            create_token_project_folder,
             delete_library_entries,
             delete_project_entries,
+            delete_token_project_entries,
             delete_project_mask,
             export_image,
             export_image_bytes_to_downloads,
             export_image_file_to_downloads,
             export_image_to_downloads,
             get_library,
+            generate_token_batch,
             import_asset,
             import_background,
             import_font,
             list_project_folders,
             list_projects,
+            list_token_project_folders,
+            list_token_projects,
             move_library_record,
             move_managed_project,
+            move_token_project,
             open_managed_project,
             open_project,
+            open_token_project,
             read_configuration,
             read_file_data_url,
             read_project_file_data_url,
@@ -72,6 +88,8 @@ pub fn run() {
             rename_library_record,
             rename_managed_project,
             rename_project_folder,
+            rename_token_project,
+            rename_token_project_folder,
             repair_missing_thumbnails,
             save_font_preview,
             save_managed_project,
@@ -80,7 +98,11 @@ pub fn run() {
             save_project_mask,
             save_project_mask_cache,
             save_project_preview,
+            save_token_project,
+            save_token_project_preview,
+            copy_token_project,
             write_encoded_image_bytes_to_downloads,
+            update_token_ring_config,
             write_configuration
         ])
         .run(tauri::generate_context!())

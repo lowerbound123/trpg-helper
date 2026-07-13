@@ -62,6 +62,14 @@ pub(crate) fn projects_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(app_root(app)?.join("projects"))
 }
 
+pub(crate) fn token_projects_root(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(app_root(app)?.join("token-projects"))
+}
+
+pub(crate) fn token_project_folders_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(token_projects_root(app)?.join("folders.json"))
+}
+
 pub(crate) fn index_path(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(library_root(app)?.join("index.json"))
 }
@@ -166,6 +174,7 @@ pub(crate) fn debug_log_file_name(scope: &str) -> &'static str {
         "speed" => "speed.log",
         "mask" => "mask.log",
         "text" => "text.log",
+        "token" => "token.log",
         "render" | "export" | "thumbnail" | "background-render" | "handout-preview" | "flat" => {
             "render.log"
         }

@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import ExportPanel from './ExportPanel.vue'
-import InspectorNumberSlider from './InspectorNumberSlider.vue'
+import NumericSliderField from '@/components/controls/NumericSliderField.vue'
 
 describe('ExportPanel numeric controls', () => {
   beforeEach(() => {
@@ -23,7 +23,7 @@ describe('ExportPanel numeric controls', () => {
       },
     })
 
-    const scale = wrapper.findAllComponents(InspectorNumberSlider)
+    const scale = wrapper.findAllComponents(NumericSliderField)
       .find((control) => control.props('label') === 'Export scale')
 
     expect(scale).toBeDefined()
@@ -43,7 +43,7 @@ describe('ExportPanel numeric controls', () => {
       },
     })
 
-    const quality = wrapper.findAllComponents(InspectorNumberSlider)
+    const quality = wrapper.findAllComponents(NumericSliderField)
       .find((control) => control.props('label') === 'Quality')
 
     expect(quality?.props('unit')).toBe('%')

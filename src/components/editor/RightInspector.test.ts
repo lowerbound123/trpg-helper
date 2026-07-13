@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { EditorTool } from '@/lib/editor-tools'
 import { useEditorStore } from '@/stores/editor'
 
-import InspectorNumberSlider from './InspectorNumberSlider.vue'
+import NumericSliderField from '@/components/controls/NumericSliderField.vue'
 import RightInspector from './RightInspector.vue'
 
 function mountInspector(activeTool: EditorTool) {
@@ -65,7 +65,7 @@ describe('RightInspector tool tab routing', () => {
     const editor = useEditorStore()
     editor.addShape('rect')
     const wrapper = mountInspector('select')
-    const controls = wrapper.findAllComponents(InspectorNumberSlider)
+    const controls = wrapper.findAllComponents(NumericSliderField)
     const opacity = controls.find((control) => control.props('label') === 'Opacity')
 
     expect(controls.some((control) => control.props('label') === 'X')).toBe(true)
@@ -81,7 +81,7 @@ describe('RightInspector tool tab routing', () => {
   it('uses the unified control for brush settings and converts opacity percentages', async () => {
     const editor = useEditorStore()
     const wrapper = mountInspector('brush')
-    const controls = wrapper.findAllComponents(InspectorNumberSlider)
+    const controls = wrapper.findAllComponents(NumericSliderField)
     const brushOpacity = controls.find((control) => control.props('label') === 'Brush opacity')
 
     expect(controls.some((control) => control.props('label') === 'Brush width')).toBe(true)

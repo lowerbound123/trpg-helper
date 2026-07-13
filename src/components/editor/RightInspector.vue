@@ -4,7 +4,7 @@ import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, FlipHorizontal,
 
 import { Button } from '@/components/ui/button'
 import ExportPanel from '@/components/editor/ExportPanel.vue'
-import InspectorNumberSlider from '@/components/editor/InspectorNumberSlider.vue'
+import NumericSliderField from '@/components/controls/NumericSliderField.vue'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
@@ -239,11 +239,11 @@ function patchDocumentSaturation(value: number) {
             <Input :model-value="activeLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
           </label>
           <div class="transform-grid">
-            <InspectorNumberSlider label="X" :model-value="commonX" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ x: value })" />
-            <InspectorNumberSlider label="Y" :model-value="commonY" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ y: value })" />
-            <InspectorNumberSlider label="Rotation" :model-value="commonRotation" :min="0" :max="359" :step="1" unit="°" @update:model-value="(value) => editor.patchSelectedLayers({ rotation: value })" />
-            <InspectorNumberSlider label="Width" :model-value="commonWidth" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
-            <InspectorNumberSlider label="Height" :model-value="commonHeight" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ height: value })" />
+            <NumericSliderField label="X" :model-value="commonX" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ x: value })" />
+            <NumericSliderField label="Y" :model-value="commonY" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ y: value })" />
+            <NumericSliderField label="Rotation" :model-value="commonRotation" :min="0" :max="359" :step="1" unit="°" @update:model-value="(value) => editor.patchSelectedLayers({ rotation: value })" />
+            <NumericSliderField label="Width" :model-value="commonWidth" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
+            <NumericSliderField label="Height" :model-value="commonHeight" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ height: value })" />
             <label>
               Flip
               <Button
@@ -258,7 +258,7 @@ function patchDocumentSaturation(value: number) {
               </Button>
             </label>
           </div>
-          <InspectorNumberSlider
+          <NumericSliderField
             label="Opacity"
             :model-value="commonOpacity === undefined ? undefined : Math.round(commonOpacity * 100)"
             :min="0"
@@ -266,7 +266,7 @@ function patchDocumentSaturation(value: number) {
             :step="1"
             unit="%"
             @update:model-value="patchOpacity"
-            @value-commit="endContinuousEdit('layer-opacity')"
+            @commit="endContinuousEdit('layer-opacity')"
           />
           <div class="appearance-row">
             <label class="blend-control">
@@ -307,7 +307,7 @@ function patchDocumentSaturation(value: number) {
               Text
               <Textarea :model-value="activeTextLayer?.text" @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })" />
             </label>
-            <InspectorNumberSlider label="Font size" :model-value="commonFontSize" :min="1" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ fontSize: value })" />
+            <NumericSliderField label="Font size" :model-value="commonFontSize" :min="1" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ fontSize: value })" />
             <label>
               Color
               <Input
@@ -317,7 +317,7 @@ function patchDocumentSaturation(value: number) {
                 @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
               />
             </label>
-            <InspectorNumberSlider label="Line height" :model-value="commonLineHeight" :min="0.5" :max="3" :step="0.05" @update:model-value="(value) => editor.patchSelectedLayers({ lineHeight: value })" />
+            <NumericSliderField label="Line height" :model-value="commonLineHeight" :min="0.5" :max="3" :step="0.05" @update:model-value="(value) => editor.patchSelectedLayers({ lineHeight: value })" />
             <div class="icon-button-grid">
               <Button
                 size="icon"
@@ -399,9 +399,9 @@ function patchDocumentSaturation(value: number) {
             </label>
           </template>
           <template v-if="allSelectedShapes">
-            <InspectorNumberSlider v-if="allSelectedLines" label="Line length" :model-value="commonWidth" :min="12" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
-            <InspectorNumberSlider v-if="allSelectedRoundRects" label="Corner radius" :model-value="commonShapeCornerRadius" :min="0" :max="4096" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: value })" />
-            <InspectorNumberSlider label="Stroke width" :model-value="commonShapeStrokeWidth" :min="0" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: value })" />
+            <NumericSliderField v-if="allSelectedLines" label="Line length" :model-value="commonWidth" :min="12" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
+            <NumericSliderField v-if="allSelectedRoundRects" label="Corner radius" :model-value="commonShapeCornerRadius" :min="0" :max="4096" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: value })" />
+            <NumericSliderField label="Stroke width" :model-value="commonShapeStrokeWidth" :min="0" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: value })" />
             <template v-if="allSelectedLines">
               <label>
                 Line style
@@ -415,7 +415,7 @@ function patchDocumentSaturation(value: number) {
                   </SelectContent>
                 </Select>
               </label>
-              <InspectorNumberSlider label="Arrow size" :model-value="commonLineArrowSize" :min="0.25" :max="16" :step="0.25" @update:model-value="(value) => editor.patchSelectedLayers({ lineArrowSize: value })" />
+              <NumericSliderField label="Arrow size" :model-value="commonLineArrowSize" :min="0.25" :max="16" :step="0.25" @update:model-value="(value) => editor.patchSelectedLayers({ lineArrowSize: value })" />
               <div class="two-col">
                 <label>
                   Start arrow
@@ -448,10 +448,10 @@ function patchDocumentSaturation(value: number) {
           </template>
           <Separator />
           <div class="effect-grid">
-            <InspectorNumberSlider label="Blur" :model-value="commonLayerBlur" :min="0" :max="40" :step="1" @update:model-value="patchBlur" @value-commit="endContinuousEdit('layer-effect-blur')" />
-            <InspectorNumberSlider label="Brightness" :model-value="commonLayerBrightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchBrightness" @value-commit="endContinuousEdit('layer-effect-brightness')" />
-            <InspectorNumberSlider label="Contrast" :model-value="commonLayerContrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchContrast" @value-commit="endContinuousEdit('layer-effect-contrast')" />
-            <InspectorNumberSlider label="Saturation" :model-value="commonLayerSaturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchSaturation" @value-commit="endContinuousEdit('layer-effect-saturation')" />
+            <NumericSliderField label="Blur" :model-value="commonLayerBlur" :min="0" :max="40" :step="1" @update:model-value="patchBlur" @commit="endContinuousEdit('layer-effect-blur')" />
+            <NumericSliderField label="Brightness" :model-value="commonLayerBrightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchBrightness" @commit="endContinuousEdit('layer-effect-brightness')" />
+            <NumericSliderField label="Contrast" :model-value="commonLayerContrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchContrast" @commit="endContinuousEdit('layer-effect-contrast')" />
+            <NumericSliderField label="Saturation" :model-value="commonLayerSaturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchSaturation" @commit="endContinuousEdit('layer-effect-saturation')" />
           </div>
           <div class="danger-row">
             <Button variant="destructive" @click="deleteLayer">
@@ -487,11 +487,11 @@ function patchDocumentSaturation(value: number) {
               @update:model-value="(value) => patchBrushSettings({ brushColor: String(value) })"
             />
           </label>
-          <InspectorNumberSlider label="Brush width" :model-value="commonBrushWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ brushWidth: value })" />
-          <InspectorNumberSlider label="Eraser width" :model-value="commonEraserWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ eraserWidth: value })" />
-          <InspectorNumberSlider label="Tension" :model-value="commonBrushTension" :min="0" :max="1" :step="0.05" @update:model-value="(value) => patchBrushSettings({ brushTension: value })" />
-          <InspectorNumberSlider label="Brush opacity" :model-value="brushOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchBrushOpacitySlider" />
-          <InspectorNumberSlider label="Eraser opacity" :model-value="eraserOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchEraserOpacitySlider" />
+          <NumericSliderField label="Brush width" :model-value="commonBrushWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ brushWidth: value })" />
+          <NumericSliderField label="Eraser width" :model-value="commonEraserWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ eraserWidth: value })" />
+          <NumericSliderField label="Tension" :model-value="commonBrushTension" :min="0" :max="1" :step="0.05" @update:model-value="(value) => patchBrushSettings({ brushTension: value })" />
+          <NumericSliderField label="Brush opacity" :model-value="brushOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchBrushOpacitySlider" />
+          <NumericSliderField label="Eraser opacity" :model-value="eraserOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchEraserOpacitySlider" />
           <div class="document-summary">
             <span>Strokes</span>
             <strong>{{ selectedPaintLayers.reduce((sum, layer) => sum + layer.strokes.length, 0) }}</strong>
@@ -505,8 +505,8 @@ function patchDocumentSaturation(value: number) {
             Title
             <Input :model-value="editor.document.title" @update:model-value="(value) => editor.renameDocument(String(value))" />
           </label>
-          <InspectorNumberSlider label="Width" :model-value="editor.document.canvas.width" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ width: value })" />
-          <InspectorNumberSlider label="Height" :model-value="editor.document.canvas.height" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ height: value })" />
+          <NumericSliderField label="Width" :model-value="editor.document.canvas.width" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ width: value })" />
+          <NumericSliderField label="Height" :model-value="editor.document.canvas.height" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ height: value })" />
           <div class="document-summary">
             <span>Background</span>
             <strong>{{ backgroundAsset?.name || 'Transparent canvas' }}</strong>
@@ -517,10 +517,10 @@ function patchDocumentSaturation(value: number) {
           </div>
           <Separator />
           <div class="effect-grid">
-            <InspectorNumberSlider label="Document blur" :model-value="editor.document.canvas.effects.blur" :min="0" :max="40" :step="1" @update:model-value="patchDocumentBlur" @value-commit="endContinuousEdit('document-effect-blur')" />
-            <InspectorNumberSlider label="Document brightness" :model-value="editor.document.canvas.effects.brightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentBrightness" @value-commit="endContinuousEdit('document-effect-brightness')" />
-            <InspectorNumberSlider label="Document contrast" :model-value="editor.document.canvas.effects.contrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentContrast" @value-commit="endContinuousEdit('document-effect-contrast')" />
-            <InspectorNumberSlider label="Document saturation" :model-value="editor.document.canvas.effects.saturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentSaturation" @value-commit="endContinuousEdit('document-effect-saturation')" />
+            <NumericSliderField label="Document blur" :model-value="editor.document.canvas.effects.blur" :min="0" :max="40" :step="1" @update:model-value="patchDocumentBlur" @commit="endContinuousEdit('document-effect-blur')" />
+            <NumericSliderField label="Document brightness" :model-value="editor.document.canvas.effects.brightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentBrightness" @commit="endContinuousEdit('document-effect-brightness')" />
+            <NumericSliderField label="Document contrast" :model-value="editor.document.canvas.effects.contrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentContrast" @commit="endContinuousEdit('document-effect-contrast')" />
+            <NumericSliderField label="Document saturation" :model-value="editor.document.canvas.effects.saturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentSaturation" @commit="endContinuousEdit('document-effect-saturation')" />
           </div>
           <Separator />
           <ExportPanel

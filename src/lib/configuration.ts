@@ -1,39 +1,19 @@
 import configurationToml from '../../configuration.toml?raw'
+import { dump, load } from 'js-toml'
+
+import {
+  defaultTokenConfiguration,
+  tokenConfigurationFromToml,
+  tokenConfigurationToToml,
+  type TokenFeatureConfiguration,
+} from './token/configuration'
 
 const CONFIGURATION_OVERRIDE_STORAGE_KEY = 'handout-generator.configuration.toml'
 
-type TomlValue = string | number | boolean
-type TomlObject = Record<string, Record<string, TomlValue>>
-
-function parseScalar(value: string): TomlValue {
-  const trimmed = value.trim()
-  if (trimmed === 'true') return true
-  if (trimmed === 'false') return false
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed)
-  return trimmed.replace(/^"|"$/g, '')
-}
+type TomlObject = Record<string, unknown>
 
 export function parseConfigurationToml(source: string): TomlObject {
-  const result: TomlObject = {}
-  let section = ''
-
-  for (const rawLine of source.split(/\r?\n/)) {
-    const line = rawLine.replace(/#.*$/, '').trim()
-    if (!line) continue
-    const sectionMatch = line.match(/^\[([^\]]+)]$/)
-    if (sectionMatch) {
-      section = sectionMatch[1]
-      result[section] = result[section] || {}
-      continue
-    }
-    const separator = line.indexOf('=')
-    if (separator < 0 || !section) continue
-    const key = line.slice(0, separator).trim()
-    const value = line.slice(separator + 1)
-    result[section][key] = parseScalar(value)
-  }
-
-  return result
+  return load(source) as TomlObject
 }
 
 export function runtimeConfigurationToml() {
@@ -52,8 +32,15 @@ export function storeRuntimeConfigurationOverride(source: string) {
 
 const parsed = parseConfigurationToml(runtimeConfigurationToml())
 
+function sectionValue(section: string) {
+  const value = parsed[section]
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
 function numberValue(section: string, key: string, fallback: number) {
-  const value = parsed[section]?.[key]
+  const value = sectionValue(section)[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
@@ -62,7 +49,7 @@ function unitValue(section: string, key: string, fallback: number) {
 }
 
 function stringValue(section: string, key: string, fallback: string) {
-  const value = parsed[section]?.[key]
+  const value = sectionValue(section)[key]
   return typeof value === 'string' ? value : fallback
 }
 
@@ -105,6 +92,7 @@ export type AppConfiguration = {
     fileLogEnabled: boolean
     renderPerfLogEnabled: boolean
   }
+  token: TokenFeatureConfiguration
 }
 
 export const appConfiguration = {
@@ -132,8 +120,8 @@ export const appConfiguration = {
     continuousEditCommitDelayMs: numberValue('editor', 'continuous_edit_commit_delay_ms', 450),
   },
   mask: {
-    enabled: parsed.mask?.enabled !== false,
-    usePixiPreview: parsed.mask?.use_pixi_preview !== false,
+    enabled: sectionValue('mask').enabled !== false,
+    usePixiPreview: sectionValue('mask').use_pixi_preview !== false,
     strokePreviewMinOpacity: unitValue('mask', 'stroke_preview_min_opacity', 0.3),
     interactiveRefreshDelayMs: numberValue('mask', 'interactive_refresh_delay_ms', 1000),
     pointerIdleGraceMs: numberValue('mask', 'pointer_idle_grace_ms', 120),
@@ -143,79 +131,63 @@ export const appConfiguration = {
     minScale: numberValue('export', 'min_scale', 0.1),
   },
   debug: {
-    fileLogEnabled: parsed.debug?.file_log_enabled !== false,
-    renderPerfLogEnabled: parsed.debug?.render_perf_log_enabled !== false,
+    fileLogEnabled: sectionValue('debug').file_log_enabled !== false,
+    renderPerfLogEnabled: sectionValue('debug').render_perf_log_enabled !== false,
   },
+  token: tokenConfigurationFromToml(parsed.token),
 } satisfies AppConfiguration
 
-function tomlString(value: string) {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-}
-
 export function serializeConfigurationToml(config: AppConfiguration) {
-  return [
-    '# Handout Generator local configuration.',
-    '# Values here are read by the Vue/Tauri app at build time unless noted otherwise.',
-    '',
-    '[paths]',
-    `data_dir = ${tomlString(config.paths.dataDir)}`,
-    `log_file = ${tomlString(config.paths.logFile)}`,
-    '',
-    '[uploads]',
-    `max_file_size = ${tomlString(config.uploads.maxFileSize)}`,
-    '',
-    '[previews]',
-    `thumbnail_max_edge_px = ${config.previews.thumbnailMaxEdgePx}`,
-    `thumbnail_quality = ${config.previews.thumbnailQuality}`,
-    `target_max_bytes = ${config.previews.targetMaxBytes}`,
-    '',
-    '[finder]',
-    `manager_height_px = ${config.finder.managerHeightPx}`,
-    `compact_height_px = ${config.finder.compactHeightPx}`,
-    `handout_grid_scale = ${config.finder.handoutGridScale}`,
-    `background_grid_scale = ${config.finder.backgroundGridScale}`,
-    '',
-    '[editor]',
-    `snap_threshold_screen_px = ${config.editor.snapThresholdScreenPx}`,
-    `max_snap_candidates = ${config.editor.maxSnapCandidates}`,
-    `continuous_edit_commit_delay_ms = ${config.editor.continuousEditCommitDelayMs}`,
-    '',
-    '[mask]',
-    '# Set to false to disable all layer mask UI, editing, preview composition,',
-    '# project preview masks, and export/flat mask application.',
-    `enabled = ${config.mask.enabled}`,
-    '# Use PixiJS for low-frequency layer mask preview composition. Final export',
-    '# still uses the Canvas2D/Konva path so the output is deterministic.',
-    `use_pixi_preview = ${config.mask.usePixiPreview}`,
-    '# Minimum opacity used only for in-progress brush/eraser stroke previews while',
-    '# editing a mask. Final mask pixels still use the configured brush/eraser value.',
-    `stroke_preview_min_opacity = ${clamp(config.mask.strokePreviewMinOpacity, 0, 1)}`,
-    '# Delay secondary mask preview work after brush/eraser/shape edits. Target layer',
-    '# recomposition starts on the next frame.',
-    `interactive_refresh_delay_ms = ${Math.max(0, Math.round(config.mask.interactiveRefreshDelayMs))}`,
-    '# Keep secondary/full mask recomposition out of pointer down/drag hot paths.',
-    `pointer_idle_grace_ms = ${Math.max(0, Math.round(config.mask.pointerIdleGraceMs))}`,
-    '',
-    '[export]',
-    `default_scale = ${config.export.defaultScale}`,
-    `min_scale = ${config.export.minScale}`,
-    '',
-    '[debug]',
-    `file_log_enabled = ${config.debug.fileLogEnabled}`,
-    `render_perf_log_enabled = ${config.debug.renderPerfLogEnabled}`,
-    '',
-  ].join('\n')
+  return `# Handout Generator local configuration.\n${dump({
+    paths: { data_dir: config.paths.dataDir, log_file: config.paths.logFile },
+    uploads: { max_file_size: config.uploads.maxFileSize },
+    previews: {
+      thumbnail_max_edge_px: config.previews.thumbnailMaxEdgePx,
+      thumbnail_quality: config.previews.thumbnailQuality,
+      target_max_bytes: config.previews.targetMaxBytes,
+    },
+    finder: {
+      manager_height_px: config.finder.managerHeightPx,
+      compact_height_px: config.finder.compactHeightPx,
+      handout_grid_scale: config.finder.handoutGridScale,
+      background_grid_scale: config.finder.backgroundGridScale,
+    },
+    editor: {
+      snap_threshold_screen_px: config.editor.snapThresholdScreenPx,
+      max_snap_candidates: config.editor.maxSnapCandidates,
+      continuous_edit_commit_delay_ms: config.editor.continuousEditCommitDelayMs,
+    },
+    mask: {
+      enabled: config.mask.enabled,
+      use_pixi_preview: config.mask.usePixiPreview,
+      stroke_preview_min_opacity: clamp(config.mask.strokePreviewMinOpacity, 0, 1),
+      interactive_refresh_delay_ms: Math.max(0, Math.round(config.mask.interactiveRefreshDelayMs)),
+      pointer_idle_grace_ms: Math.max(0, Math.round(config.mask.pointerIdleGraceMs)),
+    },
+    export: { default_scale: config.export.defaultScale, min_scale: config.export.minScale },
+    debug: {
+      file_log_enabled: config.debug.fileLogEnabled,
+      render_perf_log_enabled: config.debug.renderPerfLogEnabled,
+    },
+    token: tokenConfigurationToToml(config.token),
+  })}`
 }
 
 export function configurationFromToml(source: string): AppConfiguration {
   const config = parseConfigurationToml(source)
-  const numberFrom = (section: string, key: string, fallback: number) => {
-    const value = config[section]?.[key]
+  const section = (name: string) => {
+    const value = config[name]
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {}
+  }
+  const numberFrom = (sectionName: string, key: string, fallback: number) => {
+    const value = section(sectionName)[key]
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback
   }
   const unitFrom = (section: string, key: string, fallback: number) => clamp(numberFrom(section, key, fallback), 0, 1)
-  const stringFrom = (section: string, key: string, fallback: string) => {
-    const value = config[section]?.[key]
+  const stringFrom = (sectionName: string, key: string, fallback: string) => {
+    const value = section(sectionName)[key]
     return typeof value === 'string' ? value : fallback
   }
   return {
@@ -243,8 +215,8 @@ export function configurationFromToml(source: string): AppConfiguration {
       continuousEditCommitDelayMs: numberFrom('editor', 'continuous_edit_commit_delay_ms', appConfiguration.editor.continuousEditCommitDelayMs),
     },
     mask: {
-      enabled: config.mask?.enabled !== false,
-      usePixiPreview: config.mask?.use_pixi_preview !== false,
+      enabled: section('mask').enabled !== false,
+      usePixiPreview: section('mask').use_pixi_preview !== false,
       strokePreviewMinOpacity: unitFrom('mask', 'stroke_preview_min_opacity', appConfiguration.mask.strokePreviewMinOpacity),
       interactiveRefreshDelayMs: numberFrom('mask', 'interactive_refresh_delay_ms', appConfiguration.mask.interactiveRefreshDelayMs),
       pointerIdleGraceMs: numberFrom('mask', 'pointer_idle_grace_ms', appConfiguration.mask.pointerIdleGraceMs),
@@ -254,9 +226,10 @@ export function configurationFromToml(source: string): AppConfiguration {
       minScale: numberFrom('export', 'min_scale', appConfiguration.export.minScale),
     },
     debug: {
-      fileLogEnabled: config.debug?.file_log_enabled !== false,
-      renderPerfLogEnabled: config.debug?.render_perf_log_enabled !== false,
+      fileLogEnabled: section('debug').file_log_enabled !== false,
+      renderPerfLogEnabled: section('debug').render_perf_log_enabled !== false,
     },
+    token: tokenConfigurationFromToml(config.token ?? defaultTokenConfiguration),
   }
 }
 

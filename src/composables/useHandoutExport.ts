@@ -15,6 +15,7 @@ import { editorMaskGpuRuntime } from '@/lib/mask-runtime'
 import { downloadFileName, renderHandoutToCanvas } from '@/lib/render'
 import { isImageLayer, useEditorStore } from '@/stores/editor'
 import { useExportProgress } from './useExportProgress'
+import { translate } from '@/i18n'
 
 type EditorStore = ReturnType<typeof useEditorStore>
 type ImageCache = Record<string, HTMLImageElement>
@@ -71,11 +72,11 @@ export function useHandoutExport(options: {
   }
 
   async function browserCanvasBlob(canvas: HTMLCanvasElement, options: HandoutEncodingOptions) {
-    if (options.format === 'jxl') throw new Error('JPEG XL 仅在 Tauri 桌面应用中支持')
+    if (options.format === 'jxl') throw new Error(translate('JPEG_XL_DESKTOP_ONLY'))
     if (options.format === 'png') return canvasToPngBlob(canvas)
     return await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
-        (blob) => blob ? resolve(blob) : reject(new Error(`无法编码 ${options.format.toUpperCase()}`)),
+        (blob) => blob ? resolve(blob) : reject(new Error(translate('IMAGE_ENCODING_FAILED', { format: options.format.toUpperCase() }))),
         exportMimeType(options.format),
         browserQualityForEncoding(options),
       )
@@ -101,7 +102,7 @@ export function useHandoutExport(options: {
     const clickedAt = performance.now()
     isExportingCurrent.value = true
     exportProgress.value = 1
-    exportLog.value = 'Preparing export...'
+    exportLog.value = translate('HANDOUT_EXPORT_PREPARING')
     await prepareExportProgress()
     const clickToProgressMs = Math.round(performance.now() - clickedAt)
     options.logExport('export current start', {
@@ -112,7 +113,7 @@ export function useHandoutExport(options: {
       clickToProgressMs,
     })
     try {
-      exportLog.value = 'Checking export changes...'
+      exportLog.value = translate('HANDOUT_EXPORT_CHECKING')
       await setExportProgress(8)
       const signatureStartedAt = performance.now()
       const signature = JSON.stringify({
@@ -122,17 +123,17 @@ export function useHandoutExport(options: {
       })
       const signatureMs = Math.round(performance.now() - signatureStartedAt)
       if (lastCurrentExport.value?.signature === signature) {
-        exportLog.value = `Unchanged image already exported to ${lastCurrentExport.value.path}`
+        exportLog.value = translate('HANDOUT_EXPORT_UNCHANGED', { path: lastCurrentExport.value.path })
         options.logExport('export current unchanged', { signatureMs, clickToProgressMs, path: lastCurrentExport.value.path })
         finishExportProgress(true)
         return
       }
-      exportLog.value = 'Loading export images...'
+      exportLog.value = translate('HANDOUT_EXPORT_LOADING_IMAGES')
       await setExportProgress(18)
       const imageLoadStartedAt = performance.now()
       await ensureDocumentImages(options.editor.document)
       const imageLoadMs = Math.round(performance.now() - imageLoadStartedAt)
-      exportLog.value = 'Rendering export image...'
+      exportLog.value = translate('HANDOUT_EXPORT_RENDERING')
       await setExportProgress(42)
       const renderStartedAt = performance.now()
       const maskDataUrls = await currentMaterializedMaskDataUrls(options.editor.document)
@@ -153,7 +154,7 @@ export function useHandoutExport(options: {
       )
       const konvaRenderMs = Math.round(performance.now() - renderStartedAt)
       options.logExport('export current render complete', { signatureMs, imageLoadMs, konvaRenderMs, width: canvas.width, height: canvas.height })
-      exportLog.value = `Encoding ${exportEncoding.value.format.toUpperCase()} and writing to Downloads...`
+      exportLog.value = translate('HANDOUT_EXPORT_ENCODING', { format: exportEncoding.value.format.toUpperCase() })
       await setExportProgress(86)
       const writeStartedAt = performance.now()
       const result = await encodeCanvas(
@@ -164,7 +165,7 @@ export function useHandoutExport(options: {
       const writeMs = Math.round(performance.now() - writeStartedAt)
       const path = result.path
       lastCurrentExport.value = { signature, path }
-      exportLog.value = `Exported image to ${path}`
+      exportLog.value = translate('HANDOUT_EXPORT_COMPLETED', { path })
       options.logExport('export current complete', {
         path,
         bytes: result.outputBytes,
@@ -176,7 +177,7 @@ export function useHandoutExport(options: {
       })
       finishExportProgress(true)
     } catch (error) {
-      exportLog.value = `Export failed: ${String(error)}`
+      exportLog.value = translate('HANDOUT_EXPORT_FAILED')
       options.logExport('export current failed', { error })
       finishExportProgress(false)
     } finally {
@@ -189,7 +190,7 @@ export function useHandoutExport(options: {
     const clickedAt = performance.now()
     exportingHandoutIds.add(project.id)
     await prepareExportProgress()
-    exportLog.value = 'Preparing export...'
+    exportLog.value = translate('HANDOUT_EXPORT_PREPARING')
     const clickToProgressMs = Math.round(performance.now() - clickedAt)
     options.logExport('export handout start', { projectId: project.id, title: project.title, clickToProgressMs })
     try {
@@ -198,7 +199,7 @@ export function useHandoutExport(options: {
       const lastExport = lastHandoutExports.get(project.id)
       const signatureMs = Math.round(performance.now() - signatureStartedAt)
       if (lastExport?.signature === signature) {
-        exportLog.value = `Unchanged image already exported to ${lastExport.path}`
+        exportLog.value = translate('HANDOUT_EXPORT_UNCHANGED', { path: lastExport.path })
         options.logExport('export handout unchanged', { projectId: project.id, signatureMs, clickToProgressMs, path: lastExport.path })
         finishExportProgress(false)
         return
@@ -231,7 +232,7 @@ export function useHandoutExport(options: {
       const path = result.path
       const writeMs = Math.round(performance.now() - writeStartedAt)
       lastHandoutExports.set(project.id, { signature, path })
-      exportLog.value = `Exported image to ${path}`
+      exportLog.value = translate('HANDOUT_EXPORT_COMPLETED', { path })
       options.logExport('export handout complete', {
         projectId: project.id,
         path,
@@ -245,7 +246,7 @@ export function useHandoutExport(options: {
       })
       finishExportProgress(true)
     } catch (error) {
-      exportLog.value = `Export failed: ${String(error)}`
+      exportLog.value = translate('HANDOUT_EXPORT_FAILED')
       options.logExport('export handout failed', { projectId: project.id, error })
       finishExportProgress(false)
     } finally {

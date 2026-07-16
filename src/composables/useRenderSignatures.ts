@@ -6,6 +6,7 @@ import { hasVisibleEffects } from '@/lib/effects'
 import type { HandoutLayer, LayerGroup, ShapeLayer } from '@/lib/handout'
 import { isCurveShape } from '@/lib/handout'
 import { maskLayerCompositeSignature } from '@/lib/mask-runtime'
+import { createTransformerResizeConfig } from '@/lib/transformer-config'
 import { isTextLayer, useEditorStore } from '@/stores/editor'
 
 type EditorStore = ReturnType<typeof useEditorStore>
@@ -195,22 +196,13 @@ export function useRenderSignatures(options: {
     rotateEnabled: true,
     useSingleNodeRotation: false,
     ignoreStroke: true,
-    keepRatio: false,
-    shiftBehavior: 'none',
+    ...createTransformerResizeConfig({
+      line: selectedOnlyLineShape.value,
+      text: selectedOnlyTextLayer.value,
+      curve: selectedOnlyCurveShape.value,
+    }),
     rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
     rotationSnapTolerance: 6,
-    enabledAnchors: selectedOnlyCurveShape.value
-      ? []
-      : selectedOnlyLineShape.value
-      ? ['middle-left', 'middle-right']
-      : selectedOnlyTextLayer.value
-        ? ['middle-left', 'middle-right']
-        : ['top-left', 'top-center', 'top-right', 'middle-right', 'bottom-right', 'bottom-center', 'bottom-left', 'middle-left'],
-    boundBoxFunc: (oldBox: unknown, newBox: { width: number; height: number }) => {
-      if (selectedOnlyLineShape.value) return Math.abs(newBox.width) < 12 ? oldBox : newBox
-      if (selectedOnlyTextLayer.value) return Math.abs(newBox.width) < 24 ? oldBox : newBox
-      return newBox.width < 12 || newBox.height < 12 ? oldBox : newBox
-    },
   }))
 
   const documentFilterStyle = computed(() => {

@@ -5,7 +5,7 @@
       <span />
       <span />
     </div>
-    <strong>Handout Generator</strong>
-    <p>Loading library and projects...</p>
+    <strong>{{ $t('APP_NAME') }}</strong>
+    <p>{{ $t('LOADING_LIBRARY_AND_PROJECTS') }}</p>
   </div>
 </template>

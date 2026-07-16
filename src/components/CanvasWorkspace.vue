@@ -148,7 +148,7 @@ function draftStrokeConfig() {
         <Button size="icon" variant="outline" @click="zoomOut">
           <Minus />
         </Button>
-        <Button size="sm" variant="outline" @click="fitEditorCanvas('button')">Fit</Button>
+        <Button size="sm" variant="outline" @click="fitEditorCanvas('button')">{{ $t('VIEWPORT_FIT') }}</Button>
         <Button size="icon" variant="outline" @click="zoomIn">
           <Plus />
         </Button>

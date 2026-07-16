@@ -21,6 +21,10 @@ pub(crate) enum AppError {
     Image(#[from] image::ImageError),
     #[error("unsupported image export format: {0}")]
     InvalidImageFormat(String),
+    #[error("unknown library kind: {0}")]
+    InvalidLibraryKind(String),
+    #[error("failed to create import worker pool: {0}")]
+    ImportWorkerPool(String),
 }
 
 impl From<AppError> for String {

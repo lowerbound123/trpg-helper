@@ -26,7 +26,7 @@ if (!ctx) throw new Error('Token editor context is unavailable')
       @drop.capture="ctx.onDrop($event as DragEvent)"
     >
       <template #status-bar="{ count }">
-        <div class="finder-status-bar"><span>{{ count }} items · 右键文件或目录加入项目</span></div>
+        <div class="finder-status-bar"><span>{{ $t('FINDER_ITEMS_COUNT', { count }) }} · {{ $t('TOKEN_ASSET_CONTEXT_HINT') }}</span></div>
       </template>
     </VueFinder>
   </div>

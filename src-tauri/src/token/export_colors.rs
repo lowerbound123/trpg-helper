@@ -200,7 +200,7 @@ pub(crate) fn apply_random_colors<R, F>(
     let mut used_rings = Vec::new();
 
     for item in items {
-        let custom = item.params.ring_style.starts_with("custom:");
+        let custom = item.params.ring_asset_path.is_some();
         let current_background = parse_rgb(&item.params.background).unwrap_or([0, 0, 0]);
         let current_ring = parse_rgb(&item.params.ring_color).unwrap_or([255, 255, 255]);
 
@@ -215,7 +215,11 @@ pub(crate) fn apply_random_colors<R, F>(
 
         if item.params.random_background {
             let reference = if custom {
-                custom_representative(&item.params.ring_style).unwrap_or(current_ring)
+                item.params
+                    .ring_asset_path
+                    .as_deref()
+                    .and_then(&mut custom_representative)
+                    .unwrap_or(current_ring)
             } else {
                 current_ring
             };
@@ -299,16 +303,13 @@ mod tests {
     #[test]
     fn custom_ring_keeps_its_rgb_and_uses_representative_color_for_background() {
         let config = &active_configuration().export.random_colors;
-        let mut items = vec![item(
-            "custom.png",
-            "#22222255",
-            "#12345677",
-            "custom:shared",
-        )];
+        let mut custom = item("custom.png", "#22222255", "#12345677", "asset:shared");
+        custom.params.ring_asset_path = Some("/rings/shared.png".into());
+        let mut items = vec![custom];
         let mut rng = StdRng::seed_from_u64(9);
 
         apply_random_colors(&mut items, config, &mut rng, |id| {
-            assert_eq!(id, "custom:shared");
+            assert_eq!(id, "/rings/shared.png");
             Some([248, 250, 252])
         });
 
@@ -325,7 +326,8 @@ mod tests {
     #[test]
     fn random_ring_option_alone_is_ignored_for_custom_rings() {
         let config = &active_configuration().export.random_colors;
-        let mut custom = item("custom.png", "#010203FF", "#AABBCC66", "custom:id");
+        let mut custom = item("custom.png", "#010203FF", "#AABBCC66", "asset:id");
+        custom.params.ring_asset_path = Some("/rings/id.png".into());
         custom.params.random_background = false;
         let mut items = vec![custom];
         let mut rng = StdRng::seed_from_u64(3);

@@ -5,6 +5,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createDefaultTokenExportSettings, createDefaultTokenVisualStyle, type TokenProjectDocument } from '@/lib/token'
+import { translate } from '@/i18n'
 import { useTokenStore } from '@/stores/token'
 import TokenExportPanel from './TokenExportPanel.vue'
 
@@ -53,7 +54,11 @@ describe('TokenExportPanel', () => {
     })
 
     const labels = wrapper.findAll('[data-parameter-label="true"]').map((node) => node.text())
-    expect(labels).toEqual(expect.arrayContaining(['Alpha 优化', '保留 Metadata', 'Zopfli']))
+    expect(labels).toEqual(expect.arrayContaining([
+      translate('EXPORT_PNG_ALPHA'),
+      translate('EXPORT_PNG_METADATA'),
+      translate('ZOPFLI'),
+    ]))
   })
 
   it('exposes an observable selected state for export format buttons', () => {

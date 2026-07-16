@@ -1,9 +1,6 @@
 //! Project create/open/save/move/rename/delete and folder command boundary.
 
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 
 use chrono::Utc;
 use serde_json::Value;
@@ -12,8 +9,8 @@ use uuid::Uuid;
 
 use crate::errors::{AppError, CommandResult};
 use crate::services::path_service::{
-    copy_dir_recursive, folder_is_or_descendant, normalize_folder, remove_dir_if_exists,
-    rename_folder_value, projects_root,
+    copy_dir_recursive, folder_is_or_descendant, normalize_folder, projects_root,
+    remove_dir_if_exists, rename_folder_value,
 };
 use crate::services::project_service::{
     ensure_project_folder, project_dir, project_summary, read_project_files,
@@ -244,7 +241,10 @@ pub fn move_managed_project(
 }
 
 #[tauri::command]
-pub fn delete_project_entries(app: AppHandle, entries: DeleteEntries) -> CommandResult<Vec<String>> {
+pub fn delete_project_entries(
+    app: AppHandle,
+    entries: DeleteEntries,
+) -> CommandResult<Vec<String>> {
     let ids: std::collections::HashSet<String> = entries.ids.into_iter().collect();
     let folders: Vec<String> = entries
         .folders

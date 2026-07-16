@@ -12,6 +12,26 @@ const CONFIGURATION_OVERRIDE_STORAGE_KEY = 'handout-generator.configuration.toml
 
 type TomlObject = Record<string, unknown>
 
+export type LocalePreference = 'auto' | 'zh-CN' | 'en-US'
+export type SegmentationModelId = 'birefnet-general' | 'u2net' | 'ben2' | 'macos-vision'
+export type SegmentationDevice = 'auto' | 'cpu' | 'coreml' | 'directml' | 'cuda'
+
+function localePreference(value: string): LocalePreference {
+  return value === 'zh-CN' || value === 'en-US' ? value : 'auto'
+}
+
+function segmentationModel(value: string): SegmentationModelId {
+  return ['birefnet-general', 'u2net', 'ben2', 'macos-vision'].includes(value)
+    ? value as SegmentationModelId
+    : 'birefnet-general'
+}
+
+function segmentationDevice(value: string): SegmentationDevice {
+  return ['auto', 'cpu', 'coreml', 'directml', 'cuda'].includes(value)
+    ? value as SegmentationDevice
+    : 'auto'
+}
+
 export function parseConfigurationToml(source: string): TomlObject {
   return load(source) as TomlObject
 }
@@ -186,7 +206,7 @@ function handoutExportConfigurationFromValue(source: unknown, fallback = default
 
 export type AppConfiguration = {
   schemaVersion: number
-  application: { title: string }
+  application: { title: string; locale: LocalePreference }
   window: { width: number; height: number; minWidth: number; minHeight: number; resizable: boolean }
   diagnostics: { logDirectory: string }
   paths: {
@@ -219,6 +239,20 @@ export type AppConfiguration = {
     interactiveRefreshDelayMs: number
     pointerIdleGraceMs: number
   }
+  foregroundSegmentation: {
+    enabled: boolean
+    model: SegmentationModelId
+    device: SegmentationDevice
+    workerThreads: number
+    intraThreads: number
+    interThreads: number
+    downloadMissingModels: boolean
+    downloadTimeoutSeconds: number
+    modelCacheDirectory: string
+    outputSuffix: string
+    maxSourceDimension: number
+    maxSourcePixels: number
+  }
   export: HandoutExportConfiguration
   debug: {
     fileLogEnabled: boolean
@@ -229,7 +263,10 @@ export type AppConfiguration = {
 
 export const appConfiguration = {
   schemaVersion: typeof parsed.schema_version === 'number' ? parsed.schema_version : 1,
-  application: { title: stringValue('application', 'title', 'Handout Generator') },
+  application: {
+    title: stringValue('application', 'title', 'Handout Generator'),
+    locale: localePreference(stringValue('application', 'locale', 'auto')),
+  },
   window: {
     width: numberValue('window', 'width', 1440),
     height: numberValue('window', 'height', 920),
@@ -268,6 +305,20 @@ export const appConfiguration = {
     interactiveRefreshDelayMs: numberValue('mask', 'interactive_refresh_delay_ms', 1000),
     pointerIdleGraceMs: numberValue('mask', 'pointer_idle_grace_ms', 120),
   },
+  foregroundSegmentation: {
+    enabled: sectionValue('foreground_segmentation').enabled !== false,
+    model: segmentationModel(stringValue('foreground_segmentation', 'model', stringValue('foreground_segmentation', 'model_id', 'birefnet-general'))),
+    device: segmentationDevice(stringValue('foreground_segmentation', 'device', 'auto')),
+    workerThreads: numberValue('foreground_segmentation', 'worker_threads', 1),
+    intraThreads: numberValue('foreground_segmentation', 'intra_threads', 0),
+    interThreads: numberValue('foreground_segmentation', 'inter_threads', 1),
+    downloadMissingModels: sectionValue('foreground_segmentation').download_missing_models !== false,
+    downloadTimeoutSeconds: numberValue('foreground_segmentation', 'download_timeout_seconds', 600),
+    modelCacheDirectory: stringValue('foreground_segmentation', 'model_cache_directory', './models/foreground-segmentation'),
+    outputSuffix: stringValue('foreground_segmentation', 'output_suffix', '-foreground'),
+    maxSourceDimension: numberValue('foreground_segmentation', 'max_source_dimension', 16384),
+    maxSourcePixels: numberValue('foreground_segmentation', 'max_source_pixels', 67108864),
+  },
   export: handoutExportConfigurationFromValue(parsed.export),
   debug: {
     fileLogEnabled: sectionValue('debug').file_log_enabled !== false,
@@ -279,7 +330,7 @@ export const appConfiguration = {
 export function serializeConfigurationToml(config: AppConfiguration) {
   return `# Handout Generator local configuration.\n${dump({
     schema_version: config.schemaVersion,
-    application: { title: config.application.title },
+    application: { title: config.application.title, locale: config.application.locale },
     window: { width: config.window.width, height: config.window.height, min_width: config.window.minWidth, min_height: config.window.minHeight, resizable: config.window.resizable },
     diagnostics: { log_directory: config.diagnostics.logDirectory },
     paths: { data_dir: config.paths.dataDir, log_file: config.paths.logFile },
@@ -306,6 +357,20 @@ export function serializeConfigurationToml(config: AppConfiguration) {
       stroke_preview_min_opacity: clamp(config.mask.strokePreviewMinOpacity, 0, 1),
       interactive_refresh_delay_ms: Math.max(0, Math.round(config.mask.interactiveRefreshDelayMs)),
       pointer_idle_grace_ms: Math.max(0, Math.round(config.mask.pointerIdleGraceMs)),
+    },
+    foreground_segmentation: {
+      enabled: config.foregroundSegmentation.enabled,
+      model: config.foregroundSegmentation.model,
+      device: config.foregroundSegmentation.device,
+      worker_threads: Math.max(1, Math.round(config.foregroundSegmentation.workerThreads)),
+      intra_threads: Math.max(0, Math.round(config.foregroundSegmentation.intraThreads)),
+      inter_threads: Math.max(1, Math.round(config.foregroundSegmentation.interThreads)),
+      download_missing_models: config.foregroundSegmentation.downloadMissingModels,
+      download_timeout_seconds: Math.max(1, Math.round(config.foregroundSegmentation.downloadTimeoutSeconds)),
+      model_cache_directory: config.foregroundSegmentation.modelCacheDirectory,
+      output_suffix: config.foregroundSegmentation.outputSuffix,
+      max_source_dimension: Math.max(1, Math.round(config.foregroundSegmentation.maxSourceDimension)),
+      max_source_pixels: Math.max(1, Math.round(config.foregroundSegmentation.maxSourcePixels)),
     },
     export: {
       default_scale: config.export.defaultScale,
@@ -343,7 +408,10 @@ export function configurationFromToml(source: string): AppConfiguration {
   }
   return {
     schemaVersion: typeof config.schema_version === 'number' ? config.schema_version : appConfiguration.schemaVersion,
-    application: { title: stringFrom('application', 'title', appConfiguration.application.title) },
+    application: {
+      title: stringFrom('application', 'title', appConfiguration.application.title),
+      locale: localePreference(stringFrom('application', 'locale', appConfiguration.application.locale)),
+    },
     window: {
       width: numberFrom('window', 'width', appConfiguration.window.width),
       height: numberFrom('window', 'height', appConfiguration.window.height),
@@ -381,6 +449,20 @@ export function configurationFromToml(source: string): AppConfiguration {
       strokePreviewMinOpacity: unitFrom('mask', 'stroke_preview_min_opacity', appConfiguration.mask.strokePreviewMinOpacity),
       interactiveRefreshDelayMs: numberFrom('mask', 'interactive_refresh_delay_ms', appConfiguration.mask.interactiveRefreshDelayMs),
       pointerIdleGraceMs: numberFrom('mask', 'pointer_idle_grace_ms', appConfiguration.mask.pointerIdleGraceMs),
+    },
+    foregroundSegmentation: {
+      enabled: section('foreground_segmentation').enabled !== false,
+      model: segmentationModel(stringFrom('foreground_segmentation', 'model', stringFrom('foreground_segmentation', 'model_id', appConfiguration.foregroundSegmentation.model))),
+      device: segmentationDevice(stringFrom('foreground_segmentation', 'device', appConfiguration.foregroundSegmentation.device)),
+      workerThreads: numberFrom('foreground_segmentation', 'worker_threads', appConfiguration.foregroundSegmentation.workerThreads),
+      intraThreads: numberFrom('foreground_segmentation', 'intra_threads', appConfiguration.foregroundSegmentation.intraThreads),
+      interThreads: numberFrom('foreground_segmentation', 'inter_threads', appConfiguration.foregroundSegmentation.interThreads),
+      downloadMissingModels: section('foreground_segmentation').download_missing_models !== false,
+      downloadTimeoutSeconds: numberFrom('foreground_segmentation', 'download_timeout_seconds', appConfiguration.foregroundSegmentation.downloadTimeoutSeconds),
+      modelCacheDirectory: stringFrom('foreground_segmentation', 'model_cache_directory', appConfiguration.foregroundSegmentation.modelCacheDirectory),
+      outputSuffix: stringFrom('foreground_segmentation', 'output_suffix', appConfiguration.foregroundSegmentation.outputSuffix),
+      maxSourceDimension: numberFrom('foreground_segmentation', 'max_source_dimension', appConfiguration.foregroundSegmentation.maxSourceDimension),
+      maxSourcePixels: numberFrom('foreground_segmentation', 'max_source_pixels', appConfiguration.foregroundSegmentation.maxSourcePixels),
     },
     export: handoutExportConfigurationFromValue(config.export, appConfiguration.export),
     debug: {

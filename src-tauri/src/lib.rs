@@ -1,5 +1,6 @@
 mod commands;
 mod errors;
+mod foreground_segmentation;
 mod services;
 mod token;
 mod types;
@@ -12,7 +13,7 @@ pub(crate) use services::path_service::{decode_data_url, encode_data_url, remove
 pub(crate) use services::project_service::{resolve_project_root, safe_project_relative_path};
 // Re-exports used by `run()` setup hook.
 pub(crate) use services::asset_service::ensure_library;
-pub(crate) use services::path_service::reset_debug_log;
+pub(crate) use services::path_service::{initialize_runtime_project_root, reset_debug_log};
 
 // Import commands for `generate_handler!` in `run()`.
 use commands::asset_commands::*;
@@ -27,21 +28,45 @@ use commands::mask_commands::{
 use commands::preview_commands::{save_project_asset, save_project_preview};
 use commands::project_commands::*;
 use commands::token_project_commands::*;
+use foreground_segmentation::{
+    ForegroundSegmentationService, segment_asset_foreground, segment_assets_foreground,
+};
 use tauri::{LogicalSize, Manager};
+use tauri_plugin_fs::FsExt;
 use token::commands::generate_token_batch;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ForegroundSegmentationService::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            reset_debug_log();
-            let source = include_str!("../../configuration.toml");
-            let configuration = token::configuration::parse_handout_configuration(source)
+            let project_root =
+                initialize_runtime_project_root(app.handle()).map_err(std::io::Error::other)?;
+            let data_root = project_root.join("data");
+            app.asset_protocol_scope()
+                .allow_directory(&data_root, true)
                 .map_err(std::io::Error::other)?;
+            app.fs_scope()
+                .allow_directory(&data_root, true)
+                .map_err(std::io::Error::other)?;
+            reset_debug_log();
+            let configuration_path = project_root.join("configuration.toml");
+            let configuration_response =
+                token::configuration::load_configuration(configuration_path.clone())
+                    .map_err(std::io::Error::other)?;
+            token::configuration::write_warnings(&configuration_response);
+            let configuration = configuration_response.configuration;
+            let runtime_source = std::fs::read_to_string(&configuration_path)
+                .unwrap_or_else(|_| include_str!("../../configuration.toml").to_string());
             let handout_export_configuration =
-                token::configuration::parse_handout_export_configuration(source)
+                token::configuration::parse_handout_export_configuration(&runtime_source)
+                    .or_else(|_| {
+                        token::configuration::parse_handout_export_configuration(include_str!(
+                            "../../configuration.toml"
+                        ))
+                    })
                     .map_err(std::io::Error::other)?;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_title(&configuration.application.title)?;
@@ -93,6 +118,8 @@ pub fn run() {
             import_asset,
             import_background,
             import_font,
+            import_library_batch,
+            import_library_paths,
             list_project_folders,
             list_projects,
             list_token_project_folders,
@@ -122,6 +149,8 @@ pub fn run() {
             save_project_preview,
             save_token_project,
             save_token_project_preview,
+            segment_asset_foreground,
+            segment_assets_foreground,
             copy_token_project,
             write_encoded_image_bytes_to_downloads,
             update_token_ring_config,

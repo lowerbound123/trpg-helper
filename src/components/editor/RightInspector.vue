@@ -224,33 +224,33 @@ function patchDocumentSaturation(value: number) {
   <aside class="right-rail">
     <Tabs v-model="activeInspectorTab" default-value="inspect" class="rail-tabs">
       <TabsList class="grid grid-cols-3">
-        <TabsTrigger value="inspect">Inspect</TabsTrigger>
-        <TabsTrigger value="brush">Brush</TabsTrigger>
-        <TabsTrigger value="document">Document</TabsTrigger>
+        <TabsTrigger value="inspect">{{ $t('INSPECT') }}</TabsTrigger>
+        <TabsTrigger value="brush">{{ $t('BRUSH') }}</TabsTrigger>
+        <TabsTrigger value="document">{{ $t('DOCUMENT') }}</TabsTrigger>
       </TabsList>
 
       <TabsContent value="inspect" class="rail-tab-content">
         <div v-if="activeLayer" class="panel-stack inspector-panel">
           <div v-if="selectedCount > 1" class="selection-summary">
-            {{ selectedCount }} layers selected
+            {{ $t('SELECTED_LAYERS_COUNT', { count: selectedCount }) }}
           </div>
           <label v-if="selectedCount === 1">
-            Name
+            {{ $t('LAYER_NAME') }}
             <Input :model-value="activeLayer.name" @update:model-value="(value) => editor.patchSelectedLayer({ name: String(value) })" />
           </label>
           <div class="transform-grid">
-            <NumericSliderField label="X" :model-value="commonX" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ x: value })" />
-            <NumericSliderField label="Y" :model-value="commonY" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ y: value })" />
-            <NumericSliderField label="Rotation" :model-value="commonRotation" :min="0" :max="359" :step="1" unit="°" @update:model-value="(value) => editor.patchSelectedLayers({ rotation: value })" />
-            <NumericSliderField label="Width" :model-value="commonWidth" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
-            <NumericSliderField label="Height" :model-value="commonHeight" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ height: value })" />
+            <NumericSliderField :label="$t('POSITION_X')" :model-value="commonX" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ x: value })" />
+            <NumericSliderField :label="$t('POSITION_Y')" :model-value="commonY" :min="-16384" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ y: value })" />
+            <NumericSliderField :label="$t('LAYER_ROTATION')" :model-value="commonRotation" :min="0" :max="359" :step="1" unit="°" @update:model-value="(value) => editor.patchSelectedLayers({ rotation: value })" />
+            <NumericSliderField :label="$t('LAYER_WIDTH')" :model-value="commonWidth" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
+            <NumericSliderField :label="$t('LAYER_HEIGHT')" :model-value="commonHeight" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ height: value })" />
             <label>
-              Flip
+              {{ $t('LAYER_FLIP') }}
               <Button
                 type="button"
                 size="icon"
                 variant="outline"
-                title="Flip horizontal"
+                :title="$t('LAYER_FLIP_HORIZONTAL')"
                 :data-active="commonFlipX === true"
                 @click="editor.toggleSelectedLayersFlipX()"
               >
@@ -259,7 +259,7 @@ function patchDocumentSaturation(value: number) {
             </label>
           </div>
           <NumericSliderField
-            label="Opacity"
+            :label="$t('LAYER_OPACITY')"
             :model-value="commonOpacity === undefined ? undefined : Math.round(commonOpacity * 100)"
             :min="0"
             :max="100"
@@ -270,54 +270,54 @@ function patchDocumentSaturation(value: number) {
           />
           <div class="appearance-row">
             <label class="blend-control">
-              Blend mode
+              {{ $t('BLEND_MODE') }}
               <Select :model-value="activeLayer.blendMode" @update:model-value="(value) => editor.patchSelectedLayers({ blendMode: value as any })">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="source-over">Normal</SelectItem>
-                  <SelectItem value="multiply">Multiply</SelectItem>
-                  <SelectItem value="screen">Screen</SelectItem>
-                  <SelectItem value="overlay">Overlay</SelectItem>
-                  <SelectItem value="darken">Darken</SelectItem>
-                  <SelectItem value="lighten">Lighten</SelectItem>
+                  <SelectItem value="source-over">{{ $t('BLEND_NORMAL') }}</SelectItem>
+                  <SelectItem value="multiply">{{ $t('BLEND_MULTIPLY') }}</SelectItem>
+                  <SelectItem value="screen">{{ $t('BLEND_SCREEN') }}</SelectItem>
+                  <SelectItem value="overlay">{{ $t('BLEND_OVERLAY') }}</SelectItem>
+                  <SelectItem value="darken">{{ $t('BLEND_DARKEN') }}</SelectItem>
+                  <SelectItem value="lighten">{{ $t('BLEND_LIGHTEN') }}</SelectItem>
                 </SelectContent>
               </Select>
             </label>
             <label v-if="allSelectedShapes" class="compact-color-control">
-              Fill
+              {{ $t('LAYER_FILL') }}
               <Input
                 :type="commonShapeFill ? 'color' : 'text'"
                 :model-value="commonShapeFill ?? ''"
-                placeholder="Mixed"
+                :placeholder="$t('MIXED_VALUE')"
                 @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
               />
             </label>
             <label v-if="allSelectedShapes" class="compact-color-control">
-              Stroke
+              {{ $t('LAYER_STROKE') }}
               <Input
                 :type="commonShapeStroke ? 'color' : 'text'"
                 :model-value="commonShapeStroke ?? ''"
-                placeholder="Mixed"
+                :placeholder="$t('MIXED_VALUE')"
                 @update:model-value="(value) => editor.patchSelectedLayers({ stroke: String(value) })"
               />
             </label>
           </div>
           <template v-if="allSelectedText">
             <label v-if="selectedCount === 1">
-              Text
+              {{ $t('TEXT_CONTENT') }}
               <Textarea :model-value="activeTextLayer?.text" @update:model-value="(value) => editor.patchSelectedLayer({ text: String(value) })" />
             </label>
-            <NumericSliderField label="Font size" :model-value="commonFontSize" :min="1" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ fontSize: value })" />
+            <NumericSliderField :label="$t('FONT_SIZE')" :model-value="commonFontSize" :min="1" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ fontSize: value })" />
             <label>
-              Color
+              {{ $t('COLOR') }}
               <Input
                 :type="commonFill ? 'color' : 'text'"
                 :model-value="commonFill ?? ''"
-                placeholder="Mixed"
+                :placeholder="$t('MIXED_VALUE')"
                 @update:model-value="(value) => editor.patchSelectedLayers({ fill: String(value) })"
               />
             </label>
-            <NumericSliderField label="Line height" :model-value="commonLineHeight" :min="0.5" :max="3" :step="0.05" @update:model-value="(value) => editor.patchSelectedLayers({ lineHeight: value })" />
+            <NumericSliderField :label="$t('LINE_HEIGHT')" :model-value="commonLineHeight" :min="0.5" :max="3" :step="0.05" @update:model-value="(value) => editor.patchSelectedLayers({ lineHeight: value })" />
             <div class="icon-button-grid">
               <Button
                 size="icon"
@@ -387,7 +387,7 @@ function patchDocumentSaturation(value: number) {
               </Button>
             </div>
             <label>
-              Font
+              {{ $t('FONT') }}
               <Select :model-value="commonFontId" @update:model-value="(value) => setFont(String(value))">
                 <SelectTrigger><SelectValue :placeholder="commonFontFamily" /></SelectTrigger>
                 <SelectContent>
@@ -399,47 +399,47 @@ function patchDocumentSaturation(value: number) {
             </label>
           </template>
           <template v-if="allSelectedShapes">
-            <NumericSliderField v-if="allSelectedLines" label="Line length" :model-value="commonWidth" :min="12" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
-            <NumericSliderField v-if="allSelectedRoundRects" label="Corner radius" :model-value="commonShapeCornerRadius" :min="0" :max="4096" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: value })" />
-            <NumericSliderField label="Stroke width" :model-value="commonShapeStrokeWidth" :min="0" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: value })" />
+            <NumericSliderField v-if="allSelectedLines" :label="$t('LINE_LENGTH')" :model-value="commonWidth" :min="12" :max="16384" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ width: value })" />
+            <NumericSliderField v-if="allSelectedRoundRects" :label="$t('CORNER_RADIUS')" :model-value="commonShapeCornerRadius" :min="0" :max="4096" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ cornerRadius: value })" />
+            <NumericSliderField :label="$t('STROKE_WIDTH')" :model-value="commonShapeStrokeWidth" :min="0" :max="512" :step="1" @update:model-value="(value) => editor.patchSelectedLayers({ strokeWidth: value })" />
             <template v-if="allSelectedLines">
               <label>
-                Line style
+                {{ $t('LINE_STYLE') }}
                 <Select :model-value="commonLineStyle" @update:model-value="(value) => editor.patchSelectedLayers({ lineStyle: value as any })">
-                  <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                  <SelectTrigger><SelectValue :placeholder="$t('MIXED_VALUE')" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="solid">Solid</SelectItem>
-                    <SelectItem value="dashed">Dashed</SelectItem>
-                    <SelectItem value="dotted">Dotted</SelectItem>
-                    <SelectItem value="double">Double</SelectItem>
+                    <SelectItem value="solid">{{ $t('LINE_STYLE_SOLID') }}</SelectItem>
+                    <SelectItem value="dashed">{{ $t('LINE_STYLE_DASHED') }}</SelectItem>
+                    <SelectItem value="dotted">{{ $t('LINE_STYLE_DOTTED') }}</SelectItem>
+                    <SelectItem value="double">{{ $t('LINE_STYLE_DOUBLE') }}</SelectItem>
                   </SelectContent>
                 </Select>
               </label>
-              <NumericSliderField label="Arrow size" :model-value="commonLineArrowSize" :min="0.25" :max="16" :step="0.25" @update:model-value="(value) => editor.patchSelectedLayers({ lineArrowSize: value })" />
+              <NumericSliderField :label="$t('ARROW_SIZE')" :model-value="commonLineArrowSize" :min="0.25" :max="16" :step="0.25" @update:model-value="(value) => editor.patchSelectedLayers({ lineArrowSize: value })" />
               <div class="two-col">
                 <label>
-                  Start arrow
+                  {{ $t('LINE_ARROW_START') }}
                   <Select :model-value="commonLineStartArrow" @update:model-value="(value) => editor.patchSelectedLayers({ lineStartArrow: value as any })">
-                    <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                    <SelectTrigger><SelectValue :placeholder="$t('MIXED_VALUE')" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="triangle">Triangle</SelectItem>
-                      <SelectItem value="notched">Notched</SelectItem>
-                      <SelectItem value="bar">Bar</SelectItem>
-                      <SelectItem value="dot">Dot</SelectItem>
+                      <SelectItem value="none">{{ $t('ARROW_NONE') }}</SelectItem>
+                      <SelectItem value="triangle">{{ $t('ARROW_TRIANGLE') }}</SelectItem>
+                      <SelectItem value="notched">{{ $t('ARROW_NOTCHED') }}</SelectItem>
+                      <SelectItem value="bar">{{ $t('ARROW_BAR') }}</SelectItem>
+                      <SelectItem value="dot">{{ $t('ARROW_DOT') }}</SelectItem>
                     </SelectContent>
                   </Select>
                 </label>
                 <label>
-                  End arrow
+                  {{ $t('LINE_ARROW_END') }}
                   <Select :model-value="commonLineEndArrow" @update:model-value="(value) => editor.patchSelectedLayers({ lineEndArrow: value as any })">
-                    <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+                    <SelectTrigger><SelectValue :placeholder="$t('MIXED_VALUE')" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="triangle">Triangle</SelectItem>
-                      <SelectItem value="notched">Notched</SelectItem>
-                      <SelectItem value="bar">Bar</SelectItem>
-                      <SelectItem value="dot">Dot</SelectItem>
+                      <SelectItem value="none">{{ $t('ARROW_NONE') }}</SelectItem>
+                      <SelectItem value="triangle">{{ $t('ARROW_TRIANGLE') }}</SelectItem>
+                      <SelectItem value="notched">{{ $t('ARROW_NOTCHED') }}</SelectItem>
+                      <SelectItem value="bar">{{ $t('ARROW_BAR') }}</SelectItem>
+                      <SelectItem value="dot">{{ $t('ARROW_DOT') }}</SelectItem>
                     </SelectContent>
                   </Select>
                 </label>
@@ -448,52 +448,52 @@ function patchDocumentSaturation(value: number) {
           </template>
           <Separator />
           <div class="effect-grid">
-            <NumericSliderField label="Blur" :model-value="commonLayerBlur" :min="0" :max="40" :step="1" @update:model-value="patchBlur" @commit="endContinuousEdit('layer-effect-blur')" />
-            <NumericSliderField label="Brightness" :model-value="commonLayerBrightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchBrightness" @commit="endContinuousEdit('layer-effect-brightness')" />
-            <NumericSliderField label="Contrast" :model-value="commonLayerContrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchContrast" @commit="endContinuousEdit('layer-effect-contrast')" />
-            <NumericSliderField label="Saturation" :model-value="commonLayerSaturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchSaturation" @commit="endContinuousEdit('layer-effect-saturation')" />
+            <NumericSliderField :label="$t('BLUR')" :model-value="commonLayerBlur" :min="0" :max="40" :step="1" @update:model-value="patchBlur" @commit="endContinuousEdit('layer-effect-blur')" />
+            <NumericSliderField :label="$t('BRIGHTNESS')" :model-value="commonLayerBrightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchBrightness" @commit="endContinuousEdit('layer-effect-brightness')" />
+            <NumericSliderField :label="$t('CONTRAST')" :model-value="commonLayerContrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchContrast" @commit="endContinuousEdit('layer-effect-contrast')" />
+            <NumericSliderField :label="$t('SATURATION')" :model-value="commonLayerSaturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchSaturation" @commit="endContinuousEdit('layer-effect-saturation')" />
           </div>
           <div class="danger-row">
             <Button variant="destructive" @click="deleteLayer">
               <Trash2 data-icon="inline-start" />
-              Delete
+              {{ $t('LAYER_DELETE') }}
             </Button>
           </div>
         </div>
-        <div v-else class="empty-inspector">Select a layer on the canvas or in the layer list.</div>
+        <div v-else class="empty-inspector">{{ $t('SELECT_LAYER_PROMPT') }}</div>
       </TabsContent>
 
       <TabsContent value="brush" class="rail-tab-content">
         <div class="panel-stack inspector-panel">
           <label class="blend-control">
-            Brush type
+            {{ $t('BRUSH_TYPE') }}
             <Select :model-value="commonBrushKind" @update:model-value="(value) => patchBrushSettings({ brushKind: value as BrushKind })">
-              <SelectTrigger><SelectValue placeholder="Mixed" /></SelectTrigger>
+              <SelectTrigger><SelectValue :placeholder="$t('MIXED_VALUE')" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="pixel">Pixel</SelectItem>
-                <SelectItem value="pencil">Pencil</SelectItem>
-                <SelectItem value="marker">Marker</SelectItem>
-                <SelectItem value="highlighter">Highlighter</SelectItem>
-                <SelectItem value="airbrush">Airbrush</SelectItem>
+                <SelectItem value="pixel">{{ $t('PAINT_PIXEL') }}</SelectItem>
+                <SelectItem value="pencil">{{ $t('PAINT_PENCIL') }}</SelectItem>
+                <SelectItem value="marker">{{ $t('PAINT_MARKER') }}</SelectItem>
+                <SelectItem value="highlighter">{{ $t('PAINT_HIGHLIGHTER') }}</SelectItem>
+                <SelectItem value="airbrush">{{ $t('PAINT_AIRBRUSH') }}</SelectItem>
               </SelectContent>
             </Select>
           </label>
           <label class="compact-color-control">
-            Brush
+            {{ $t('BRUSH') }}
             <Input
               :type="commonBrushColor ? 'color' : 'text'"
               :model-value="commonBrushColor ?? ''"
-              placeholder="Mixed"
+              :placeholder="$t('MIXED_VALUE')"
               @update:model-value="(value) => patchBrushSettings({ brushColor: String(value) })"
             />
           </label>
-          <NumericSliderField label="Brush width" :model-value="commonBrushWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ brushWidth: value })" />
-          <NumericSliderField label="Eraser width" :model-value="commonEraserWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ eraserWidth: value })" />
-          <NumericSliderField label="Tension" :model-value="commonBrushTension" :min="0" :max="1" :step="0.05" @update:model-value="(value) => patchBrushSettings({ brushTension: value })" />
-          <NumericSliderField label="Brush opacity" :model-value="brushOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchBrushOpacitySlider" />
-          <NumericSliderField label="Eraser opacity" :model-value="eraserOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchEraserOpacitySlider" />
+          <NumericSliderField :label="$t('BRUSH_WIDTH')" :model-value="commonBrushWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ brushWidth: value })" />
+          <NumericSliderField :label="$t('ERASER_WIDTH')" :model-value="commonEraserWidth" :min="1" :max="512" :step="1" @update:model-value="(value) => patchBrushSettings({ eraserWidth: value })" />
+          <NumericSliderField :label="$t('TENSION')" :model-value="commonBrushTension" :min="0" :max="1" :step="0.05" @update:model-value="(value) => patchBrushSettings({ brushTension: value })" />
+          <NumericSliderField :label="$t('BRUSH_OPACITY')" :model-value="brushOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchBrushOpacitySlider" />
+          <NumericSliderField :label="$t('ERASER_OPACITY')" :model-value="eraserOpacityPercent" :min="0" :max="100" :step="1" unit="%" @update:model-value="patchEraserOpacitySlider" />
           <div class="document-summary">
-            <span>Strokes</span>
+            <span>{{ $t('STROKES') }}</span>
             <strong>{{ selectedPaintLayers.reduce((sum, layer) => sum + layer.strokes.length, 0) }}</strong>
           </div>
         </div>
@@ -502,25 +502,25 @@ function patchDocumentSaturation(value: number) {
       <TabsContent value="document" class="rail-tab-content">
         <div class="panel-stack inspector-panel">
           <label>
-            Title
+            {{ $t('TITLE') }}
             <Input :model-value="editor.document.title" @update:model-value="(value) => editor.renameDocument(String(value))" />
           </label>
-          <NumericSliderField label="Width" :model-value="editor.document.canvas.width" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ width: value })" />
-          <NumericSliderField label="Height" :model-value="editor.document.canvas.height" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ height: value })" />
+          <NumericSliderField :label="$t('LAYER_WIDTH')" :model-value="editor.document.canvas.width" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ width: value })" />
+          <NumericSliderField :label="$t('LAYER_HEIGHT')" :model-value="editor.document.canvas.height" :min="1" :max="16384" :step="1" @update:model-value="(value) => editor.patchCanvas({ height: value })" />
           <div class="document-summary">
-            <span>Background</span>
-            <strong>{{ backgroundAsset?.name || 'Transparent canvas' }}</strong>
+            <span>{{ $t('DOCUMENT_BACKGROUND') }}</span>
+            <strong>{{ backgroundAsset?.name || $t('TRANSPARENT_CANVAS') }}</strong>
           </div>
           <div class="document-summary">
-            <span>Layers</span>
+            <span>{{ $t('DOCUMENT_LAYERS') }}</span>
             <strong>{{ editor.document.layers.length }}</strong>
           </div>
           <Separator />
           <div class="effect-grid">
-            <NumericSliderField label="Document blur" :model-value="editor.document.canvas.effects.blur" :min="0" :max="40" :step="1" @update:model-value="patchDocumentBlur" @commit="endContinuousEdit('document-effect-blur')" />
-            <NumericSliderField label="Document brightness" :model-value="editor.document.canvas.effects.brightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentBrightness" @commit="endContinuousEdit('document-effect-brightness')" />
-            <NumericSliderField label="Document contrast" :model-value="editor.document.canvas.effects.contrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentContrast" @commit="endContinuousEdit('document-effect-contrast')" />
-            <NumericSliderField label="Document saturation" :model-value="editor.document.canvas.effects.saturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentSaturation" @commit="endContinuousEdit('document-effect-saturation')" />
+            <NumericSliderField :label="$t('DOCUMENT_BLUR')" :model-value="editor.document.canvas.effects.blur" :min="0" :max="40" :step="1" @update:model-value="patchDocumentBlur" @commit="endContinuousEdit('document-effect-blur')" />
+            <NumericSliderField :label="$t('DOCUMENT_BRIGHTNESS')" :model-value="editor.document.canvas.effects.brightness" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentBrightness" @commit="endContinuousEdit('document-effect-brightness')" />
+            <NumericSliderField :label="$t('DOCUMENT_CONTRAST')" :model-value="editor.document.canvas.effects.contrast" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentContrast" @commit="endContinuousEdit('document-effect-contrast')" />
+            <NumericSliderField :label="$t('DOCUMENT_SATURATION')" :model-value="editor.document.canvas.effects.saturation" :min="-100" :max="100" :step="1" unit="%" @update:model-value="patchDocumentSaturation" @commit="endContinuousEdit('document-effect-saturation')" />
           </div>
           <Separator />
           <ExportPanel

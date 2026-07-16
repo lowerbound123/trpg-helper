@@ -212,6 +212,7 @@ export class PixiTokenRenderer {
   private worldSize = PREVIEW_MIN_WORLD_SIZE
   private viewport = { width: PREVIEW_MIN_WORLD_SIZE, height: PREVIEW_MIN_WORLD_SIZE }
   private camera = { scale: 1, x: 0, y: 0 }
+  private viewportZoom = 1
   private resizeObserver: ResizeObserver | null = null
   private activePointerId: number | null = null
   private dragStartClient = { x: 0, y: 0 }
@@ -360,6 +361,21 @@ export class PixiTokenRenderer {
   update(params: TokenParams): void {
     this.params = { ...params }
     this.renderScene()
+  }
+
+  setViewportZoom(value: number): number {
+    this.viewportZoom = Math.min(8, Math.max(0.1, Number(value) || 1))
+    this.renderScene()
+    return this.viewportZoom
+  }
+
+  fitViewport(): void {
+    this.viewportZoom = 1
+    this.renderScene()
+  }
+
+  getViewportZoom(): number {
+    return this.viewportZoom
   }
 
   snapshot(type = 'image/webp', quality = 0.85): string | undefined {
@@ -625,6 +641,7 @@ export class PixiTokenRenderer {
       this.viewport.width,
       this.viewport.height,
       this.worldSize,
+      this.viewportZoom,
     )
     this.camera = camera
     this.scene.root.scale.set(camera.scale)

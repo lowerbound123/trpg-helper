@@ -119,7 +119,7 @@ watch(() => props.modelValue, () => {
           v-model="draft"
           type="text"
           inputmode="decimal"
-          :aria-label="`Edit ${label} value`"
+          :aria-label="$t('EDIT_VALUE_ARIA', { label })"
           class="h-7 w-20 px-1.5 text-right text-xs tabular-nums"
           @blur="commitNumberEdit"
           @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
@@ -129,7 +129,7 @@ watch(() => props.modelValue, () => {
           v-else
           type="button"
           :disabled="disabled"
-          :aria-label="`Edit ${label} value`"
+          :aria-label="$t('EDIT_VALUE_ARIA', { label })"
           class="rounded-sm px-1 py-0.5 text-right tabular-nums transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           @click="startNumberEdit"
         >

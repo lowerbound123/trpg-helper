@@ -1,4 +1,3 @@
-import { ref } from 'vue'
 import type { Ref } from 'vue'
 
 import type { LibraryRecord, ProjectSummary } from '@/lib/backend'
@@ -17,37 +16,8 @@ export function useProjectCreation(options: {
   selectedImageRecord: (kind: 'background' | 'asset') => LibraryRecord | undefined
   editorMaskPreviewMaxEdge: number
   logHandoutPreview: DebugLog
-  blankWidth: Ref<number>
-  blankHeight: Ref<number>
 }) {
-  const { editor, imageElements, imageSize, selectedProjectFolder, selectedImageRecord, editorMaskPreviewMaxEdge, logHandoutPreview, blankWidth, blankHeight } = options
-
-  const newProjectTitle = ref('Untitled handout')
-  const createMode = ref<'blank' | 'upload-background'>('blank')
-  const isCreateDialogOpen = ref(false)
-
-  async function createProject() {
-    if (createMode.value === 'blank') {
-      await editor.createManagedHandout(newProjectTitle.value, {
-        width: blankWidth.value,
-        height: blankHeight.value,
-        folder: selectedProjectFolder.value,
-      })
-      isCreateDialogOpen.value = false
-      return
-    }
-  }
-
-  async function createProjectFromBackground(background: LibraryRecord) {
-    const size = await imageSize(background)
-    await editor.createManagedHandout(newProjectTitle.value, {
-      width: size.width,
-      height: size.height,
-      backgroundId: background.id,
-      folder: selectedProjectFolder.value,
-    })
-    isCreateDialogOpen.value = false
-  }
+  const { editor, imageElements, imageSize, selectedProjectFolder, selectedImageRecord, editorMaskPreviewMaxEdge, logHandoutPreview } = options
 
   function handoutTitleFromRecord(record: LibraryRecord) {
     const name = record.name || record.fileName || 'Untitled handout'
@@ -85,11 +55,6 @@ export function useProjectCreation(options: {
   }
 
   return {
-    newProjectTitle,
-    createMode,
-    isCreateDialogOpen,
-    createProject,
-    createProjectFromBackground,
     handoutTitleFromRecord,
     createHandoutFromImageRecord,
     createHandoutFromFinderImage,

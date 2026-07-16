@@ -1,0 +1,43 @@
+{
+  "onnxRuntimeVersion": "1.22.0",
+  "models": {
+    "birefnet-general": {
+      "revision": "epoch-244",
+      "fileName": "BiRefNet-general-epoch_244.onnx",
+      "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-epoch_244.onnx",
+      "sha256": "58f621f00f5d756097615970a88a791584600dcf7c45b18a0a6267535a1ebd3c"
+    },
+    "u2net": {
+      "revision": "7fc34deee10329bc039c10a73b98090d0c6f5c59",
+      "fileName": "u2net.onnx",
+      "url": "https://huggingface.co/Heliosoph/u2net-onnx/resolve/7fc34deee10329bc039c10a73b98090d0c6f5c59/u2net.onnx",
+      "sha256": "8d10d2f3bb75ae3b6d527c77944fc5e7dcd94b29809d47a739a7a728a912b491"
+    },
+    "ben2": {
+      "revision": "e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f",
+      "fileName": "BEN2_Base.onnx",
+      "url": "https://huggingface.co/PramaLLC/BEN2/resolve/e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f/BEN2_Base.onnx",
+      "sha256": "22cea62108ff53b7ccc20f7a008bf30494228d84b1687f29ecbe76936a998101"
+    }
+  },
+  "targets": {
+    "aarch64-apple-darwin": {
+      "archive": "onnxruntime-osx-arm64-1.22.0.tgz",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-osx-arm64-1.22.0.tgz",
+      "sha256": "cab6dcbd77e7ec775390e7b73a8939d45fec3379b017c7cb74f5b204c1a1cc07",
+      "libraryFile": "onnxruntime-osx-arm64-1.22.0/lib/libonnxruntime.1.22.0.dylib"
+    },
+    "x86_64-pc-windows-msvc": {
+      "archive": "onnxruntime-win-x64-1.22.0.zip",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip",
+      "sha256": "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da",
+      "libraryFile": "onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "archive": "onnxruntime-linux-x64-1.22.0.tgz",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz",
+      "sha256": "8344d55f93d5bc5021ce342db50f62079daf39aaafb5d311a451846228be49b3",
+      "libraryFile": "onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0"
+    }
+  }
+}

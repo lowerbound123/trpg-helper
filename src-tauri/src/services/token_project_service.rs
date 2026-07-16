@@ -127,8 +127,7 @@ pub(crate) fn read_token_project(
             if let Some(relative) = item.get("fallbackSource").and_then(Value::as_str) {
                 let fallback = root.join(relative);
                 if fallback.exists() {
-                    resolved_sources
-                        .insert(id.to_string(), fallback.to_string_lossy().to_string());
+                    resolved_sources.insert(id.to_string(), fallback.to_string_lossy().to_string());
                 }
             }
         }
@@ -140,10 +139,7 @@ pub(crate) fn read_token_project(
     })
 }
 
-pub(crate) fn token_summary(
-    root: &Path,
-    payload: &TokenProjectPayload,
-) -> TokenProjectSummary {
+pub(crate) fn token_summary(root: &Path, payload: &TokenProjectPayload) -> TokenProjectSummary {
     let id = root
         .file_name()
         .and_then(|value| value.to_str())
@@ -190,7 +186,8 @@ mod tests {
 
     #[test]
     fn copies_project_source_and_records_relative_fallback() {
-        let root = std::env::temp_dir().join(format!("handout-token-source-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("handout-token-source-{}", uuid::Uuid::new_v4()));
         let source = root.with_extension("png");
         fs::write(&source, b"source-bytes").unwrap();
         let mut document = serde_json::json!({
@@ -203,7 +200,10 @@ mod tests {
         copy_token_sources(&root, &mut document).unwrap();
 
         assert_eq!(document["items"][0]["fallbackSource"], "sources/item-1.png");
-        assert_eq!(fs::read(root.join("sources/item-1.png")).unwrap(), b"source-bytes");
+        assert_eq!(
+            fs::read(root.join("sources/item-1.png")).unwrap(),
+            b"source-bytes"
+        );
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_file(source);
     }

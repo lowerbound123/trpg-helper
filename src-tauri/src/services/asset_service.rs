@@ -3,9 +3,11 @@
 use std::{
     fs,
     path::Path,
+    sync::{Mutex, MutexGuard, OnceLock},
 };
 
 use chrono::Utc;
+use rayon::prelude::*;
 use tauri::AppHandle;
 use uuid::Uuid;
 
@@ -15,7 +17,36 @@ use crate::services::path_service::{
     remove_file_if_exists, write_debug_log,
 };
 use crate::services::preview_service::write_webp_thumbnail;
-use crate::types::{ImportResult, LibraryIndex, LibraryRecord};
+use crate::types::{ImportResult, LibraryIndex, LibraryRecord, TokenRingConfig};
+
+pub(crate) struct BatchImportInput<'a> {
+    pub(crate) client_id: String,
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
+    pub(crate) data: &'a [u8],
+}
+
+pub(crate) struct BatchImportOutcome {
+    pub(crate) client_id: String,
+    pub(crate) file_name: String,
+    pub(crate) record: Option<LibraryRecord>,
+    pub(crate) error: Option<String>,
+}
+
+struct PreparedImport<'a> {
+    outcome_index: usize,
+    record: LibraryRecord,
+    data: &'a [u8],
+}
+
+static LIBRARY_IMPORT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+pub(crate) fn lock_library_mutation() -> MutexGuard<'static, ()> {
+    LIBRARY_IMPORT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 pub(crate) fn ensure_library(app: &AppHandle) -> Result<(), AppError> {
     let root = library_root(app)?;
@@ -108,11 +139,7 @@ fn decode_font_name(bytes: &[u8], platform_id: u16) -> Option<String> {
         String::from_utf8_lossy(bytes).to_string()
     };
     let value = value.trim_matches(char::from(0)).trim().to_string();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
+    if value.is_empty() { None } else { Some(value) }
 }
 
 pub(crate) fn extract_font_family_from_bytes(bytes: &[u8]) -> Option<String> {
@@ -182,26 +209,167 @@ pub(crate) fn ensure_font_metadata(index: &mut LibraryIndex) -> bool {
                 record.font_family = Some(font_family.clone());
                 record.updated_at = Utc::now();
                 changed = true;
-                let _ = write_debug_log("text", &format!(
-                    "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repaired\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"fontFamily\":\"{}\"}}}}",
-                    Utc::now().to_rfc3339(),
-                    record.id.replace('"', "\\\""),
-                    record.name.replace('"', "\\\""),
-                    font_family.replace('"', "\\\"")
-                ));
+                let _ = write_debug_log(
+                    "text",
+                    &format!(
+                        "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repaired\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"fontFamily\":\"{}\"}}}}",
+                        Utc::now().to_rfc3339(),
+                        record.id.replace('"', "\\\""),
+                        record.name.replace('"', "\\\""),
+                        font_family.replace('"', "\\\"")
+                    ),
+                );
             }
             None => {
-                let _ = write_debug_log("text", &format!(
-                    "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repair-failed\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"path\":\"{}\"}}}}",
-                    Utc::now().to_rfc3339(),
-                    record.id.replace('"', "\\\""),
-                    record.name.replace('"', "\\\""),
-                    record.path.replace('"', "\\\"")
-                ));
+                let _ = write_debug_log(
+                    "text",
+                    &format!(
+                        "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-repair-failed\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"path\":\"{}\"}}}}",
+                        Utc::now().to_rfc3339(),
+                        record.id.replace('"', "\\\""),
+                        record.name.replace('"', "\\\""),
+                        record.path.replace('"', "\\\"")
+                    ),
+                );
             }
         }
     }
     changed
+}
+
+pub(crate) fn import_records_batch(
+    app: &AppHandle,
+    bucket: &str,
+    folder: String,
+    tags: Vec<String>,
+    files: Vec<BatchImportInput<'_>>,
+) -> Result<(Vec<BatchImportOutcome>, LibraryIndex), AppError> {
+    let _guard = lock_library_mutation();
+    ensure_library(app)?;
+    let folder = normalize_folder(folder);
+    let root = library_root(app)?.join(bucket);
+    let now = Utc::now();
+    let mut outcomes = Vec::with_capacity(files.len());
+    let mut prepared = Vec::with_capacity(files.len());
+
+    for file in files {
+        let id = Uuid::new_v4().to_string();
+        let clean_name = clean_file_name(&file.file_name);
+        let stored_name = format!("{id}-{clean_name}");
+        let destination = root.join(&stored_name);
+        let outcome_index = outcomes.len();
+        match fs::write(&destination, file.data) {
+            Ok(()) => {
+                outcomes.push(BatchImportOutcome {
+                    client_id: file.client_id,
+                    file_name: file.file_name.clone(),
+                    record: None,
+                    error: None,
+                });
+                prepared.push(PreparedImport {
+                    outcome_index,
+                    record: LibraryRecord {
+                        id,
+                        name: file.file_name,
+                        file_name: stored_name,
+                        path: destination.to_string_lossy().to_string(),
+                        thumbnail_path: None,
+                        font_family: None,
+                        tags: tags.clone(),
+                        folder: folder.clone(),
+                        media_type: file.media_type,
+                        created_at: now,
+                        updated_at: now,
+                        token_ring: if bucket == "assets" && folder == "rings" {
+                            Some(TokenRingConfig {
+                                revision: 1,
+                                design_size: 512.0,
+                                inner_radius: 225.0,
+                                outer_radius: 250.0,
+                                image_scale_x: 100.0,
+                                image_scale_y: 100.0,
+                                image_offset_x: 0.0,
+                                image_offset_y: 0.0,
+                                legacy: false,
+                            })
+                        } else {
+                            None
+                        },
+                    },
+                    data: file.data,
+                });
+            }
+            Err(error) => outcomes.push(BatchImportOutcome {
+                client_id: file.client_id,
+                file_name: file.file_name,
+                record: None,
+                error: Some(error.to_string()),
+            }),
+        }
+    }
+
+    let worker_count = std::thread::available_parallelism()
+        .map_or(2, usize::from)
+        .clamp(1, 4);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(worker_count)
+        .build()
+        .map_err(|error| AppError::ImportWorkerPool(error.to_string()))?;
+    pool.install(|| {
+        prepared.par_iter_mut().for_each(|item| {
+            if matches!(bucket, "backgrounds" | "assets") {
+                match write_webp_thumbnail(app, &item.record.id, item.data) {
+                    Ok(path) => item.record.thumbnail_path = Some(path.to_string_lossy().to_string()),
+                    Err(error) => {
+                        let _ = write_debug_log("upload", &format!(
+                            "{{\"timestamp\":\"{}\",\"scope\":\"upload\",\"message\":\"batch-thumbnail-failed\",\"data\":{{\"fileName\":\"{}\",\"error\":\"{}\"}}}}",
+                            Utc::now().to_rfc3339(),
+                            item.record.name.replace('"', "\\\""),
+                            error.to_string().replace('"', "\\\"")
+                        ));
+                    }
+                }
+            } else if bucket == "fonts" {
+                item.record.font_family = extract_font_family_from_bytes(item.data);
+            }
+        });
+    });
+
+    let mut index = read_index(app)?;
+    match bucket {
+        "backgrounds" => {
+            ensure_folder(&mut index.background_folders, &folder);
+            index
+                .backgrounds
+                .extend(prepared.iter().map(|item| item.record.clone()));
+        }
+        "assets" => {
+            ensure_folder(&mut index.asset_folders, &folder);
+            index
+                .assets
+                .extend(prepared.iter().map(|item| item.record.clone()));
+        }
+        "fonts" => {
+            ensure_folder(&mut index.font_folders, &folder);
+            index
+                .fonts
+                .extend(prepared.iter().map(|item| item.record.clone()));
+        }
+        _ => return Err(AppError::InvalidLibraryKind(bucket.into())),
+    }
+    if let Err(error) = write_index(app, &index) {
+        for item in &prepared {
+            let _ = remove_file_if_exists(Path::new(&item.record.path));
+            if let Some(path) = &item.record.thumbnail_path {
+                let _ = remove_file_if_exists(Path::new(path));
+            }
+        }
+        return Err(error);
+    }
+    for item in prepared {
+        outcomes[item.outcome_index].record = Some(item.record);
+    }
+    Ok((outcomes, index))
 }
 
 pub(crate) fn import_record(
@@ -225,13 +393,16 @@ pub(crate) fn import_record(
         match write_webp_thumbnail(app, &id, &data) {
             Ok(path) => Some(path.to_string_lossy().to_string()),
             Err(error) => {
-                let _ = write_debug_log("thumbnail", &format!(
-                    "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to generate import thumbnail\",\"data\":{{\"id\":\"{}\",\"fileName\":\"{}\",\"error\":\"{}\"}}}}",
-                    Utc::now().to_rfc3339(),
-                    id,
-                    file_name.replace('"', "\\\""),
-                    error.to_string().replace('"', "\\\"")
-                ));
+                let _ = write_debug_log(
+                    "thumbnail",
+                    &format!(
+                        "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to generate import thumbnail\",\"data\":{{\"id\":\"{}\",\"fileName\":\"{}\",\"error\":\"{}\"}}}}",
+                        Utc::now().to_rfc3339(),
+                        id,
+                        file_name.replace('"', "\\\""),
+                        error.to_string().replace('"', "\\\"")
+                    ),
+                );
                 None
             }
         }
@@ -240,15 +411,18 @@ pub(crate) fn import_record(
     };
     let font_family = if bucket == "fonts" {
         let extracted = extract_font_family_from_bytes(&data);
-        let _ = write_debug_log("text", &format!(
-            "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-import\",\"data\":{{\"fileName\":\"{}\",\"fontFamily\":{}}}}}",
-            Utc::now().to_rfc3339(),
-            file_name.replace('"', "\\\""),
-            extracted
-                .as_ref()
-                .map(|value| format!("\"{}\"", value.replace('"', "\\\"")))
-                .unwrap_or_else(|| "null".to_string())
-        ));
+        let _ = write_debug_log(
+            "text",
+            &format!(
+                "{{\"timestamp\":\"{}\",\"scope\":\"text\",\"message\":\"font-metadata-import\",\"data\":{{\"fileName\":\"{}\",\"fontFamily\":{}}}}}",
+                Utc::now().to_rfc3339(),
+                file_name.replace('"', "\\\""),
+                extracted
+                    .as_ref()
+                    .map(|value| format!("\"{}\"", value.replace('"', "\\\"")))
+                    .unwrap_or_else(|| "null".to_string())
+            ),
+        );
         extracted
     } else {
         None
@@ -273,9 +447,11 @@ pub(crate) fn import_record(
                 design_size: 512.0,
                 inner_radius: 225.0,
                 outer_radius: 250.0,
-                asset_scale: 1.0,
-                offset_x: 0.0,
-                offset_y: 0.0,
+                image_scale_x: 100.0,
+                image_scale_y: 100.0,
+                image_offset_x: 0.0,
+                image_offset_y: 0.0,
+                legacy: false,
             })
         } else {
             None

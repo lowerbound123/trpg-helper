@@ -8,7 +8,7 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::errors::{AppError, CommandResult};
 
@@ -51,23 +51,47 @@ mod tests {
     }
 }
 
+pub(crate) fn initialize_runtime_project_root(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let documents_dir = app.path().document_dir().map_err(|_| AppError::DataDir)?;
+    let root = documents_dir.join("trpg-helper");
+    for directory in [
+        root.join("data/library/backgrounds"),
+        root.join("data/library/assets"),
+        root.join("data/library/fonts"),
+        root.join("data/library/thumbnails"),
+        root.join("data/projects"),
+        root.join("data/token-projects"),
+        root.join("models/foreground-segmentation"),
+        root.join("logs"),
+    ] {
+        fs::create_dir_all(directory).map_err(AppError::from)?;
+    }
+    if !root.join("configuration.toml").exists() {
+        fs::write(
+            root.join("configuration.toml"),
+            include_str!("../../../configuration.toml"),
+        )
+        .map_err(AppError::from)?;
+    }
+    for (relative_path, contents) in [
+        ("data/projects/folders.json", "{\"folders\":[]}"),
+        ("data/token-projects/folders.json", "{\"folders\":[]}"),
+    ] {
+        let path = root.join(relative_path);
+        if !path.exists() {
+            fs::write(path, contents).map_err(AppError::from)?;
+        }
+    }
+    std::env::set_current_dir(&root).map_err(AppError::from)?;
+    Ok(root)
+}
+
 pub(crate) fn app_root(_app: &AppHandle) -> Result<PathBuf, AppError> {
-    let cwd = std::env::current_dir().map_err(|_| AppError::DataDir)?;
-    let project_root = if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
-        cwd.parent()
-            .map(Path::to_path_buf)
-            .ok_or(AppError::DataDir)?
-    } else {
-        cwd
-    };
-    Ok(project_root.join("data"))
+    Ok(project_root()?.join("data"))
 }
 
 pub(crate) fn project_root() -> Result<PathBuf, AppError> {
     let cwd = std::env::current_dir().map_err(|_| AppError::DataDir)?;
-    if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
-        return cwd.parent().map(Path::to_path_buf).ok_or(AppError::DataDir);
-    }
     Ok(cwd)
 }
 
@@ -200,6 +224,7 @@ pub(crate) fn debug_log_file_name(scope: &str) -> &'static str {
             "render.log"
         }
         "upload" => "upload.log",
+        "segmentation" => "segmentation.log",
         _ => "app.log",
     }
 }
@@ -232,6 +257,7 @@ pub(crate) fn reset_debug_log() {
             "speed.log",
             "text.log",
             "upload.log",
+            "segmentation.log",
         ] {
             let _ = fs::write(path.join(file_name), "");
         }

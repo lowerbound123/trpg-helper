@@ -4,6 +4,7 @@ import type { DirEntry } from 'vuefinder'
 import type { LibraryRecord, ProjectSummary } from '@/lib/backend'
 import { partitionUploadFiles, type UploadKind } from '@/lib/upload-validation'
 import { useEditorStore } from '@/stores/editor'
+import { translate } from '@/i18n'
 
 type EditorStore = ReturnType<typeof useEditorStore>
 type DebugLog = (message: string, data?: Record<string, unknown>) => void
@@ -24,20 +25,15 @@ export function useFinderSelection(options: {
   selectedBackgroundFolder: Ref<string>
   selectedAssetFolder: Ref<string>
   selectedFontFolder: Ref<string>
-  createProjectFromBackground: (background: LibraryRecord) => Promise<void>
   logUpload: DebugLog
 }) {
-  const { editor, loadImage, imageRecordFromFinderEntry, projectFromFinderEntry, previewUrl, isHandoutExporting, exportHandoutProject, selectedFinderItems, finderRevision, selectedBackgroundFolder, selectedAssetFolder, selectedFontFolder, createProjectFromBackground, logUpload } = options
+  const { editor, loadImage, imageRecordFromFinderEntry, projectFromFinderEntry, previewUrl, isHandoutExporting, exportHandoutProject, selectedFinderItems, finderRevision, selectedBackgroundFolder, selectedAssetFolder, selectedFontFolder, logUpload } = options
 
   async function uploadFiles(kind: UploadKind, files: FileList | File[], folder = '') {
     const fileArray = validUploadFiles(kind, Array.from(files))
-    if (!fileArray.length) return []
-    const imported: LibraryRecord[] = []
-    for (const file of fileArray) {
-      if (kind === 'background') imported.push(await editor.importBackgroundFile(file, '', folder))
-      if (kind === 'asset') imported.push(await editor.importAssetFile(file, '', folder))
-      if (kind === 'font') imported.push(await editor.importFontFile(file, '', folder))
-    }
+    if (!fileArray.length) return { results: [], library: editor.library }
+    const result = await editor.importFiles(kind, fileArray, folder)
+    const imported = result.results.flatMap((item) => item.record ? [item.record] : [])
     await Promise.allSettled(
       imported
         .filter((record) => record.mediaType.startsWith('image/'))
@@ -48,15 +44,16 @@ export function useFinderSelection(options: {
       kind, folder,
       files: fileArray.map((file) => ({ name: file.name, type: file.type, size: file.size })),
       imported: imported.map((record) => ({ id: record.id, name: record.name, path: record.path })),
+      failed: result.results.filter((item) => item.error).map((item) => ({ fileName: item.fileName, error: item.error })),
     })
-    return imported
+    return result
   }
 
   function validUploadFiles(kind: UploadKind, files: File[]) {
     const { accepted, rejected } = partitionUploadFiles(kind, files)
     if (rejected.length) {
       const names = rejected.map((file) => file.name).join(', ')
-      editor.status = `Unsupported ${kind} file${rejected.length > 1 ? 's' : ''}: ${names}`
+      editor.status = translate('UNSUPPORTED_UPLOAD_FILES', { kind, names })
       logUpload('rejected unsupported files', {
         kind,
         files: rejected.map((file) => ({ name: file.name, type: file.type, size: file.size })),
@@ -84,7 +81,8 @@ export function useFinderSelection(options: {
     event.dataTransfer.effectAllowed = 'copy'
     event.preventDefault()
     event.stopPropagation()
-    if (editor.status !== `Drop ${kind} files to upload`) editor.status = `Drop ${kind} files to upload`
+    const status = translate('UPLOAD_DROP_PROMPT', { kind })
+    if (editor.status !== status) editor.status = status
   }
 
   function selectedImageRecord(kind: 'background' | 'asset') {
@@ -95,10 +93,10 @@ export function useFinderSelection(options: {
 
   function selectedImageStatus(kind: 'background' | 'asset') {
     const selected = selectedFinderItems[kind]
-    if (selected.length === 0) return 'No image selected'
-    if (selected.length > 1) return `${selected.length} items selected`
+    if (selected.length === 0) return translate('NO_IMAGE_SELECTED')
+    if (selected.length > 1) return translate('SELECTED_ITEMS_COUNT', { count: selected.length })
     const record = selectedImageRecord(kind)
-    return record ? `Selected: ${record.name}` : 'Select an image file'
+    return record ? translate('SELECTED_ITEM', { name: record.name }) : translate('SELECT_AN_IMAGE_FILE')
   }
 
   function fontPreviewSource(font: LibraryRecord) {
@@ -109,24 +107,6 @@ export function useFinderSelection(options: {
     selectedFinderItems[kind] = items
   }
 
-  async function handleCreateBackgroundInput(event: Event) {
-    const file = (event.target as HTMLInputElement).files?.[0]
-    if (!file) return
-    const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
-    if (!background) return
-    await createProjectFromBackground(background)
-    ;(event.target as HTMLInputElement).value = ''
-  }
-
-  async function handleCreateBackgroundDrop(event: DragEvent) {
-    event.preventDefault()
-    const file = event.dataTransfer?.files?.[0]
-    if (!file) return
-    const [background] = await uploadFiles('background', [file], selectedBackgroundFolder.value)
-    if (!background) return
-    await createProjectFromBackground(background)
-  }
-
   function selectedHandoutProject() {
     const selected = selectedFinderItems.handout
     if (selected.length !== 1) return undefined
@@ -135,10 +115,10 @@ export function useFinderSelection(options: {
 
   function selectedHandoutStatus() {
     const selected = selectedFinderItems.handout
-    if (selected.length === 0) return 'No handout selected'
-    if (selected.length > 1) return `${selected.length} items selected`
+    if (selected.length === 0) return translate('NO_HANDOUT_SELECTED')
+    if (selected.length > 1) return translate('SELECTED_ITEMS_COUNT', { count: selected.length })
     const project = selectedHandoutProject()
-    return project ? `Selected: ${project.title}` : 'Select a handout'
+    return project ? translate('SELECTED_ITEM', { name: project.title }) : translate('SELECT_A_HANDOUT')
   }
 
   function isSelectedHandoutExporting() {
@@ -161,8 +141,6 @@ export function useFinderSelection(options: {
     selectedImageStatus,
     fontPreviewSource,
     handleFinderSelect,
-    handleCreateBackgroundInput,
-    handleCreateBackgroundDrop,
     selectedHandoutProject,
     selectedHandoutStatus,
     isSelectedHandoutExporting,

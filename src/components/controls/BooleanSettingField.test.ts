@@ -3,6 +3,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
+import { translate } from '@/i18n'
 import BooleanSettingField from './BooleanSettingField.vue'
 
 describe('BooleanSettingField', () => {
@@ -16,7 +17,9 @@ describe('BooleanSettingField', () => {
       },
     })
 
-    expect(wrapper.get('[data-parameter-label="true"]').attributes('aria-label')).toBe('解释 Alpha 优化')
+    expect(wrapper.get('[data-parameter-label="true"]').attributes('aria-label')).toBe(
+      translate('EXPLAIN_PARAMETER', { label: 'Alpha 优化' }),
+    )
     const control = wrapper.get('[role="switch"]')
     expect(control.attributes('aria-checked')).toBe('false')
 

@@ -8,6 +8,7 @@ import {
   importAsset,
   importBackground,
   importFont,
+  importLibraryFiles,
   moveLibraryRecord,
   renameLibraryFolder,
   renameLibraryRecord,
@@ -15,8 +16,10 @@ import {
   type LibraryIndex,
   type LibraryRecord,
 } from '@/lib/backend'
+import type { UploadKind } from '@/lib/upload-validation'
 
 import type { createFontStore } from './font-store'
+import { translate } from '@/i18n'
 
 const tagList = (value: string) =>
   value
@@ -43,14 +46,14 @@ export function createLibraryStore(deps: {
   async function importAssetFile(file: File, tagText: string, folder = '') {
     const result = await importAsset(file, tagList(tagText), folder)
     deps.library.value = result.library
-    deps.status.value = `Imported asset ${result.record.name}`
+    deps.status.value = translate('LIBRARY_IMPORTED_ITEM', { kind: 'asset', name: result.record.name })
     return result.record
   }
 
   async function importBackgroundFile(file: File, tagText: string, folder = '') {
     const result = await importBackground(file, tagList(tagText), folder)
     deps.library.value = result.library
-    deps.status.value = `Imported background ${result.record.name}`
+    deps.status.value = translate('LIBRARY_IMPORTED_ITEM', { kind: 'background', name: result.record.name })
     return result.record
   }
 
@@ -59,33 +62,48 @@ export function createLibraryStore(deps: {
     deps.library.value = result.library
     await deps.fontStore.loadFont(result.record)
     await deps.fontStore.createFontPreview(result.record)
-    deps.status.value = `Imported font ${result.record.name}`
+    deps.status.value = translate('LIBRARY_IMPORTED_ITEM', { kind: 'font', name: result.record.name })
     return result.record
+  }
+
+  async function importFiles(kind: UploadKind, files: File[], folder = '') {
+    const result = await importLibraryFiles(kind, files, [], folder)
+    deps.library.value = result.library
+    const records = result.results.flatMap((item) => item.record ? [item.record] : [])
+    if (kind === 'font') {
+      await Promise.allSettled(records.map((record) => deps.fontStore.loadFont(record)))
+      deps.fontStore.scheduleFontPreviews()
+    }
+    const failed = result.results.filter((item) => item.error).length
+    deps.status.value = failed
+      ? translate('LIBRARY_IMPORTED_FILES_WITH_FAILURES', { count: records.length, kind, failed })
+      : translate('LIBRARY_IMPORTED_FILES', { count: records.length, kind })
+    return result
   }
 
   async function createResourceFolder(kind: 'background' | 'asset' | 'font', folder: string) {
     deps.library.value = await createLibraryFolder(kind, folder)
-    deps.status.value = `Created ${kind} folder ${folder.trim()}`
+    deps.status.value = translate('LIBRARY_CREATED_FOLDER', { kind, name: folder.trim() })
   }
 
   async function renameResource(kind: 'background' | 'asset' | 'font', id: string, name: string) {
     deps.library.value = await renameLibraryRecord(kind, id, name)
-    deps.status.value = `Renamed ${kind} to ${name.trim()}`
+    deps.status.value = translate('LIBRARY_RENAMED_ITEM', { kind, name: name.trim() })
   }
 
   async function renameResourceFolder(kind: 'background' | 'asset' | 'font', oldFolder: string, newFolder: string) {
     deps.library.value = await renameLibraryFolder(kind, oldFolder, newFolder)
-    deps.status.value = `Renamed folder ${oldFolder} to ${newFolder.trim()}`
+    deps.status.value = translate('LIBRARY_RENAMED_FOLDER', { oldName: oldFolder, newName: newFolder.trim() })
   }
 
   async function moveResourceToFolder(kind: 'background' | 'asset' | 'font', id: string, folder: string) {
     deps.library.value = await moveLibraryRecord(kind, id, folder)
-    deps.status.value = `Moved ${kind} to ${folder.trim() || 'root'}`
+    deps.status.value = translate('LIBRARY_MOVED_ITEM', { kind, folder: folder.trim() || translate('ROOT_FOLDER') })
   }
 
   async function deleteResourceEntries(kind: 'background' | 'asset' | 'font', entries: { ids: string[]; folders: string[] }) {
     deps.library.value = await deleteLibraryEntries(kind, entries)
-    deps.status.value = `Deleted ${kind} item${entries.ids.length + entries.folders.length === 1 ? '' : 's'}`
+    deps.status.value = translate('LIBRARY_DELETED_ITEMS', { count: entries.ids.length + entries.folders.length, kind })
   }
 
   function resolveAsset(assetId?: string) {
@@ -120,6 +138,7 @@ export function createLibraryStore(deps: {
     importAssetFile,
     importBackgroundFile,
     importFontFile,
+    importFiles,
     createResourceFolder,
     renameResource,
     renameResourceFolder,

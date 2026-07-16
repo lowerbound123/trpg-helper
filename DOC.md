@@ -50,6 +50,7 @@
 | shadcn-vue | — | UI 组件库（new-york 风格） |
 | Lucide Vue | ^1.20.0 | 图标库 |
 | VueFinder | ^4.5.5 | 文件管理器组件 |
+| Vue I18n | ^11.4.6 | 中文/英文 UI 国际化与系统语言解析 |
 | vue-sonner | ^2.0.9 | Toast 通知 |
 | @vueuse/core | ^14.3.0 | Vue 组合式工具集 |
 | zod | ^4.4.3 | Schema 校验 |
@@ -70,6 +71,10 @@
 | oxipng / mozjpeg-rs | 10.1.1 / 0.9.2 | Token 与 Handout 共享的 PNG/JPEG 高质量编码 |
 | jpegxl-rs / jpegxl-sys | 0.15.0 / 0.13.0 | Token 与 Handout 共享 JPEG XL 编码（GPL-3.0-or-later 约束） |
 | resvg / usvg / tiny-skia | 0.47 / 0.47 / 0.12 | 11 个内置 SVG Token 环渲染 |
+| ort / ndarray | 2.0.0-rc.10 / 0.16.1 | BiRefNet/U²-Net/BEN2 ONNX 推理、Execution Provider 探测与 NCHW Tensor |
+| objc2-core-ml | 0.3.2 | macOS 原生加载单一 `.mlmodelc`、构造 MLMultiArray 并执行 Core ML 推理 |
+| objc2-vision / objc2-core-video | 0.3.2 / 0.3.2 | macOS 14+ 系统 Vision 前景实例分割与浮点 mask 读取 |
+| reqwest / sha2 | 0.12.28 / 0.10.9 | 缺失 ONNX 模型的运行时下载、SHA-256 校验和原子缓存替换 |
 | base64 | 0.22.1 | data URL 编解码 |
 | uuid | 1.20.0 | UUIDv4 生成 |
 | chrono | 0.4.45 | 时间戳 |
@@ -89,13 +94,16 @@
 | `pnpm build` | `vue-tsc -b && vite build` → 输出到 `dist/` |
 | `pnpm preview` | `vite preview` 预览构建产物 |
 | `pnpm tauri` | Tauri CLI 入口（`pnpm tauri dev` / `pnpm tauri build`） |
+| `pnpm prepare:segmentation-resources` | 按目标平台下载并校验 ONNX Runtime 动态库；模型在首次使用时按需下载 |
+| `pnpm compile:segmentation-coreml -- --source=/path/to/model.mlpackage` | macOS 显式把 Core ML 源模型编译并持久化为单一 `native-coreml/model.mlmodelc`；可用 `--input-name` / `--output-name` 指定特征名 |
+| `pnpm test:segmentation-smoke` | 自动识别测试机 OS/架构，生成测试 PNG，并使用真实 BiRefNet 执行一次 CPU 前景分割 |
 | `pnpm exec vitest run` | 运行单元测试 |
 
 ### 开发流程
 
 - **浏览器端**：`pnpm dev` → Vite HMR（忽略 `data/`、`logs/`、`src-tauri/target/`）
-- **桌面端**：`pnpm tauri dev` → 自动执行 `pnpm dev` 启动 Vite，原生窗口加载 `http://localhost:5173`
-- **生产打包**：`pnpm tauri build` → 先 `pnpm build` 构建前端，再 Tauri 打包 `dist/` 为桌面应用
+- **桌面端**：`pnpm tauri dev` → 先准备当前平台分割资源，再启动 Vite 和原生窗口
+- **生产打包**：`pnpm tauri build` → 先准备并校验目标平台 ONNX Runtime，再构建前端和 Tauri bundle；缺失模型在首次使用时按配置下载
 
 ### 验证命令
 
@@ -146,6 +154,7 @@ handout-generator/
 │   │   ├── LeftRail.vue          # 编辑器左栏（Assets/Fonts/Graph/Layers 四标签）
 │   │   └── CanvasWorkspace.vue   # Konva 画布工作区
 │   ├── composables/              # 27 个组合式函数实现（详见 6.7）
+│   ├── i18n/                     # Vue I18n 运行时、中文/英文语言包及源码审计测试
 │   ├── stores/                   # Pinia 状态仓库（workspace/editor/token）
 │   │   ├── editor.ts             # facade store（656 行）
 │   │   └── editor/               # 4 个子 store
@@ -185,7 +194,7 @@ handout-generator/
 │       ├── token/                # Token Rust 引擎、编码、配色、环与 55 项测试
 │       └── editor/mod.rs         # 编辑器领域占位
 │
-└── data/                         # 运行时数据（git 忽略）
+└── data/                         # 开发目录示意；运行时实际位于 ~/Documents/trpg-helper/data
     ├── library/                  # 资源库
     │   ├── index.json
     │   ├── backgrounds/
@@ -233,6 +242,7 @@ handout-generator/
 |---|---|---|---|
 | 根 | `schema_version` | `1` | 配置 schema 版本，Rust 只接受已支持版本 |
 | `[application]` | `title` | `Handout Generator` | 应用和主窗口标题 |
+| | `locale` | `auto` | UI 语言：`auto`、`zh-CN` 或 `en-US`；修改后重启生效 |
 | `[window]` | `width` / `height` | `1440` / `920` | 启动时应用的窗口尺寸 |
 | | `min_width` / `min_height` | `1180` / `760` | 最小窗口尺寸 |
 | | `resizable` | `true` | 是否允许调整窗口 |
@@ -262,10 +272,17 @@ handout-generator/
 | | `max_canvas_pixels` | `67108864` | Handout 导出总像素上限（64 MP） |
 | `[debug]` | `file_log_enabled` | `true` | 文件日志开关 |
 | | `render_perf_log_enabled` | `true` | 渲染性能日志开关 |
+| `[foreground_segmentation]` | `enabled` / `model` | `true` / `birefnet-general` | 前景分割开关与模型；可选 BiRefNet、U²-Net、BEN2、macOS Vision |
+| | `device` / `worker_threads` | `auto` / `1` | macOS 自动模式只复用已手动编译的 CoreML，否则走 CPU；批量任务默认单 worker |
+| | `intra_threads` / `inter_threads` | `0` / `1` | ORT 线程配置；intra 为 0 时交给 ORT 自动选择 |
+| | `download_missing_models` / `download_timeout_seconds` | `true` / `600` | 首次使用缺失 ONNX 模型时下载及超时配置 |
+| | `model_cache_directory` | `models/foreground-segmentation` | 相对于 `~/Documents/trpg-helper` 的模型缓存目录 |
+| | `output_suffix` | `-foreground` | 同目录透明 PNG 的文件名后缀，冲突时自动追加序号 |
+| | `max_source_dimension` / `max_source_pixels` | `16384` / `67108864` | 分割输入的单边和总像素上限 |
 
 `[export.defaults]` / `[export.limits]` / `[export.rendering]` / `[[export.webp_strength_profiles]]` 是 Handout 编码配置；`[token.*]` 是独立的完整 Token 配置命名空间，包含 `defaults`、`limits`、`export.*`、`preview`、`layout`、`files`、`rings`、`history` 和 `notifications`。前端由 `js-toml` 完整往返；Rust 在启动和 Settings 写入前严格校验 Token 与 Handout 导出配置。根目录 `configuration.toml` 是唯一配置文件，`src-tauri/configuration.toml` 已移除。
 
-> `configuration.toml` 可被 localStorage（key: `handout-generator.configuration.toml`）覆盖，实现运行时配置覆盖而无需改源文件。
+桌面端启动时加载并激活 `~/Documents/trpg-helper/configuration.toml`；浏览器开发环境使用 localStorage（key: `handout-generator.configuration.toml`）覆盖内联默认配置。Settings 保存后需要重启的字段会在下次桌面启动生效。`application.locale = "auto"` 时，系统语言以 `zh` 开头则使用简体中文，其余语言回退英文；文件名、项目名和用户输入内容不参与翻译。
 
 ---
 
@@ -275,9 +292,18 @@ handout-generator/
 
 | 文件 | 用途 |
 |---|---|
-| `src/main.ts` | 应用启动入口。`createApp(App).use(createPinia()).use(VueKonva).use(VueFinderPlugin, { locale: 'zhCN' }).mount('#app')` |
+| `src/main.ts` | 最小应用启动入口。先安装启动失败捕获，再动态加载 `bootstrap.ts`；模块初始化失败时显示错误并写入 `logs/app.log`，避免无日志白屏 |
+| `src/bootstrap.ts` | Vue 应用装配入口。挂载前读取配置并激活 Vue I18n，同时把解析后的 `zh-CN/en-US` 映射为 VueFinder 的 `zhCN/en`，再注册 Pinia、VueKonva 和 VueFinder |
 | `src/App.vue` | 根组件（1252 行）。shell + composable 编排器，详见 6.12 |
 | `src/style.css` | 全局样式（1148 行）。`@import "tailwindcss"` + `@import "tw-animate-css"`；`:root` 定义 shadcn 设计令牌（HSL）；大量应用专属类（`.loading-shell`、`.manager-shell`、`.app-shell`、`.left-rail`、`.right-rail`、`.stage-frame`、`.topbar`、`.inspector-panel` 等） |
+
+### 6.1.1 UI 国际化
+
+- `src/i18n/en-US.ts` 是消息键类型来源，`src/i18n/zh-CN.ts` 必须提供完全相同的键。
+- 所有 UI 源码使用全大写标识符，例如 `t('SAVE_SETTINGS')`；禁止在 Vue 模板中直接写中文、英文标题、占位符或可访问性标签。
+- `src/i18n/source-audit.test.ts` 扫描 Vue 模板中的中文和静态用户文案，`src/i18n/index.test.ts` 检查消息键全大写及中英文语言包完整性。
+- 配置、启动失败页、Manager、Handout、Token、Finder 扩展菜单和导出状态共用同一 i18n 实例；VueFinder 自带界面跟随应用解析后的语言。
+- Settings 中切换语言只写配置，重启应用后生效；运行过程中不热切换，避免第三方组件与业务组件语言不同步。
 
 ### 6.2 `src/app/` — 快捷键、持久化、生命周期
 
@@ -334,7 +360,7 @@ handout-generator/
 
 | 文件 | 用途 |
 |---|---|
-| `ConfigurationDialog.vue` | 编辑唯一根 `configuration.toml`。分组覆盖 Application/Window、Diagnostics、Handout Export、Token Defaults/Preview/Layout/Files/History/Rings/Notifications/Export；写入前由 Rust 严格校验，需重启生效 |
+| `ConfigurationDialog.vue` | 宽屏设置对话框，使用 General/Library/Handout/Token/Export/AI 六标签分类编辑唯一配置；标题、标签和保存栏固定，内容独立滚动；写入前由 Rust 严格校验 |
 
 #### 6.4.4 应用骨架组件（根目录）
 
@@ -355,7 +381,7 @@ handout-generator/
 | `useCanvasViewport.ts` | 168 | Konva 视口管理：`fitScale`/`canvasZoom`/`canvasPan`/`stageScale`/`fitCanvasView`/`zoomCanvas in/out`、滚轮缩放（以鼠标为锚）、中键拖拽平移。zoom 限制 0.1–8 |
 | `useEditorDragPayloads.ts` | 80 | HTML5 拖拽 payload 统一管理：`draggedAssetId`/`draggedFontId`/`draggedShapeKind` 及各 `start*/clear*` 函数 |
 | `useExportProgress.ts` | 56 | 模拟导出进度条：`beginExportProgress`（90ms 渐增到 95）、`prepareExportProgress`（等待 nextTick + RAF + setTimeout 让 UI 先绘制） |
-| `useFinderManagement.ts` | 将 Pinia store 包装为 Handout/Token/Assets/Fonts VueFinder Driver。Token Assets 右键菜单支持单文件、多选和目录递归加入当前项目，过滤非图片并按 `assetId` 去重 |
+| `useFinderManagement.ts` | 将 Pinia store 包装为 Handout/Token/Assets/Fonts VueFinder Driver。Manager、Handout、Token 三处 Assets 均支持对当前单选或多选图片执行前景分割；目录和非图片不进入任务 |
 | `useHandoutExport.ts` | 导出当前文档或 Manager 项目。签名去重 → 加载图片 → materialize mask → `renderHandoutToCanvas` → 自适应 RGBA/PNG raw IPC → Rust 四格式编码并直写 Downloads |
 | `useResourceImages.ts` | 68 | 图片预加载与缓存管理。`previewUrl(record)` 优先 thumbnailPath，回退 fileUrl |
 
@@ -529,7 +555,7 @@ handout-generator/
 | `Cargo.toml` | Rust 包配置。`name="app"`，`crate-type=["staticlib","cdylib","rlib"]`；关键依赖见第 2 节 |
 | `tauri.conf.json` | Tauri 应用配置。窗口 1440×920（min 1180×760）；`dragDropEnabled: false`；`assetProtocol` 限定到 `data/**/*`；`beforeDevCommand: pnpm dev`；`beforeBuildCommand: pnpm build` |
 | `build.rs` | 标准 Tauri 构建脚本，调用 `tauri_build::build()` |
-| `capabilities/default.json` | Tauri 权限：`core:default` + `dialog:allow-confirm` + `fs:allow-app-write-recursive` |
+| `capabilities/default.json` | 主窗口最小权限集合：`core:default`、`dialog:allow-open/confirm` 和 `fs:allow-app-write-recursive` |
 
 ### 7.2 源码文件
 
@@ -539,6 +565,12 @@ handout-generator/
 |---|---|
 | `src/main.rs` | 6 行。二进制入口，release 模式隐藏 Windows 控制台，调用 `app_lib::run()` |
 | `src/lib.rs` | Tauri 入口：解析根配置、应用窗口标题/尺寸/最小尺寸/resizable，初始化 Token 与 Handout 导出配置，注册所有 IPC 命令 |
+| `src/foreground_segmentation.rs` | 前景分割外围 adapter：Asset 路径安全、批量 worker、Channel 进度、透明 PNG/缩略图和单次 Library index 事务 |
+| `src/foreground_segmentation/engine.rs` | 与 Tauri/Library 解耦的推理核心：方向修正、模型预处理、Session pool、soft mask 和 PNG 输出 |
+| `src/foreground_segmentation/models.rs` | 四种模型注册表、固定 revision、下载 URL、SHA-256 和模型专用输入/输出规则 |
+| `src/foreground_segmentation/downloader.rs` | 运行时模型缓存、single-flight 下载、SHA-256 校验持久化和 `.partial` 原子替换 |
+| `src/foreground_segmentation/device.rs` | 平台 GPU Provider 优先级和 CPU 回退顺序 |
+| `src/foreground_segmentation/vision.rs` | macOS Vision 实例 mask、CoreVideo 行步长读取及原 Alpha 合成 |
 
 #### 模块结构（staged module split 已完成）
 
@@ -578,7 +610,7 @@ handout-generator/
 
 #### 路径解析
 
-- `app_root(app)` → `<project_root>/data`
+- `app_root(app)` → `~/Documents/trpg-helper/data`
 - `library_root(app)` → `data/library`
 - `projects_root(app)` → `data/projects`
 - `index_path(app)` → `data/library/index.json`
@@ -609,12 +641,15 @@ handout-generator/
 
 ---
 
-## 8. 运行时数据（data/）
+## 8. 运行时数据（~/Documents/trpg-helper/）
 
-> 整个 `data/` 目录由 Tauri 后端管理，已通过 `.gitignore` 排除版本控制。
+> 桌面应用启动时固定使用 `~/Documents/trpg-helper/` 作为运行时根目录；不存在时自动创建配置、数据、日志和项目目录。开发模式与打包应用使用同一位置，避免依赖进程工作目录。
 
 ```
-data/
+~/Documents/trpg-helper/
+├── configuration.toml           # 不存在时从项目默认配置自动创建
+├── logs/                         # app/mask/render/speed/text/upload/token 日志
+└── data/
 ├── library/
 │   ├── index.json                 # LibraryIndex（所有资源元数据 + 文件夹列表）
 │   ├── backgrounds/<id>-<name>    # 原始背景图
@@ -633,7 +668,7 @@ data/
         └── .cache/masks/          # 降采样遮罩缓存
 ```
 
-**根目录运行时文件**：
+**运行时根目录文件**：
 - `logs/*.log` — 调试日志（启动时清空默认日志文件，由 `append_debug_log` 按 scope 追加；渲染耗时在 `logs/speed.log`）
 - `configuration.toml` — 应用配置（由 `read/write_configuration` 读写）
 
@@ -641,7 +676,7 @@ data/
 
 ## 9. IPC API 全景
 
-后端共暴露 **53 个 Tauri 命令**，全部返回 `Result<T, String>`。前端通过 `@tauri-apps/api` 的 `invoke("command_name", args?, options?)` 调用。常规命令使用 JSON 参数；Handout 大导出使用 raw bytes body，Token 批量导出使用 Channel 推送进度。
+后端共暴露 **56 个 Tauri 命令**，全部返回 `Result<T, String>`。前端通过 `@tauri-apps/api` 的 `invoke("command_name", args?, options?)` 调用。常规命令使用 JSON 参数；Handout 大导出使用 raw bytes body，Token 批量导出使用 Channel 推送进度。
 
 ### 库管理（11）
 
@@ -658,6 +693,8 @@ data/
 | `import_asset` | 导入素材图（生成缩略图） |
 | `import_font` | 导入字体（提取 font_family） |
 | `update_token_ring_config` | 使用 expected revision 更新 Asset 自定义环几何 |
+| `segment_asset_foreground` | 单文件兼容入口，内部转发到批量分割链路 |
+| `segment_assets_foreground` | 批量接收 `assetId + sourcePath`，按配置并发分割，通过 Channel 返回下载/探测/逐项处理/写入进度，最后单次提交 Library index |
 
 ### 项目管理（13）
 
@@ -873,25 +910,31 @@ Token 项目默认命名为 `未命名项目-YYYYMMDD-HHmmss`，创建后立即�
 
 ### 12.2 项目模型与资源回退
 
-`TokenProjectDocument` 保存项目项的独立 `TokenVisualStyle` 和共享 `TokenExportSettings`。每个项目项优先使用稳定 `assetId` 解析当前 Assets；创建/保存时 Rust 将源图复制到项目 `sources/` 并写入 `fallbackSource`。Asset 被移动不影响引用，Asset 被删除后仍可通过项目副本打开、预览和导出；两处均缺失的项保留在文档中并在导出时跳过。
+`TokenProjectDocument` 保存项目项的独立 `TokenVisualStyle` 和共享 `TokenExportSettings`。每个项目项优先使用稳定 `assetId` 解析当前 Assets；创建/保存时 Rust 将源图复制到项目 `sources/` 并写入 `fallbackSource`。Asset 被移动不影响引用，Asset 被删除后仍可通过项目副本打开、预览和导出；两处均缺失的项保留在文档中，批量导出会为其生成明确失败结果，而不是静默跳过。
 
 Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编辑器导入外部文件/文件夹时先进入 `token-tmp`；自定义环进入 `rings`。`LibraryRecord.tokenRing` 保存 revision、设计尺寸、内外径、素材缩放和偏移，更新使用 expected revision 防止旧提交覆盖新设置。
 
 ### 12.3 三栏编辑器
 
-- 左栏 `Items / Assets`：Items 提供外部图片/文件夹导入、拖放、全选/取消、样式批量应用、清空和紧凑项列表；Assets 是完整 VueFinder，支持上传、目录、移动、重命名、删除、搜索、多选，并可右键递归加入文件/目录。
+- 左栏 `Items / Assets`：Items 提供外部图片/文件夹导入、拖放、全选/取消、样式批量应用、清空和紧凑项列表；文件选择统一走 64 MiB 分批 raw IPC，Tauri 原生文件/目录拖放在 Rust 侧递归收集图片并通过单批索引事务导入。列表优先使用 Library thumbnail，项目 fallback source 使用 64 项运行时小图缓存。Assets 是完整 VueFinder，支持上传、目录、移动、重命名、删除、搜索、多选，并可右键递归加入文件/目录。
 - 中栏：长期持有的 `PixiTokenRenderer`，支持头像拖动、滚轮缩放、响应式取景、出框参考线、快速切图 freshness token、纹理释放和完整 dispose。Asset/项目 fallback/自定义环通过 Tauri asset protocol URL 加载，不请求 plugin-fs 读取 capability；加载错误可见且写入 `logs/token.log`。
 - 右栏 `参数 / 导出`：头像缩放/偏移、背景、环样式/颜色/半径/拉伸、分割角度与高度、自定义环几何，以及 PNG/JPEG/WebP/JXL 参数和导出范围。
 
-三栏标题、下划线标签、列表密度、选择态和控制面板顺序与独立 Token Generator 保持一致，同时继续使用集成应用的 shadcn-vue 中性主题。左侧 Assets 通过 `TokenEditorContext` 注入已解析的 plain VueFinder driver、features 和 context menu，不能把嵌套 `ComputedRef` 直接传给 VueFinder；资源浏览器及其 explorer 使用完整高度和独立滚动区。
+三栏首行分别承载“返回与可编辑项目名”、“实时预览与视口缩放”、“撤销/重做/保存”，不再叠加整宽项目横条。下划线标签、列表密度、选择态和控制面板顺序与独立 Token Generator 保持一致，同时继续使用集成应用的 shadcn-vue 中性主题。左侧 Assets 通过 `TokenEditorContext` 注入已解析的 plain VueFinder driver、features 和 context menu，不能把嵌套 `ComputedRef` 直接传给 VueFinder；资源浏览器及其 explorer 使用完整高度和独立滚动区。
+
+全局 Tailwind v4 主题必须在 `style.css` 的 `@theme` 中把 `--background`、`--primary`、`--border` 等运行时变量注册为 `--color-*`；仅声明 `:root` 变量不会生成 `bg-background`、`border-border`、`bg-primary` 等 utility。共享 Button/Input/Switch/Slider 使用与 Token Generator 一致的紧凑视觉参数，禁止再用全局 `[data-slot] !important` 覆盖组件内部样式。
 
 所有布尔参数使用共享 `BooleanSettingField`，内部遵循 Reka UI `Switch` 的 `modelValue` / `update:modelValue` 契约。选中轨道使用高对比 primary 色；分割环、PNG Alpha/Metadata/Zopfli、JPEG、WebP、JXL 等高级参数均提供可聚焦的悬停说明。导出格式、色度采样和 WebP 编码强度使用 `aria-pressed` 暴露选中状态，并以实心 primary 样式显示当前选项。
 
-连续滑块编辑通过 `edit-start -> update:modelValue -> commit` 合并为一条历史。显式 Save 和返回 Manager 都会保存；Save 使用当前预览写入 `preview.webp`。`NumericSliderField` 是 Handout 与 Token 共享的唯一滑块精确输入控件，支持点击数字编辑、clamp、step、单位、Mixed 和禁用状态。
+连续滑块编辑通过 `edit-start -> update:modelValue -> commit` 合并为一条历史。Token Store 使用 `style | export | items | ringConfig` 混合 Action History：参数只记录目标项，自定义环几何支持异步撤销，结构操作同时恢复选择、勾选和 runtime source；保存项目不清空历史，打开其他项目才重置。Token 编辑器提供 `Cmd/Ctrl+Z`、`Cmd/Ctrl+Y` 和 `Cmd/Ctrl+Shift+Z`，输入控件中保留系统撤销。显式 Save 和返回 Manager 都会保存；Save 使用当前预览写入 `preview.webp`。`NumericSliderField` 是 Handout 与 Token 共享的唯一滑块精确输入控件，支持点击数字编辑、clamp、step、单位、Mixed 和禁用状态。
 
 ### 12.4 圆环与 Pixi 预览
 
-11 个内置 SVG 位于 `src-tauri/src/token/rings/`，Rust 文件是素材唯一来源，前端通过 Vite `?raw` 复用。`RingTextureProvider` 在 Worker 中进行径向映射并带 LRU 风格缓存；自定义环保留原始 RGB，仅乘环颜色 alpha。环 Asset 缺失时预览和导出均回退 solid，并写入 `logs/token.log`。
+11 个内置 SVG 位于 `src-tauri/src/token/rings/`，Rust 文件是素材唯一来源，前端通过 Vite `?raw` 复用。`useTokenRingStore` 统一提供 descriptor、runtime preview override、revision commit、导入、删除、设计尺寸迁移和有效几何；Workspace 只创建一个共享 `RingTextureProvider`，预览与 Ring Selector 共用按 revision 缓存、Worker 径向映射、DPR 清晰度和 50 ms 请求去抖。Ring Selector 显示应用内外径/缩放/位移后的真实缩略图，不再直接显示原始 SVG 或 Asset thumbnail。
+
+圆环样式选择器与自定义圆环六项几何使用两个相互独立、默认折叠的 Reka UI Collapsible。折叠标题分别显示当前圆环摘要和 geometry revision；折叠只节省控制面板空间，不销毁共享纹理，也不中断实时预览或 revision 提交。
+
+自定义环六项几何在滑块拖动时只更新 runtime preview，松手后以 expected revision 提交并进入撤销历史；`designSize` 不再对用户开放。非标准旧设计尺寸会按当前配置同比迁移半径和位移。前端和 Rust 均先裁切透明边界，保证带透明留白的环在预览与导出中位置一致；自定义环保留原始 RGB，仅乘环颜色 alpha。环 Asset 缺失时预览和导出均回退 solid，并写入 `logs/token.log`。
 
 ### 12.5 Rust 批量导出与共享编码
 
@@ -902,14 +945,25 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 - WebP：lossy/lossless、质量和 strength profile。
 - JXL：lossless/distance/effort/progressive/decoding speed。
 
-随机配色使用高对比 palette；内置环可随机环色，自定义环保持 RGB 并只参与背景对比选择。导出结果与耗时分别写入 `logs/render.log` 和 `logs/speed.log`，Token 业务事件写入 `logs/token.log`。
+随机配色使用高对比 palette；内置环可随机环色，自定义环通过 `ringAssetPath` 识别并保持 RGB，随机背景使用自定义环 Alpha 加权代表色选择对比色。导出完成后前端总是以 Rust 最终结果校准 completed/success/failure，即使 Channel 没有发送 `finished`；命令异常写入可观察状态和通知，不从点击事件重新抛出。导出结果与耗时分别写入 `logs/render.log` 和 `logs/speed.log`，Token 业务事件写入 `logs/token.log`。
 
 ### 12.6 当前验证基线
 
-- `pnpm exec vitest run`：42 个测试文件、182 项测试。
+- `pnpm exec vitest run`：63 个测试文件、247 项测试。
 - `pnpm run typecheck`：通过。
 - `pnpm run build`：通过，无构建 warning。
-- `cargo test --manifest-path src-tauri/Cargo.toml`：61 项 Rust 测试通过，覆盖项目源图副本、Token/Handout 配置、几何、内置/自定义环、四种编码器、HGE1 envelope、中文文件名和重名避让。
+- VueFinder 包含预打包的 CodeMirror 模块，必须保持为单一 vendor chunk；禁止通过 `maxSize` 强制拆分，否则会形成循环初始化并导致打包应用启动白屏。`chunkSizeWarningLimit=850` 仅覆盖该已知 812 kB 第三方 chunk，其他更大 chunk 仍会报警。
+- `cargo test --manifest-path src-tauri/Cargo.toml`：82 项 Rust 测试通过，另有 1 项真实 BiRefNet smoke test 按需运行；覆盖项目源图副本、Token/Handout/AI/i18n 配置、几何、内置/自定义环、前景 mask Alpha 合成、模型注册与下载、持久化校验缓存、单一 CoreML manifest、设备选择、惰性后端错误恢复与平台资源映射、四种编码器、HGE1 envelope、中文文件名和重名避让。
+
+### 12.7 前景分割资源与运行时
+
+`scripts/prepare-segmentation-resources.mjs` 依据 `--target`、`TAURI_ENV_TARGET_TRIPLE` 或 host target 下载并校验 ONNX Runtime 1.22 动态库。当前打包目标为 `aarch64-apple-darwin`、`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`；未知目标在构建阶段失败。运行库缓存位于 `~/.cache/handout-generator/segmentation-resources` 并作为 Tauri resource 打包。
+
+BiRefNet General、U²-Net 和 BEN2 不进入应用 bundle；首次选择模型时由 Rust 下载到 `~/Documents/trpg-helper/models/foreground-segmentation/<model>/<revision>/`，写入 `.partial` 后校验 SHA-256，再原子替换正式文件。完整校验成功后会写入与模型 ID、revision、SHA-256、文件大小和修改时间绑定的 `.verified.json` 侧车文件；后续启动在文件指纹未变化时直接复用校验结果，模型被替换或修改后自动重新执行完整校验。同一模型下载与首次校验由 single-flight 锁去重，失败不破坏已有缓存。`macos-vision` 使用 macOS 14+ 的 `VNGenerateForegroundInstanceMaskRequest`，不可用时自动回退 BiRefNet。
+
+桌面端命令只接收文件路径，不通过 IPC 传 Base64 或 Tensor。Rust 再次核对 Asset ID、index 路径和 canonical Assets 根目录，拒绝伪造路径及符号链接逃逸。Windows/Linux 的 ONNX 路径先注册随包分发的 ONNX Runtime，再检测 Provider，且不执行模型基准。macOS 不再使用 ORT CoreML Execution Provider：`pnpm compile:segmentation-coreml` 将用户提供的 `.mlmodel` / `.mlpackage` 通过 `coremlcompiler` 原子持久化为模型 revision 目录下唯一的 `native-coreml/model.mlmodelc` 和 manifest；运行时由 `objc2-core-ml` 原生 `MLModel` 加载，并将 compute units 设为 All。`device = "auto"` 或 `"coreml"` 找不到匹配 model/revision/SHA-256 的单一产物时会记录具体路径并回退 CPU，不会触发 ORT 分区编译。Windows 依次尝试 CUDA/DirectML，Linux 优先 CUDA，都不可用时回退 CPU。Session pool 按 model/device/线程配置分别缓存，数量由 `worker_threads` 控制。模型缓存检查、下载进度、SHA-256 校验、设备选择、Session 加载、推理、后处理和写入阶段会同步更新右上角状态，并逐条写入 `logs/segmentation.log`。输出保留原图 RGB，Alpha 为 `原 Alpha × soft mask`；批量任务逐项隔离失败，文件和缩略图完成后仅写一次 Library index，事务失败会清理半成品。
+
+真实模型 smoke test 默认使用 CPU，测试在系统临时目录生成输入与 `segmented-output.png`，并输出 Session、推理和后处理耗时。CoreML smoke 只会加载已经存在的单一 `mlmodelc`，不会在测试进程中转换 ONNX；缺失时明确回退 CPU。动态加载 ORT 的测试进程在 macOS 退出阶段可能触发上游 C++ 全局析构异常，因此 runner 以推理完成后写入的成功标记和可解码输出为准；常驻 Tauri 进程不会在每次分割后卸载 ORT。
 
 ---
 

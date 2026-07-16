@@ -1,6 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { computed, reactive } from 'vue'
+import { toast } from 'vue-sonner'
 
 import { appendDebugLog } from '@/lib/backend'
 import { appConfiguration } from '@/lib/configuration'
@@ -13,6 +14,7 @@ import type {
 } from '@/lib/token'
 import { useEditorStore } from '@/stores/editor'
 import { useTokenStore } from '@/stores/token'
+import { translate } from '@/i18n'
 
 export type TokenExportScope = 'current' | 'checked' | 'all'
 
@@ -56,10 +58,10 @@ export function useTokenExport() {
       ringInnerRadius: ring?.innerRadius ?? item.style.ringInnerRadius,
       ringOuterRadius: ring?.outerRadius ?? item.style.ringOuterRadius,
       ...token.document!.exportSettings,
-      ringImageScaleX: ring ? ring.assetScale * 100 : 100,
-      ringImageScaleY: ring ? ring.assetScale * 100 : 100,
-      ringImageOffsetX: ring?.offsetX ?? 0,
-      ringImageOffsetY: ring?.offsetY ?? 0,
+      ringImageScaleX: ring?.imageScaleX ?? 100,
+      ringImageScaleY: ring?.imageScaleY ?? 100,
+      ringImageOffsetX: ring?.imageOffsetX ?? 0,
+      ringImageOffsetY: ring?.imageOffsetY ?? 0,
       ringAssetPath: customAsset?.path,
     }
   }
@@ -102,15 +104,18 @@ export function useTokenExport() {
     if (progress.running) return
     const selected = itemsForScope(scope)
     if (!selected.length) return
-    const outputDir = await open({ directory: true, multiple: false, title: '选择 Token 导出目录' })
+    const outputDir = await open({ directory: true, multiple: false, title: translate('TOKEN_EXPORT_DIRECTORY_TITLE') })
     if (!outputDir || Array.isArray(outputDir)) return
+    const missingResults: TokenGenerateResult[] = []
     const items: TokenBatchGenerateItem[] = selected.flatMap((item) => {
       const source = token.resolvedSources[item.id] || item.sourcePath
-      return source ? [{ input: source, params: paramsForItem(item) }] : []
+      if (source) return [{ input: source, params: paramsForItem(item) }]
+      missingResults.push({ success: false, outputPath: '', error: translate('TOKEN_EXPORT_MISSING_SOURCE', { name: item.name }) })
+      return []
     })
     progress.running = true
     progress.completed = 0
-    progress.total = items.length
+    progress.total = selected.length
     progress.phase = 'preparing'
     progress.currentInput = ''
     progress.itemProgress = 0
@@ -122,11 +127,20 @@ export function useTokenExport() {
     const onProgress = new Channel<TokenExportProgressEvent>()
     onProgress.onmessage = handleProgress
     try {
-      const results = await invoke<TokenGenerateResult[]>('generate_token_batch', { items, outputDir, onProgress })
+      const generated = items.length
+        ? await invoke<TokenGenerateResult[]>('generate_token_batch', { items, outputDir, onProgress })
+        : []
+      const results = [...generated, ...missingResults]
       const failures = results.filter((result) => !result.success)
+      progress.completed = results.length
+      progress.total = selected.length
+      progress.itemProgress = 0
+      progress.successCount = results.length - failures.length
+      progress.failureCount = failures.length
+      progress.status = 'finished'
       token.status = failures.length
-        ? `Exported ${results.length - failures.length}/${results.length}; ${failures.length} failed`
-        : `Exported ${results.length} token${results.length === 1 ? '' : 's'}`
+        ? translate('TOKEN_EXPORT_PARTIAL', { success: results.length - failures.length, total: results.length, failure: failures.length })
+        : translate('TOKEN_EXPORT_SUCCESS', { count: results.length })
       void appendDebugLog('speed', 'token-export-complete', {
         scope,
         count: results.length,
@@ -134,13 +148,16 @@ export function useTokenExport() {
         durationMs: performance.now() - startedAt,
       })
       void appendDebugLog('render', 'token-export-results', { scope, outputDir, results })
+      if (failures.length) toast.error(translate('TOKEN_EXPORT_PARTIAL', { success: results.length - failures.length, total: results.length, failure: failures.length }))
+      else toast.success(translate('TOKEN_EXPORT_SUCCESS', { count: results.length }))
       return results
     } catch (error) {
       progress.status = 'failed'
       progress.error = String(error)
-      token.status = `Token export failed: ${String(error)}`
+      token.status = translate('TOKEN_EXPORT_FAILED')
       void appendDebugLog('token', 'token-export-failed', { scope, error: String(error) })
-      throw error
+      toast.error(translate('TOKEN_EXPORT_FAILED'))
+      return selected.map((item) => ({ success: false, outputPath: '', error: `${item.name}: ${String(error)}` }))
     } finally {
       progress.running = false
     }

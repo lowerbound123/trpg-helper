@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { Slider } from '@/components/ui/slider'
+import { translate } from '@/i18n'
 import NumericSliderField from './NumericSliderField.vue'
 
 describe('NumericSliderField', () => {
@@ -79,6 +80,8 @@ describe('NumericSliderField', () => {
         step: 0.01,
       },
     })
-    expect(wrapper.get('[data-parameter-label="true"]').attributes('aria-label')).toBe('解释 JXL Distance')
+    expect(wrapper.get('[data-parameter-label="true"]').attributes('aria-label')).toBe(
+      translate('EXPLAIN_PARAMETER', { label: 'JXL Distance' }),
+    )
   })
 })

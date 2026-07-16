@@ -56,9 +56,10 @@ export interface TokenRingConfig {
   designSize: number
   innerRadius: number
   outerRadius: number
-  assetScale: number
-  offsetX: number
-  offsetY: number
+  imageScaleX: number
+  imageScaleY: number
+  imageOffsetX: number
+  imageOffsetY: number
 }
 
 export interface CustomRingConfig {

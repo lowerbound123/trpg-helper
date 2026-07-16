@@ -21,6 +21,7 @@ describe('configuration', () => {
   it('loads app configuration defaults from configuration.toml', () => {
     expect(appConfiguration.schemaVersion).toBe(1)
     expect(appConfiguration.application.title).toBe('Handout Generator')
+    expect(appConfiguration.application.locale).toBe('auto')
     expect(appConfiguration.window.width).toBe(1440)
     expect(appConfiguration.finder.managerHeightPx).toBe(1080)
     expect(appConfiguration.finder.handoutGridScale).toBe(2)
@@ -40,6 +41,20 @@ describe('configuration', () => {
     expect(appConfiguration.export.defaults.jxlEffort).toBe(7)
     expect(appConfiguration.export.rawRgbaIpcMaxBytes).toBe(134217728)
     expect(appConfiguration.export.limits.maxCanvasPixels).toBe(67108864)
+    expect(appConfiguration.foregroundSegmentation).toEqual({
+      enabled: true,
+      model: 'birefnet-general',
+      device: 'auto',
+      workerThreads: 1,
+      intraThreads: 0,
+      interThreads: 1,
+      downloadMissingModels: true,
+      downloadTimeoutSeconds: 600,
+      modelCacheDirectory: './models/foreground-segmentation',
+      outputSuffix: '-foreground',
+      maxSourceDimension: 16384,
+      maxSourcePixels: 67108864,
+    })
   })
 
   it('round-trips editable configuration fields', () => {
@@ -53,9 +68,14 @@ describe('configuration', () => {
         interactiveRefreshDelayMs: 800,
         pointerIdleGraceMs: 90,
       },
-      application: { title: 'Custom Generator' },
+      application: { title: 'Custom Generator', locale: 'en-US' },
       window: { ...appConfiguration.window, width: 1500 },
       diagnostics: { logDirectory: './custom-logs' },
+      foregroundSegmentation: {
+        ...appConfiguration.foregroundSegmentation,
+        intraThreads: 4,
+        outputSuffix: '-cutout',
+      },
       export: {
         ...appConfiguration.export,
         defaultScale: 2,
@@ -76,9 +96,36 @@ describe('configuration', () => {
     expect(parsed.export.defaults.format).toBe('jxl')
     expect(parsed.export.defaults.jxlEffort).toBe(8)
     expect(parsed.application.title).toBe('Custom Generator')
+    expect(parsed.application.locale).toBe('en-US')
     expect(parsed.window.width).toBe(1500)
     expect(parsed.diagnostics.logDirectory).toBe('./custom-logs')
+    expect(parsed.foregroundSegmentation.intraThreads).toBe(4)
+    expect(parsed.foregroundSegmentation.outputSuffix).toBe('-cutout')
     expect(parsed.token.export.webpStrengthProfiles[1]?.id).toBe('balanced')
+  })
+
+  it('migrates legacy foreground segmentation fields to the new model and device settings', () => {
+    const parsed = configurationFromToml(`
+      [foreground_segmentation]
+      enabled = true
+      model_id = "birefnet-general"
+      model_resource = "resources/models/BiRefNet-general-epoch_244.onnx"
+      backend = "cpu"
+      device_id = 0
+      intra_threads = 2
+      inter_threads = 1
+      output_suffix = "-legacy"
+      max_source_dimension = 4096
+      max_source_pixels = 16000000
+    `)
+    expect(parsed.foregroundSegmentation).toMatchObject({
+      model: 'birefnet-general',
+      device: 'auto',
+      workerThreads: 1,
+      intraThreads: 2,
+      downloadMissingModels: true,
+      outputSuffix: '-legacy',
+    })
   })
 
   it('round-trips nested token tables and arrays of tables', () => {

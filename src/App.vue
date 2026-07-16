@@ -4,6 +4,7 @@ import Konva from 'konva'
 import type { DirEntry } from 'vuefinder'
 
 import RightInspector from '@/components/editor/RightInspector.vue'
+import EditorActionBar from '@/components/editor/EditorActionBar.vue'
 import BootSplash from '@/components/BootSplash.vue'
 import EditorTopBar from '@/components/EditorTopBar.vue'
 import ManagerShell from '@/components/ManagerShell.vue'
@@ -40,6 +41,7 @@ import { useLayerListDragDrop } from '@/composables/useLayerListDragDrop'
 import {
   appendDebugLog,
   fontRecordFamily,
+  segmentAssetsForeground as runForegroundSegmentation,
   type LibraryRecord,
 } from '@/lib/backend'
 import { createDebugLogger, serializableLogData, writeDebugLog } from '@/lib/debug-log'
@@ -54,9 +56,11 @@ import { disposeLayerSourceCanvasCache } from '@/lib/render/mask-composition'
 import { createAppShortcutHandler } from '@/app/AppShortcuts'
 import { appConfiguration } from '@/lib/configuration'
 import { partitionUploadFiles } from '@/lib/upload-validation'
+import { segmentationProgressText } from '@/lib/segmentation-progress'
 import { isPaintLayer, useEditorStore } from '@/stores/editor'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTokenStore } from '@/stores/token'
+import { translate } from '@/i18n'
 
 type NodeRef = { getNode: () => Konva.Node }
 type KonvaEvent = { target: Konva.Node; evt?: MouseEvent; cancelBubble?: boolean }
@@ -87,6 +91,7 @@ const activeTool = ref<EditorTool>('select')
 const activeRailTab = ref<'assets' | 'fonts' | 'graph' | 'layers'>('assets')
 const assetSearch = ref('')
 const fontSearch = ref('')
+const segmentingAssetIds = reactive(new Set<string>())
 const selectedProjectFolder = ref('')
 const selectedTokenProjectFolder = ref('')
 const selectedBackgroundFolder = ref('')
@@ -448,18 +453,10 @@ const {
   editorMaskPreviewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
   logFlat,
 })
-const projectCreationHolder: { createProjectFromBackground: (bg: LibraryRecord) => Promise<void> } = {
-  createProjectFromBackground: async () => {},
-}
 const finderSelectionHolder: { selectedImageRecord: (kind: 'background' | 'asset') => LibraryRecord | undefined } = {
   selectedImageRecord: () => undefined,
 }
 const {
-  newProjectTitle,
-  createMode,
-  isCreateDialogOpen,
-  createProject,
-  createProjectFromBackground,
   createHandoutFromImageRecord,
   createHandoutFromFinderImage,
   saveProject,
@@ -472,10 +469,7 @@ const {
   selectedImageRecord: (kind: 'background' | 'asset') => finderSelectionHolder.selectedImageRecord(kind),
   editorMaskPreviewMaxEdge: EDITOR_MASK_PREVIEW_MAX_EDGE,
   logHandoutPreview,
-  blankWidth,
-  blankHeight,
 })
-projectCreationHolder.createProjectFromBackground = createProjectFromBackground
 const {
   uploadFiles,
   handleDirectFinderDrop,
@@ -484,8 +478,6 @@ const {
   selectedImageStatus,
   fontPreviewSource,
   handleFinderSelect,
-  handleCreateBackgroundInput,
-  handleCreateBackgroundDrop,
   selectedHandoutProject,
   selectedHandoutStatus,
   isSelectedHandoutExporting,
@@ -504,7 +496,6 @@ const {
   selectedBackgroundFolder,
   selectedAssetFolder,
   selectedFontFolder,
-  createProjectFromBackground: (bg: LibraryRecord) => projectCreationHolder.createProjectFromBackground(bg),
   logUpload,
 })
 finderSelectionHolder.selectedImageRecord = selectedImageRecord
@@ -527,6 +518,33 @@ const {
   exportHandoutProject,
   previewUrl,
   uploadFiles,
+  async segmentAssetsForeground(records) {
+    const pending = records.filter((record) => !segmentingAssetIds.has(record.id))
+    if (!pending.length) return
+    pending.forEach((record) => segmentingAssetIds.add(record.id))
+    editor.status = translate('SEGMENTATION_BATCH_RUNNING', { count: pending.length })
+    try {
+      const result = await runForegroundSegmentation(
+        pending.map((record) => ({ assetId: record.id, sourcePath: record.path })),
+        (progress) => {
+          editor.status = segmentationProgressText(progress, translate)
+        },
+      )
+      editor.library = result.library
+      finderRevision.asset += 1
+      const success = result.results.filter((item) => item.success).length
+      editor.status = translate('SEGMENTATION_BATCH_COMPLETED', {
+        success,
+        failure: result.results.length - success,
+      })
+    } catch (error) {
+      editor.status = translate('SEGMENTATION_FAILED_DETAIL', { error: String(error) })
+      void appendDebugLog('segmentation', 'foreground-segmentation-command-failed',
+        serializableLogData({ assetIds: pending.map((record) => record.id), error }))
+    } finally {
+      pending.forEach((record) => segmentingAssetIds.delete(record.id))
+    }
+  },
   selectedFolders: {
     handout: selectedProjectFolder,
     token: selectedTokenProjectFolder,
@@ -619,11 +637,6 @@ const {
 layerListHolder.groupForLayer = groupForLayer
 provide('manager-context', {
   isSettingsDialogOpen,
-  isCreateDialogOpen,
-  newProjectTitle,
-  createMode,
-  blankWidth,
-  blankHeight,
   fontSearch,
   finderRevision,
   handoutFinderStyle,
@@ -642,9 +655,6 @@ provide('manager-context', {
   isSelectedHandoutExporting,
   exportSelectedHandout,
   cloneHandoutProject,
-  createProject,
-  handleCreateBackgroundDrop,
-  handleCreateBackgroundInput,
   selectedImageStatus,
   selectedImageRecord,
   createHandoutFromFinderImage,
@@ -665,6 +675,7 @@ provide('left-rail-context', {
   finderUploadConfig,
   finderDrivers,
   finderFeaturesForKind,
+  imageHandoutContextMenuItems,
   handleFinderFileDoubleClick,
   handleFinderPathChange,
   handleDirectFinderDrop,
@@ -1165,7 +1176,7 @@ onMounted(async () => {
       .catch((error) => logUpload('thumbnail repair failed', { error }))
     void ensureProjectPreviews()
   } catch (error) {
-    editor.status = String(error)
+    editor.status = translate('APP_BOOT_FAILED')
     void appendDebugLog('app', 'boot failed', serializableLogData({ error }))
     isBooting.value = false
   }
@@ -1281,12 +1292,7 @@ watch(
     <main class="workspace">
       <EditorTopBar
         :active-tool="activeTool"
-        :can-undo="editor.canUndo"
-        :can-redo="editor.canRedo"
-        @save="saveProject"
         @set-tool="setActiveTool"
-        @undo="editor.undo()"
-        @redo="editor.redo()"
       />
 
       <CanvasWorkspace />
@@ -1296,15 +1302,24 @@ watch(
     <ResizableHandle with-handle />
 
     <ResizablePanel :default-size="20" :min-size="16" :max-size="34" class="shell-panel">
-    <RightInspector
-      v-model:export-scale="exportScale"
-      v-model:export-encoding="exportEncoding"
-      :is-exporting="isExportingCurrent"
-      :export-log="exportLog"
-      :export-progress="exportProgress"
-      :active-tool="activeTool"
-      @export-image="exportCurrentImage"
-    />
+    <div class="handout-panel-column">
+      <EditorActionBar
+        :can-undo="editor.canUndo"
+        :can-redo="editor.canRedo"
+        @save="saveProject"
+        @undo="editor.undo()"
+        @redo="editor.redo()"
+      />
+      <RightInspector
+        v-model:export-scale="exportScale"
+        v-model:export-encoding="exportEncoding"
+        :is-exporting="isExportingCurrent"
+        :export-log="exportLog"
+        :export-progress="exportProgress"
+        :active-tool="activeTool"
+        @export-image="exportCurrentImage"
+      />
+    </div>
     </ResizablePanel>
   </ResizablePanelGroup>
 

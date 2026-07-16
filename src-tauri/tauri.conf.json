@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeDevCommand": "pnpm prepare:segmentation-resources && pnpm dev",
+    "beforeBuildCommand": "pnpm prepare:segmentation-resources && pnpm build"
   },
   "app": {
     "windows": [
@@ -41,6 +41,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/onnxruntime/**/*"
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"

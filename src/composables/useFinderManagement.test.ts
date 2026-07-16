@@ -1,45 +1,35 @@
 import { describe, expect, it } from 'vitest'
-import type { DirEntry } from 'vuefinder'
 
-import type { LibraryRecord } from '@/lib/backend'
-import { collectImageAssetsForFinderEntries } from './useFinderManagement'
+import { filterRecords, foregroundSegmentationTargets } from './useFinderManagement'
 
-function asset(id: string, folder: string, mediaType = 'image/png'): LibraryRecord {
-  return {
-    id,
-    name: `${id}.png`,
-    fileName: `${id}.png`,
-    path: `/assets/${folder}/${id}.png`,
-    folder,
-    tags: [],
-    mediaType,
-    createdAt: new Date(0).toISOString(),
-    updatedAt: new Date(0).toISOString(),
-  }
-}
+const record = (name: string, folder: string, tags: string[] = []) => ({
+  id: name, name, fileName: name, path: name, folder, tags, mediaType: 'image/png', createdAt: '', updatedAt: '',
+})
 
-function entry(path: string, type: 'file' | 'dir'): DirEntry {
-  return {
-    dir: 'assets://', basename: path.split('/').at(-1) || '', extension: '', path,
-    storage: 'assets', type, file_size: null, last_modified: null, mime_type: null,
-    visibility: 'public',
-  }
-}
+describe('foregroundSegmentationTargets', () => {
+  const image = { type: 'file', path: 'assets://__asset-a', mime_type: 'image/png' } as never
+  const other = { type: 'file', path: 'assets://__asset-b', mime_type: 'image/png' } as never
+  const directory = { type: 'dir', path: 'assets://folder', mime_type: null } as never
 
-describe('Token asset finder collection', () => {
-  it('recursively collects image files from folders and deduplicates explicit files', () => {
-    const records = [
-      asset('root', ''),
-      asset('one', 'portraits'),
-      asset('two', 'portraits/npcs'),
-      asset('text', 'portraits', 'text/plain'),
-    ]
+  it('returns all selected images when the context target belongs to the selection', () => {
+    expect(foregroundSegmentationTargets(image, [image, other])).toEqual([image, other])
+    expect(foregroundSegmentationTargets(directory, [directory])).toEqual([])
+  })
 
-    const result = collectImageAssetsForFinderEntries(
-      [entry('assets://portraits', 'dir'), entry('assets://portraits/__asset-one', 'file')],
-      records,
-    )
+  it('uses an unselected right-click target instead of an old multi-selection', () => {
+    expect(foregroundSegmentationTargets(image, [other, directory])).toEqual([image])
+  })
+})
 
-    expect(result.map((record) => record.id)).toEqual(['one', 'two'])
+describe('filterRecords', () => {
+  it('searches names and tags across all asset folders when a query is present', () => {
+    const records = [record('root.png', ''), record('portrait.png', 'nested', ['hero'])]
+    expect(filterRecords(records, 'hero', '').map((item) => item.name)).toEqual(['portrait.png'])
+    expect(filterRecords(records, 'portrait', '').map((item) => item.name)).toEqual(['portrait.png'])
+  })
+
+  it('keeps folder scoping when there is no query', () => {
+    const records = [record('root.png', ''), record('nested.png', 'nested')]
+    expect(filterRecords(records, '', '').map((item) => item.name)).toEqual(['root.png'])
   })
 })

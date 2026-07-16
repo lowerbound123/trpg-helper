@@ -250,13 +250,15 @@ export function calculatePreviewCameraTransform(
   viewportWidth: number,
   viewportHeight: number,
   worldSize: number,
+  viewportZoom = 1,
 ): PreviewCameraTransform {
   const safeWorldSize = Math.max(worldSize, 1)
-  const scale = Math.min(
+  const fitScale = Math.min(
     1,
     Math.max(viewportWidth, 1) / safeWorldSize,
     Math.max(viewportHeight, 1) / safeWorldSize,
   )
+  const scale = fitScale * Math.min(8, Math.max(0.1, viewportZoom))
 
   return {
     scale,

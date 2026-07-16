@@ -1,3 +1,5 @@
+/// <reference types="vitest/config" />
+
 import { defineConfig, type UserConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
@@ -36,6 +38,10 @@ function isVueUsePureAnnotationWarning(log: BuildLog) {
   return source.includes('@vueuse/core')
 }
 
+function isPluginTimingsDiagnostic(log: BuildLog) {
+  return log.code === 'PLUGIN_TIMINGS'
+}
+
 const rolldownOutputOptions = {
   codeSplitting: {
     groups: [
@@ -46,7 +52,9 @@ const rolldownOutputOptions = {
       { name: 'vendor-ui', test: /node_modules[\\/](@lucide[\\/]vue|@vueuse[\\/]core|reka-ui|class-variance-authority|clsx|tailwind-merge|vue-sonner)[\\/]/, priority: 30 },
       { name: 'vendor-uppy', test: /node_modules[\\/](@uppy)[\\/]/, priority: 28 },
       { name: 'vendor-finder-support', test: /node_modules[\\/](@floating-ui|@nanostores|@tanstack|@viselect|nanostores|overlayscrollbars|vanilla-lazyload|vue-advanced-cropper|mitt)[\\/]/, priority: 27 },
-      { name: 'vendor-finder', test: /node_modules[\\/](vuefinder)[\\/]/, priority: 25, maxSize: 450_000 },
+      // VueFinder ships prebundled CodeMirror modules whose initialization order
+      // breaks when Rolldown arbitrarily splits the package by chunk size.
+      { name: 'vendor-finder', test: /node_modules[\\/](vuefinder)[\\/]/, priority: 25 },
       { name: 'vendor-utils', test: /node_modules[\\/](zod|uuid|papaparse|@types[\\/]papaparse)[\\/]/, priority: 20 },
       { name: 'vendor', test: /node_modules[\\/]/, priority: 10 },
     ],
@@ -55,6 +63,9 @@ const rolldownOutputOptions = {
 
 const onRolldownLog: ViteRolldownOnLog = (level, log, handler) => {
   if (level === 'warn' && isVueUsePureAnnotationWarning(log as BuildLog)) return
+  // This is a profiling hint about the required Vue/Tailwind transforms, not a
+  // correctness or output-size warning. Keep all other Rolldown warnings visible.
+  if (level === 'warn' && isPluginTimingsDiagnostic(log as BuildLog)) return
   handler(level, log)
 }
 
@@ -65,6 +76,9 @@ export default defineConfig({
     tailwindcss(),
   ],
   build: {
+    // VueFinder's prebundled CodeMirror module must remain intact; lower limits
+    // tempt unsafe size-based splitting that creates circular initialization.
+    chunkSizeWarningLimit: 850,
     rolldownOptions: {
       onLog: onRolldownLog,
       output: rolldownOutputOptions as unknown as ViteRolldownOutput,
@@ -81,5 +95,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+  },
+  test: {
+    setupFiles: ['./src/test/setup.ts'],
   },
 })

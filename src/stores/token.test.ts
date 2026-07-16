@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createDefaultTokenExportSettings } from '@/lib/token'
+import { createDefaultTokenExportSettings, createDefaultTokenVisualStyle } from '@/lib/token'
 import { useTokenStore } from './token'
 
 const backend = vi.hoisted(() => ({
@@ -11,6 +11,7 @@ const backend = vi.hoisted(() => ({
   createTokenProjectFolder: vi.fn(async () => []),
   openTokenProject: vi.fn(),
   saveTokenProject: vi.fn(),
+  renameTokenProject: vi.fn(),
   deleteTokenProjectEntries: vi.fn(async () => []),
 }))
 
@@ -107,6 +108,63 @@ describe('token project store', () => {
 
     expect(store.selectedItemId).toBe('two')
     expect(store.checkedItemIds).toEqual(['two'])
+  })
+
+  it('preserves undo history after saving', async () => {
+    const store = useTokenStore()
+    const now = new Date().toISOString()
+    const document = {
+      schemaVersion: 1 as const,
+      id: 'project', title: 'Token',
+      items: [{ id: 'one', name: 'a.png', mediaType: 'image/png', sourcePath: '/a.png', style: createDefaultTokenVisualStyle() }],
+      exportSettings: createDefaultTokenExportSettings(), createdAt: now, updatedAt: now,
+    }
+    store.document = document
+    store.selectedItemId = 'one'
+    store.beginEdit()
+    store.updateVisualStyle('scale', 150)
+    store.commitEdit()
+    backend.saveTokenProject.mockResolvedValue({ document, metadata: {}, resolvedSources: { one: '/a.png' } })
+
+    await store.save()
+    store.undo()
+
+    expect(store.selectedItem?.style.scale).toBe(100)
+  })
+
+  it('restores structural selection and runtime sources on undo', () => {
+    const store = useTokenStore()
+    const now = new Date().toISOString()
+    store.document = {
+      schemaVersion: 1, id: 'project', title: 'Token', items: [],
+      exportSettings: createDefaultTokenExportSettings(), createdAt: now, updatedAt: now,
+    }
+    store.addAssets([asset('a')])
+    const addedId = store.items[0]!.id
+    expect(store.resolvedSources[addedId]).toBe('/assets/a.png')
+
+    store.undo()
+    expect(store.items).toEqual([])
+    expect(store.selectedItemId).toBeUndefined()
+    expect(store.checkedItemIds).toEqual([])
+    expect(store.resolvedSources).toEqual({})
+  })
+
+  it('renames the current project without replacing unsaved item edits', async () => {
+    const store = useTokenStore()
+    const now = new Date().toISOString()
+    store.document = {
+      schemaVersion: 1, id: 'project', title: 'Old', items: [{
+        id: 'one', name: 'a.png', mediaType: 'image/png', sourcePath: '/a.png',
+        style: { ...createDefaultTokenVisualStyle(), scale: 177 },
+      }], exportSettings: createDefaultTokenExportSettings(), createdAt: now, updatedAt: now,
+    }
+    backend.renameTokenProject.mockResolvedValue({ document: { ...store.document, title: 'New' }, metadata: {}, resolvedSources: {} })
+
+    await store.renameCurrentProject(' New ')
+
+    expect(store.document.title).toBe('New')
+    expect(store.document.items[0].style.scale).toBe(177)
   })
 
   it('groups select-all, clear, reset style and missing-ring repair as store operations', () => {

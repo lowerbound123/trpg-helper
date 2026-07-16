@@ -1,14 +1,24 @@
 //! Library import, folder, record, font preview, and configuration command boundary.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use chrono::Utc;
-use tauri::AppHandle;
+use serde::{Deserialize, Serialize};
+use tauri::{
+    AppHandle,
+    ipc::{InvokeBody, Request},
+};
+use walkdir::WalkDir;
 
 use crate::errors::{AppError, CommandResult};
 use crate::services::asset_service::{
-    delete_record_files, ensure_font_metadata, ensure_record_thumbnail, import_record,
-    library_folders_mut, library_records_mut, read_index, write_index,
+    BatchImportInput, delete_record_files, ensure_font_metadata, ensure_record_thumbnail,
+    import_record, import_records_batch, library_folders_mut, library_records_mut, read_index,
+    write_index,
 };
 use crate::services::path_service::{
     encode_data_url, ensure_folder, folder_is_or_descendant, normalize_folder, project_root,
@@ -17,10 +27,331 @@ use crate::services::path_service::{
 use crate::services::preview_service::{encode_webp_thumbnail_bytes, thumbnail_path};
 use crate::types::{DeleteEntries, ImportResult, LibraryIndex, TokenRingConfig};
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryImportMetadata {
+    kind: String,
+    folder: String,
+    tags: Vec<String>,
+    files: Vec<LibraryImportFileMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryImportFileMetadata {
+    client_id: String,
+    file_name: String,
+    media_type: String,
+    offset: usize,
+    length: usize,
+}
+
+struct ParsedLibraryImportFile<'a> {
+    client_id: String,
+    file_name: String,
+    media_type: String,
+    data: &'a [u8],
+}
+
+struct ParsedLibraryImport<'a> {
+    kind: String,
+    folder: String,
+    tags: Vec<String>,
+    files: Vec<ParsedLibraryImportFile<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportItemResult {
+    client_id: String,
+    file_name: String,
+    record: Option<crate::types::LibraryRecord>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportResult {
+    results: Vec<BatchImportItemResult>,
+    library: LibraryIndex,
+}
+
+fn parse_library_import_envelope(data: &[u8]) -> Result<ParsedLibraryImport<'_>, String> {
+    if data.len() < 8 || &data[..4] != b"HGI1" {
+        return Err("Library import envelope magic/version is invalid".into());
+    }
+    let header_len =
+        u32::from_le_bytes(data[4..8].try_into().map_err(|_| "Invalid import header")?) as usize;
+    let payload_start = 8usize
+        .checked_add(header_len)
+        .ok_or("Import header length overflow")?;
+    if payload_start > data.len() {
+        return Err("Library import envelope is truncated".into());
+    }
+    let metadata: LibraryImportMetadata = serde_json::from_slice(&data[8..payload_start])
+        .map_err(|error| format!("Invalid library import metadata: {error}"))?;
+    if !matches!(metadata.kind.as_str(), "asset" | "background" | "font") {
+        return Err("Unknown library import kind".into());
+    }
+    let payload = &data[payload_start..];
+    let mut files = Vec::with_capacity(metadata.files.len());
+    for file in metadata.files {
+        let end = file
+            .offset
+            .checked_add(file.length)
+            .ok_or("Import file range overflow")?;
+        let bytes = payload
+            .get(file.offset..end)
+            .ok_or("Import file range exceeds payload")?;
+        files.push(ParsedLibraryImportFile {
+            client_id: file.client_id,
+            file_name: file.file_name,
+            media_type: file.media_type,
+            data: bytes,
+        });
+    }
+    Ok(ParsedLibraryImport {
+        kind: metadata.kind,
+        folder: metadata.folder,
+        tags: metadata.tags,
+        files,
+    })
+}
+
+#[tauri::command]
+pub async fn import_library_batch(
+    app: AppHandle,
+    request: Request<'_>,
+) -> CommandResult<BatchImportResult> {
+    let data = match request.body() {
+        InvokeBody::Raw(bytes) => bytes.clone(),
+        InvokeBody::Json(_) => return Err("import_library_batch expects raw bytes".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = Instant::now();
+        let parsed = parse_library_import_envelope(&data)?;
+        let bucket = match parsed.kind.as_str() {
+            "background" => "backgrounds",
+            "asset" => "assets",
+            "font" => "fonts",
+            _ => return Err("Unknown library import kind".to_string()),
+        };
+        let inputs = parsed
+            .files
+            .into_iter()
+            .map(|file| BatchImportInput {
+                client_id: file.client_id,
+                file_name: file.file_name,
+                media_type: file.media_type,
+                data: file.data,
+            })
+            .collect();
+        let (outcomes, library) =
+            import_records_batch(&app, bucket, parsed.folder, parsed.tags, inputs)
+                .map_err(String::from)?;
+        let results = outcomes
+            .into_iter()
+            .map(|outcome| BatchImportItemResult {
+                client_id: outcome.client_id,
+                file_name: outcome.file_name,
+                record: outcome.record,
+                error: outcome.error,
+            })
+            .collect::<Vec<_>>();
+        let _ = write_debug_log(
+            "speed",
+            &format!(
+                "{{\"timestamp\":\"{}\",\"scope\":\"speed\",\"message\":\"library-import-batch\",\"data\":{{\"kind\":\"{}\",\"files\":{},\"bytes\":{},\"durationMs\":{}}}}}",
+                Utc::now().to_rfc3339(),
+                parsed.kind,
+                results.len(),
+                data.len(),
+                started.elapsed().as_millis()
+            ),
+        );
+        Ok(BatchImportResult { results, library })
+    })
+    .await
+    .map_err(|error| format!("Library import task failed: {error}"))?
+}
+
+fn import_media_type(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()?
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "bmp" => Some("image/bmp"),
+        "tif" | "tiff" => Some("image/tiff"),
+        _ => None,
+    }
+}
+
+fn collect_import_paths(paths: &[String]) -> Vec<PathBuf> {
+    paths
+        .iter()
+        .flat_map(|value| {
+            let path = PathBuf::from(value);
+            if path.is_dir() {
+                WalkDir::new(path)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter(|entry| {
+                        entry.file_type().is_file() && import_media_type(entry.path()).is_some()
+                    })
+                    .map(|entry| entry.into_path())
+                    .collect::<Vec<_>>()
+            } else if path.is_file() && import_media_type(&path).is_some() {
+                vec![path]
+            } else {
+                Vec::new()
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn import_library_paths(
+    app: AppHandle,
+    kind: String,
+    paths: Vec<String>,
+    folder: String,
+    tags: Vec<String>,
+) -> CommandResult<BatchImportResult> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bucket = match kind.as_str() {
+            "background" => "backgrounds",
+            "asset" => "assets",
+            "font" => "fonts",
+            _ => return Err("Unknown library import kind".to_string()),
+        };
+        let collected = collect_import_paths(&paths);
+        let owned = collected
+            .into_iter()
+            .map(|path| {
+                let name = path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("image")
+                    .to_string();
+                let media_type = import_media_type(&path)
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                match fs::read(&path) {
+                    Ok(data) => Ok((path, name, media_type, data)),
+                    Err(error) => Err((path, name, error.to_string())),
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut read_errors = Vec::new();
+        let successful = owned
+            .into_iter()
+            .filter_map(|result| match result {
+                Ok(value) => Some(value),
+                Err((path, name, error)) => {
+                    read_errors.push(BatchImportItemResult {
+                        client_id: path.to_string_lossy().to_string(),
+                        file_name: name,
+                        record: None,
+                        error: Some(error),
+                    });
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let inputs = successful
+            .iter()
+            .enumerate()
+            .map(|(index, (path, name, media_type, data))| BatchImportInput {
+                client_id: format!("path:{index}:{}", path.to_string_lossy()),
+                file_name: name.clone(),
+                media_type: media_type.clone(),
+                data,
+            })
+            .collect();
+        let (outcomes, library) =
+            import_records_batch(&app, bucket, folder, tags, inputs).map_err(String::from)?;
+        let mut results = outcomes
+            .into_iter()
+            .map(|outcome| BatchImportItemResult {
+                client_id: outcome.client_id,
+                file_name: outcome.file_name,
+                record: outcome.record,
+                error: outcome.error,
+            })
+            .collect::<Vec<_>>();
+        results.extend(read_errors);
+        Ok(BatchImportResult { results, library })
+    })
+    .await
+    .map_err(|error| format!("Path import task failed: {error}"))?
+}
+
+#[cfg(test)]
+mod batch_import_tests {
+    use super::parse_library_import_envelope;
+
+    fn envelope(metadata: serde_json::Value, payload: &[u8]) -> Vec<u8> {
+        let header = serde_json::to_vec(&metadata).unwrap();
+        let mut data = b"HGI1".to_vec();
+        data.extend_from_slice(&(header.len() as u32).to_le_bytes());
+        data.extend_from_slice(&header);
+        data.extend_from_slice(payload);
+        data
+    }
+
+    #[test]
+    fn parses_multiple_file_boundaries() {
+        let data = envelope(
+            serde_json::json!({
+                "kind": "asset",
+                "folder": "rings",
+                "tags": ["token"],
+                "files": [
+                    { "clientId": "0", "fileName": "a.png", "mediaType": "image/png", "offset": 0, "length": 2 },
+                    { "clientId": "1", "fileName": "b.png", "mediaType": "image/png", "offset": 2, "length": 1 }
+                ]
+            }),
+            &[1, 2, 3],
+        );
+        let parsed = parse_library_import_envelope(&data).unwrap();
+        assert_eq!(parsed.files.len(), 2);
+        assert_eq!(parsed.files[0].data, &[1, 2]);
+        assert_eq!(parsed.files[1].data, &[3]);
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_file_payload() {
+        let data = envelope(
+            serde_json::json!({
+                "kind": "asset", "folder": "", "tags": [],
+                "files": [{ "clientId": "0", "fileName": "a.png", "mediaType": "image/png", "offset": 1, "length": 4 }]
+            }),
+            &[1, 2],
+        );
+        assert!(parse_library_import_envelope(&data).is_err());
+    }
+}
+
 #[tauri::command]
 pub fn get_library(app: AppHandle) -> CommandResult<LibraryIndex> {
     let mut index = read_index(&app).map_err(String::from)?;
-    if ensure_font_metadata(&mut index) {
+    let migrated_ring_geometry = index
+        .assets
+        .iter()
+        .any(|record| record.token_ring.as_ref().is_some_and(|ring| ring.legacy));
+    if ensure_font_metadata(&mut index) || migrated_ring_geometry {
+        for record in &mut index.assets {
+            if let Some(ring) = &mut record.token_ring {
+                ring.legacy = false;
+            }
+        }
         write_index(&app, &index).map_err(String::from)?;
     }
     Ok(index)
@@ -34,13 +365,16 @@ pub fn repair_missing_thumbnails(app: AppHandle) -> CommandResult<LibraryIndex> 
         match ensure_record_thumbnail(&app, record) {
             Ok(record_changed) => changed |= record_changed,
             Err(error) => {
-                let _ = write_debug_log("thumbnail", &format!(
-                    "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to repair thumbnail\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"error\":\"{}\"}}}}",
-                    Utc::now().to_rfc3339(),
-                    record.id.replace('"', "\\\""),
-                    record.name.replace('"', "\\\""),
-                    error.to_string().replace('"', "\\\"")
-                ));
+                let _ = write_debug_log(
+                    "thumbnail",
+                    &format!(
+                        "{{\"timestamp\":\"{}\",\"scope\":\"thumbnail\",\"message\":\"failed to repair thumbnail\",\"data\":{{\"id\":\"{}\",\"name\":\"{}\",\"error\":\"{}\"}}}}",
+                        Utc::now().to_rfc3339(),
+                        record.id.replace('"', "\\\""),
+                        record.name.replace('"', "\\\""),
+                        error.to_string().replace('"', "\\\"")
+                    ),
+                );
             }
         }
     }
@@ -133,18 +467,45 @@ pub fn update_token_ring_config(
         || config.inner_radius < 0.0
         || config.outer_radius <= config.inner_radius
         || config.outer_radius > config.design_size / 2.0
-        || !(0.1..=5.0).contains(&config.asset_scale)
+        || !(f64::from(
+            crate::token::configuration::active_configuration()
+                .rings
+                .custom_scale_min,
+        )
+            ..=f64::from(
+                crate::token::configuration::active_configuration()
+                    .rings
+                    .custom_scale_max,
+            ))
+            .contains(&config.image_scale_x)
+        || !(f64::from(
+            crate::token::configuration::active_configuration()
+                .rings
+                .custom_scale_min,
+        )
+            ..=f64::from(
+                crate::token::configuration::active_configuration()
+                    .rings
+                    .custom_scale_max,
+            ))
+            .contains(&config.image_scale_y)
     {
         return Err("invalid token ring geometry".to_string());
     }
     let mut index = read_index(&app).map_err(String::from)?;
-    let record = index.assets.iter_mut().find(|record| record.id == id)
+    let record = index
+        .assets
+        .iter_mut()
+        .find(|record| record.id == id)
         .ok_or_else(|| "ring asset not found".to_string())?;
     let revision = record.token_ring.as_ref().map_or(0, |ring| ring.revision);
     if revision != expected_revision {
-        return Err(format!("token ring revision conflict: expected {expected_revision}, current {revision}"));
+        return Err(format!(
+            "token ring revision conflict: expected {expected_revision}, current {revision}"
+        ));
     }
     config.revision = revision + 1;
+    config.legacy = false;
     record.token_ring = Some(config);
     record.updated_at = Utc::now();
     write_index(&app, &index).map_err(String::from)?;
@@ -286,8 +647,8 @@ pub fn save_font_preview(
     font_id: String,
     data_url: String,
 ) -> CommandResult<LibraryIndex> {
-    let bytes = crate::services::path_service::decode_data_url(&data_url)
-        .map_err(AppError::from)?;
+    let bytes =
+        crate::services::path_service::decode_data_url(&data_url).map_err(AppError::from)?;
     let path = thumbnail_path(&app, &font_id).map_err(String::from)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)

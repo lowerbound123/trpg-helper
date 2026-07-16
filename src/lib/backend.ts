@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { BaseDirectory, writeFile } from '@tauri-apps/plugin-fs'
 
 import { appConfiguration, runtimeConfigurationToml, storeRuntimeConfigurationOverride } from './configuration'
@@ -11,6 +11,8 @@ import {
   type HandoutEncodingOptions,
   type HandoutExportResult,
 } from './handout-export'
+import { buildLibraryImportEnvelope, partitionLibraryImportFiles } from './library-import'
+import type { UploadKind } from './upload-validation'
 import type {
   TokenProjectDocument,
   TokenProjectPayload,
@@ -68,6 +70,71 @@ export interface ImportResult {
   library: LibraryIndex
 }
 
+export interface BatchImportItemResult {
+  clientId: string
+  fileName: string
+  record?: LibraryRecord | null
+  error?: string | null
+}
+
+export interface BatchImportResult {
+  results: BatchImportItemResult[]
+  library: LibraryIndex
+}
+
+export interface ForegroundSegmentationTimings {
+  sessionLoadMs: number
+  decodeMs: number
+  preprocessMs: number
+  inferenceMs: number
+  postprocessMs: number
+  writeMs: number
+  thumbnailMs: number
+  indexWriteMs: number
+}
+
+export interface ForegroundSegmentationResult {
+  record: LibraryRecord
+  library: LibraryIndex
+  timings: ForegroundSegmentationTimings
+}
+
+export interface ForegroundSegmentationRequest {
+  assetId: string
+  sourcePath: string
+}
+
+export interface ForegroundSegmentationItemResult {
+  assetId: string
+  success: boolean
+  record?: LibraryRecord | null
+  error?: string | null
+  model: string
+  device: string
+  timings: ForegroundSegmentationTimings
+}
+
+export interface ForegroundSegmentationBatchResult {
+  results: ForegroundSegmentationItemResult[]
+  library: LibraryIndex
+}
+
+export interface ForegroundSegmentationProgress {
+  phase: 'preparing' | 'downloading' | 'probing' | 'processing' | 'writing' | 'finished'
+  stage: string
+  current: number
+  total: number
+  assetId?: string | null
+  successCount: number
+  failureCount: number
+  model?: string | null
+  device?: string | null
+  completedBytes?: number | null
+  totalBytes?: number | null
+  elapsedMs?: number | null
+  error?: string | null
+}
+
 export const emptyLibrary = (): LibraryIndex => ({
   backgrounds: [],
   assets: [],
@@ -107,6 +174,7 @@ export function logFileNameForScope(scope: string) {
   if (RENDER_LOG_SCOPES.has(normalized)) return 'render.log'
   if (normalized === 'upload') return 'upload.log'
   if (normalized === 'token') return 'token.log'
+  if (normalized === 'segmentation') return 'segmentation.log'
   return 'app.log'
 }
 
@@ -158,6 +226,24 @@ export async function getLibrary(): Promise<LibraryIndex> {
 export async function repairMissingThumbnails(): Promise<LibraryIndex> {
   if (!isTauriRuntime()) return emptyLibrary()
   return invoke<LibraryIndex>('repair_missing_thumbnails')
+}
+
+export async function segmentAssetForeground(assetId: string, sourcePath: string): Promise<ForegroundSegmentationResult> {
+  if (!isTauriRuntime()) throw new Error('Foreground segmentation requires the Tauri desktop runtime.')
+  return invoke<ForegroundSegmentationResult>('segment_asset_foreground', { assetId, sourcePath })
+}
+
+export async function segmentAssetsForeground(
+  requests: ForegroundSegmentationRequest[],
+  onProgress?: (event: ForegroundSegmentationProgress) => void,
+): Promise<ForegroundSegmentationBatchResult> {
+  if (!isTauriRuntime()) throw new Error('Foreground segmentation requires the Tauri desktop runtime.')
+  const progressChannel = new Channel<ForegroundSegmentationProgress>()
+  progressChannel.onmessage = (event) => onProgress?.(event)
+  return invoke<ForegroundSegmentationBatchResult>('segment_assets_foreground', {
+    requests,
+    onProgress: progressChannel,
+  })
 }
 
 export async function saveFontPreview(fontId: string, dataUrl: string): Promise<LibraryIndex> {
@@ -224,16 +310,52 @@ export async function deleteProjectMask(
 }
 
 export async function importAsset(file: File, tags: string[], folder = ''): Promise<ImportResult> {
-  if (!isTauriRuntime()) {
-    throw new Error('Asset import requires the Tauri desktop runtime.')
+  return importSingleLibraryFile('asset', file, tags, folder)
+}
+
+export async function importLibraryFiles(
+  kind: UploadKind,
+  files: File[],
+  tags: string[],
+  folder = '',
+): Promise<BatchImportResult> {
+  if (!isTauriRuntime()) throw new Error('Library import requires the Tauri desktop runtime.')
+  if (!files.length) return { results: [], library: await getLibrary() }
+  const results: BatchImportItemResult[] = []
+  let library = emptyLibrary()
+  let clientIdOffset = 0
+  for (const batch of partitionLibraryImportFiles(files)) {
+    const preparedAt = performance.now()
+    const envelope = await buildLibraryImportEnvelope(kind, batch, tags, folder, clientIdOffset)
+    void appendDebugLog('speed', 'library-import-envelope-prepared', {
+      kind,
+      files: batch.length,
+      bytes: envelope.length,
+      durationMs: Math.round(performance.now() - preparedAt),
+    })
+    const imported = await invoke<BatchImportResult>('import_library_batch', envelope)
+    results.push(...imported.results)
+    library = imported.library
+    clientIdOffset += batch.length
   }
-  return invoke<ImportResult>('import_asset', {
-    fileName: file.name,
-    data: Array.from(new Uint8Array(await file.arrayBuffer())),
-    tags,
-    folder,
-    mediaType: file.type || 'application/octet-stream',
-  })
+  return { results, library }
+}
+
+export async function importLibraryPaths(
+  kind: UploadKind,
+  paths: string[],
+  folder = '',
+  tags: string[] = [],
+): Promise<BatchImportResult> {
+  if (!isTauriRuntime()) throw new Error('Path import requires the Tauri desktop runtime.')
+  return invoke<BatchImportResult>('import_library_paths', { kind, paths, folder, tags })
+}
+
+async function importSingleLibraryFile(kind: UploadKind, file: File, tags: string[], folder: string): Promise<ImportResult> {
+  const result = await importLibraryFiles(kind, [file], tags, folder)
+  const item = result.results[0]
+  if (!item?.record) throw new Error(item?.error || `Failed to import ${file.name}`)
+  return { record: item.record, library: result.library }
 }
 
 export async function updateTokenRingConfig(
@@ -245,29 +367,11 @@ export async function updateTokenRingConfig(
 }
 
 export async function importBackground(file: File, tags: string[], folder = ''): Promise<ImportResult> {
-  if (!isTauriRuntime()) {
-    throw new Error('Background import requires the Tauri desktop runtime.')
-  }
-  return invoke<ImportResult>('import_background', {
-    fileName: file.name,
-    data: Array.from(new Uint8Array(await file.arrayBuffer())),
-    tags,
-    folder,
-    mediaType: file.type || 'application/octet-stream',
-  })
+  return importSingleLibraryFile('background', file, tags, folder)
 }
 
 export async function importFont(file: File, tags: string[], folder = ''): Promise<ImportResult> {
-  if (!isTauriRuntime()) {
-    throw new Error('Font import requires the Tauri desktop runtime.')
-  }
-  return invoke<ImportResult>('import_font', {
-    fileName: file.name,
-    data: Array.from(new Uint8Array(await file.arrayBuffer())),
-    tags,
-    folder,
-    mediaType: file.type || 'font/ttf',
-  })
+  return importSingleLibraryFile('font', file, tags, folder)
 }
 
 export async function createLibraryFolder(

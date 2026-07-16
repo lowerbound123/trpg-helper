@@ -14,9 +14,7 @@ use crate::services::path_service::{ensure_folder, project_folders_path, project
 use crate::services::preview_service::preview_path;
 use crate::types::{ProjectFolderIndex, ProjectPayload, ProjectSummary};
 
-pub(crate) fn read_project_folder_index(
-    app: &AppHandle,
-) -> Result<ProjectFolderIndex, AppError> {
+pub(crate) fn read_project_folder_index(app: &AppHandle) -> Result<ProjectFolderIndex, AppError> {
     fs::create_dir_all(projects_root(app)?)?;
     let path = project_folders_path(app)?;
     if !path.exists() {

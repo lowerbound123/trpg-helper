@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use image::{imageops::FilterType, GenericImageView};
+use image::{GenericImageView, imageops::FilterType};
 use tauri::AppHandle;
 
 use crate::errors::AppError;

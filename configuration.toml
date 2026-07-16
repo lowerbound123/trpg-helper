@@ -1,279 +1,514 @@
 # Handout Generator local configuration.
 # Values here are read by the Vue/Tauri app at build time unless noted otherwise.
 
+# 配置项：root / 结构 版本；用途：设置 root 的结构 版本；范围：按该字段的业务约束；生效：保存并重启应用后。
 schema_version = 1
 
 [application]
+# 配置项：应用 / 标题；用途：设置 应用 的标题；格式：字符串或枚举值；生效：保存并重启应用后。
 title = "Handout Generator"
+# 配置项：应用 / 界面语言；用途：设置 应用 的界面语言；格式：字符串或枚举值；生效：保存并重启应用后。
+locale = "auto"
 
 [window]
+# 配置项：窗口 / 宽度；用途：设置 窗口 的宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 width = 1440
+# 配置项：窗口 / 高度；用途：设置 窗口 的高度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 height = 920
+# 配置项：窗口 / 最小 宽度；用途：设置 窗口 的最小 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 min_width = 1180
+# 配置项：窗口 / 最小 高度；用途：设置 窗口 的最小 高度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 min_height = 760
+# 配置项：窗口 / 可调整大小；用途：设置 窗口 的可调整大小；取值：true 或 false；生效：保存并重启应用后。
 resizable = true
 
 [diagnostics]
+# 配置项：诊断 / 日志 目录；用途：设置 诊断 的日志 目录；格式：字符串或枚举值；生效：保存并重启应用后。
 log_directory = "./logs"
 
 [paths]
+# 配置项：路径 / 数据 目录；用途：设置 路径 的数据 目录；格式：字符串或枚举值；生效：保存并重启应用后。
 data_dir = "./data"
+# 配置项：路径 / 日志 文件；用途：设置 路径 的日志 文件；格式：字符串或枚举值；生效：保存并重启应用后。
 log_file = "./logs/app.log"
 
 [uploads]
+# 配置项：上传 / 最大 文件 尺寸；用途：设置 上传 的最大 文件 尺寸；单位：字节或容量字符串；范围：正数；生效：保存并重启应用后。
 max_file_size = "100mb"
 
 [previews]
+# 配置项：缩略图 / 缩略图 最大 边长 PX；用途：设置 缩略图 的缩略图 最大 边长 PX；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 thumbnail_max_edge_px = 256
+# 配置项：缩略图 / 缩略图 质量；用途：设置 缩略图 的缩略图 质量；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 thumbnail_quality = 80
+# 配置项：缩略图 / 目标 最大 字节；用途：设置 缩略图 的目标 最大 字节；单位：字节或容量字符串；范围：正数；生效：保存并重启应用后。
 target_max_bytes = 524288
 
 [finder]
+# 配置项：文件管理器 / 管理器 高度 PX；用途：设置 文件管理器 的管理器 高度 PX；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 manager_height_px = 1080
+# 配置项：文件管理器 / 紧凑视图 高度 PX；用途：设置 文件管理器 的紧凑视图 高度 PX；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 compact_height_px = 300
+# 配置项：文件管理器 / Handout 网格 缩放；用途：设置 文件管理器 的Handout 网格 缩放；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 handout_grid_scale = 2
+# 配置项：文件管理器 / 背景 网格 缩放；用途：设置 文件管理器 的背景 网格 缩放；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 background_grid_scale = 2
 
 [editor]
+# 配置项：编辑器 / 吸附 阈值 屏幕 PX；用途：设置 编辑器 的吸附 阈值 屏幕 PX；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 snap_threshold_screen_px = 5
+# 配置项：编辑器 / 最大 吸附 候选项；用途：设置 编辑器 的最大 吸附 候选项；范围：按该字段的业务约束；生效：保存并重启应用后。
 max_snap_candidates = 24
+# 配置项：编辑器 / 连续 编辑 提交 延迟 MS；用途：设置 编辑器 的连续 编辑 提交 延迟 MS；单位：毫秒；范围：非负数；生效：保存并重启应用后。
 continuous_edit_commit_delay_ms = 450
 
 [mask]
 # Set to false to disable all layer mask UI, editing, preview composition,
 # project preview masks, and export/flat mask application.
+# 配置项：蒙版 / 启用；用途：设置 蒙版 的启用；取值：true 或 false；生效：保存并重启应用后。
 enabled = true
 # Use PixiJS for low-frequency layer mask preview composition. Final export
 # still uses the Canvas2D/Konva path so the output is deterministic.
+# 配置项：蒙版 / 使用 PixiJS 预览；用途：设置 蒙版 的使用 PixiJS 预览；取值：true 或 false；生效：保存并重启应用后。
 use_pixi_preview = true
 # Minimum opacity used only for in-progress brush/eraser stroke previews while
 # editing a mask. Final mask pixels still use the configured brush/eraser value.
+# 配置项：蒙版 / 笔触 预览 最小 不透明度；用途：设置 蒙版 的笔触 预览 最小 不透明度；范围：0 到 1，或按字段定义的百分比；生效：保存并重启应用后。
 stroke_preview_min_opacity = 0.3
 # Delay secondary mask preview work after brush/eraser/shape edits. Target layer
 # recomposition starts on the next frame.
+# 配置项：蒙版 / INTERACTIVE 刷新 延迟 MS；用途：设置 蒙版 的INTERACTIVE 刷新 延迟 MS；单位：毫秒；范围：非负数；生效：保存并重启应用后。
 interactive_refresh_delay_ms = 1000
 # Keep secondary/full mask recomposition out of pointer down/drag hot paths.
+# 配置项：蒙版 / 指针 空闲 宽限 MS；用途：设置 蒙版 的指针 空闲 宽限 MS；单位：毫秒；范围：非负数；生效：保存并重启应用后。
 pointer_idle_grace_ms = 120
 
+[foreground_segmentation]
+# 是否启用前景分割功能；修改后重启生效。
+# 配置项：前景分割 / 启用；用途：设置 前景分割 的启用；取值：true 或 false；生效：保存并重启应用后。
+enabled = true
+# 前景分割模型：birefnet-general、u2net、ben2 或 macos-vision。
+# 配置项：前景分割 / 模型；用途：设置 前景分割 的模型；格式：字符串或枚举值；生效：保存并重启应用后。
+model = "birefnet-general"
+# 推理设备：macOS 下 auto/coreml 只加载 native-coreml/model.mlmodelc；不存在时回退 CPU。使用 pnpm compile:segmentation-coreml 显式编译单一模型。Windows/Linux 的 auto 仍优先可用 GPU。
+# 配置项：前景分割 / 设备；用途：设置 前景分割 的设备；格式：字符串或枚举值；生效：保存并重启应用后。
+device = "auto"
+# 同时处理的图片数量；每个 worker 持有独立推理 Session。
+# 配置项：前景分割 / 任务 worker 线程数；用途：设置 前景分割 的任务 worker 线程数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
+worker_threads = 1
+# 单个 ONNX Session 的 intra-op 线程数；0 表示由 ORT 自动决定。
+# 配置项：前景分割 / 算子内 线程数；用途：设置 前景分割 的算子内 线程数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
+intra_threads = 0
+# 单个 ONNX Session 的 inter-op 线程数。
+# 配置项：前景分割 / 算子间 线程数；用途：设置 前景分割 的算子间 线程数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
+inter_threads = 1
+# 模型缺失时是否允许从锁定清单自动下载。
+# 配置项：前景分割 / 下载 MISSING MODELS；用途：设置 前景分割 的下载 MISSING MODELS；取值：true 或 false；生效：保存并重启应用后。
+download_missing_models = true
+# 模型下载超时时间，单位秒。
+# 配置项：前景分割 / 下载 超时 SECONDS；用途：设置 前景分割 的下载 超时 SECONDS；单位：秒；范围：正整数；生效：保存并重启应用后。
+download_timeout_seconds = 600
+# 模型缓存目录，相对于 ~/Documents/trpg-helper。
+# 配置项：前景分割 / 模型 缓存 目录；用途：设置 前景分割 的模型 缓存 目录；格式：字符串或枚举值；生效：保存并重启应用后。
+model_cache_directory = "./models/foreground-segmentation"
+# 输出透明 PNG 文件名后缀。
+# 配置项：前景分割 / 输出 后缀；用途：设置 前景分割 的输出 后缀；格式：字符串或枚举值；生效：保存并重启应用后。
+output_suffix = "-foreground"
+# 输入图片允许的最大单边像素数。
+# 配置项：前景分割 / 最大 源图片 尺寸；用途：设置 前景分割 的最大 源图片 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
+max_source_dimension = 16384
+# 输入图片允许的最大总像素数。
+# 配置项：前景分割 / 最大 源图片 像素数；用途：设置 前景分割 的最大 源图片 像素数；范围：按该字段的业务约束；生效：保存并重启应用后。
+max_source_pixels = 67108864
+
 [export]
+# 配置项：Handout 导出 / 默认 缩放；用途：设置 Handout 导出 的默认 缩放；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 default_scale = 1
+# 配置项：Handout 导出 / 最小 缩放；用途：设置 Handout 导出 的最小 缩放；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 min_scale = 0.1
+# 配置项：Handout 导出 / RAW RGBA IPC 最大 字节；用途：设置 Handout 导出 的RAW RGBA IPC 最大 字节；单位：字节或容量字符串；范围：正数；生效：保存并重启应用后。
 raw_rgba_ipc_max_bytes = 134217728
 
 [export.defaults]
+# 配置项：Handout 导出 / 默认值 / 格式；用途：设置 Handout 导出 / 默认值 的格式；格式：字符串或枚举值；生效：保存并重启应用后。
 format = "png"
+# 配置项：Handout 导出 / 默认值 / PNG 优化 等级；用途：设置 Handout 导出 / 默认值 的PNG 优化 等级；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 png_optimization_level = 3
+# 配置项：Handout 导出 / 默认值 / PNG OPTIMIZE Alpha；用途：设置 Handout 导出 / 默认值 的PNG OPTIMIZE Alpha；取值：true 或 false；生效：保存并重启应用后。
 png_optimize_alpha = true
+# 配置项：Handout 导出 / 默认值 / PNG 保留 元数据；用途：设置 Handout 导出 / 默认值 的PNG 保留 元数据；取值：true 或 false；生效：保存并重启应用后。
 png_preserve_metadata = false
+# 配置项：Handout 导出 / 默认值 / PNG Zopfli；用途：设置 Handout 导出 / 默认值 的PNG Zopfli；取值：true 或 false；生效：保存并重启应用后。
 png_zopfli = false
+# 配置项：Handout 导出 / 默认值 / JPEG 质量；用途：设置 Handout 导出 / 默认值 的JPEG 质量；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jpeg_quality = 85
+# 配置项：Handout 导出 / 默认值 / JPEG 渐进式；用途：设置 Handout 导出 / 默认值 的JPEG 渐进式；取值：true 或 false；生效：保存并重启应用后。
 jpeg_progressive = true
+# 配置项：Handout 导出 / 默认值 / JPEG DERINGING；用途：设置 Handout 导出 / 默认值 的JPEG DERINGING；取值：true 或 false；生效：保存并重启应用后。
 jpeg_deringing = true
+# 配置项：Handout 导出 / 默认值 / JPEG CHROMA SUBSAMPLING；用途：设置 Handout 导出 / 默认值 的JPEG CHROMA SUBSAMPLING；格式：字符串或枚举值；生效：保存并重启应用后。
 jpeg_chroma_subsampling = "422"
+# 配置项：Handout 导出 / 默认值 / WebP 质量；用途：设置 Handout 导出 / 默认值 的WebP 质量；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 webp_quality = 90
+# 配置项：Handout 导出 / 默认值 / WebP 无损；用途：设置 Handout 导出 / 默认值 的WebP 无损；取值：true 或 false；生效：保存并重启应用后。
 webp_lossless = false
+# 配置项：Handout 导出 / 默认值 / WebP 编码 STRENGTH；用途：设置 Handout 导出 / 默认值 的WebP 编码 STRENGTH；格式：字符串或枚举值；生效：保存并重启应用后。
 webp_encoding_strength = "balanced"
+# 配置项：Handout 导出 / 默认值 / JXL 无损；用途：设置 Handout 导出 / 默认值 的JXL 无损；取值：true 或 false；生效：保存并重启应用后。
 jxl_lossless = false
+# 配置项：Handout 导出 / 默认值 / JXL 距离；用途：设置 Handout 导出 / 默认值 的JXL 距离；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jxl_distance = 1.0
+# 配置项：Handout 导出 / 默认值 / JXL 压缩强度；用途：设置 Handout 导出 / 默认值 的JXL 压缩强度；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_effort = 7
+# 配置项：Handout 导出 / 默认值 / JXL 渐进式；用途：设置 Handout 导出 / 默认值 的JXL 渐进式；取值：true 或 false；生效：保存并重启应用后。
 jxl_progressive = true
+# 配置项：Handout 导出 / 默认值 / JXL 解码 速度；用途：设置 Handout 导出 / 默认值 的JXL 解码 速度；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_decoding_speed = 0
 
 [export.limits]
+# 配置项：Handout 导出 / 限制 / PNG 优化 等级 最小；用途：设置 Handout 导出 / 限制 的PNG 优化 等级 最小；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 png_optimization_level_min = 0
+# 配置项：Handout 导出 / 限制 / PNG 优化 等级 最大；用途：设置 Handout 导出 / 限制 的PNG 优化 等级 最大；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 png_optimization_level_max = 6
+# 配置项：Handout 导出 / 限制 / JPEG 质量 最小；用途：设置 Handout 导出 / 限制 的JPEG 质量 最小；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jpeg_quality_min = 1
+# 配置项：Handout 导出 / 限制 / JPEG 质量 最大；用途：设置 Handout 导出 / 限制 的JPEG 质量 最大；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jpeg_quality_max = 100
+# 配置项：Handout 导出 / 限制 / WebP 质量 最小；用途：设置 Handout 导出 / 限制 的WebP 质量 最小；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 webp_quality_min = 1
+# 配置项：Handout 导出 / 限制 / WebP 质量 最大；用途：设置 Handout 导出 / 限制 的WebP 质量 最大；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 webp_quality_max = 100
+# 配置项：Handout 导出 / 限制 / JXL 距离 最小；用途：设置 Handout 导出 / 限制 的JXL 距离 最小；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jxl_distance_min = 0.0
+# 配置项：Handout 导出 / 限制 / JXL 距离 最大；用途：设置 Handout 导出 / 限制 的JXL 距离 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jxl_distance_max = 5.0
+# 配置项：Handout 导出 / 限制 / JXL 压缩强度 最小；用途：设置 Handout 导出 / 限制 的JXL 压缩强度 最小；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_effort_min = 1
+# 配置项：Handout 导出 / 限制 / JXL 压缩强度 最大；用途：设置 Handout 导出 / 限制 的JXL 压缩强度 最大；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_effort_max = 9
+# 配置项：Handout 导出 / 限制 / JXL 解码 速度 最小；用途：设置 Handout 导出 / 限制 的JXL 解码 速度 最小；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_decoding_speed_min = 0
+# 配置项：Handout 导出 / 限制 / JXL 解码 速度 最大；用途：设置 Handout 导出 / 限制 的JXL 解码 速度 最大；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_decoding_speed_max = 4
+# 配置项：Handout 导出 / 限制 / 最大 画布 尺寸；用途：设置 Handout 导出 / 限制 的最大 画布 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 max_canvas_dimension = 16384
+# 配置项：Handout 导出 / 限制 / 最大 画布 像素数；用途：设置 Handout 导出 / 限制 的最大 画布 像素数；范围：按该字段的业务约束；生效：保存并重启应用后。
 max_canvas_pixels = 67108864
 
 [export.rendering]
+# 配置项：Handout 导出 / 渲染 / JPEG MATTE 颜色；用途：设置 Handout 导出 / 渲染 的JPEG MATTE 颜色；格式：十六进制颜色或颜色数组；生效：保存并重启应用后。
 jpeg_matte_color = "#FFFFFFFF"
 
 [[export.webp_strength_profiles]]
+# 配置项：Handout 导出 / webp_strength_profiles / ID；用途：设置 Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "fast"
+# 配置项：Handout 导出 / webp_strength_profiles / 名称；用途：设置 Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "快速"
+# 配置项：Handout 导出 / webp_strength_profiles / 方法；用途：设置 Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 2
+# 配置项：Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 1
 
 [[export.webp_strength_profiles]]
+# 配置项：Handout 导出 / webp_strength_profiles / ID；用途：设置 Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "balanced"
+# 配置项：Handout 导出 / webp_strength_profiles / 名称；用途：设置 Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "均衡"
+# 配置项：Handout 导出 / webp_strength_profiles / 方法；用途：设置 Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 4
+# 配置项：Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 2
 
 [[export.webp_strength_profiles]]
+# 配置项：Handout 导出 / webp_strength_profiles / ID；用途：设置 Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "strong"
+# 配置项：Handout 导出 / webp_strength_profiles / 名称；用途：设置 Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "高压缩"
+# 配置项：Handout 导出 / webp_strength_profiles / 方法；用途：设置 Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 5
+# 配置项：Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 6
 
 [[export.webp_strength_profiles]]
+# 配置项：Handout 导出 / webp_strength_profiles / ID；用途：设置 Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "maximum"
+# 配置项：Handout 导出 / webp_strength_profiles / 名称；用途：设置 Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "极限"
+# 配置项：Handout 导出 / webp_strength_profiles / 方法；用途：设置 Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 6
+# 配置项：Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 10
 
 [debug]
+# 配置项：调试 / 文件 日志 启用；用途：设置 调试 的文件 日志 启用；取值：true 或 false；生效：保存并重启应用后。
 file_log_enabled = true
+# 配置项：调试 / RENDER PERF 日志 启用；用途：设置 调试 的RENDER PERF 日志 启用；取值：true 或 false；生效：保存并重启应用后。
 render_perf_log_enabled = true
 
 [token.defaults]
+# 配置项：Token / 默认值 / DESIGN 尺寸；用途：设置 Token / 默认值 的DESIGN 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 design_size = 512
+# 配置项：Token / 默认值 / 缩放；用途：设置 Token / 默认值 的缩放；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 scale = 100
+# 配置项：Token / 默认值 / 偏移 横向；用途：设置 Token / 默认值 的偏移 横向；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 offset_x = 0
+# 配置项：Token / 默认值 / 偏移 纵向；用途：设置 Token / 默认值 的偏移 纵向；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 offset_y = 0
+# 配置项：Token / 默认值 / 背景 颜色；用途：设置 Token / 默认值 的背景 颜色；格式：十六进制颜色或颜色数组；生效：保存并重启应用后。
 background_color = "#000000FF"
+# 配置项：Token / 默认值 / 圆环 内侧 半径；用途：设置 Token / 默认值 的圆环 内侧 半径；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 ring_inner_radius = 225
+# 配置项：Token / 默认值 / 圆环 外侧 半径；用途：设置 Token / 默认值 的圆环 外侧 半径；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 ring_outer_radius = 250
+# 配置项：Token / 默认值 / 圆环 颜色；用途：设置 Token / 默认值 的圆环 颜色；格式：十六进制颜色或颜色数组；生效：保存并重启应用后。
 ring_color = "#F6C75BFF"
+# 配置项：Token / 默认值 / 圆环 样式；用途：设置 Token / 默认值 的圆环 样式；格式：字符串或枚举值；生效：保存并重启应用后。
 ring_style = "solid"
+# 配置项：Token / 默认值 / 圆环 拉伸 横向；用途：设置 Token / 默认值 的圆环 拉伸 横向；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 ring_stretch_x = 1.0
+# 配置项：Token / 默认值 / 圆环 拉伸 纵向；用途：设置 Token / 默认值 的圆环 拉伸 纵向；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 ring_stretch_y = 1.0
+# 配置项：Token / 默认值 / 分割 圆环；用途：设置 Token / 默认值 的分割 圆环；取值：true 或 false；生效：保存并重启应用后。
 split_ring = false
+# 配置项：Token / 默认值 / 分割 ANGLE；用途：设置 Token / 默认值 的分割 ANGLE；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 split_angle = 0
+# 配置项：Token / 默认值 / 分割 高度；用途：设置 Token / 默认值 的分割 高度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 split_height = 0
 
 [token.limits]
+# 配置项：Token / 限制 / 缩放 最小；用途：设置 Token / 限制 的缩放 最小；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 scale_min = 10
+# 配置项：Token / 限制 / 缩放 最大；用途：设置 Token / 限制 的缩放 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 scale_max = 500
+# 配置项：Token / 限制 / 缩放 步长；用途：设置 Token / 限制 的缩放 步长；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 scale_step = 5
+# 配置项：Token / 限制 / 偏移 最小；用途：设置 Token / 限制 的偏移 最小；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 offset_min = -100
+# 配置项：Token / 限制 / 偏移 最大；用途：设置 Token / 限制 的偏移 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 offset_max = 100
+# 配置项：Token / 限制 / 圆环 拉伸 最小；用途：设置 Token / 限制 的圆环 拉伸 最小；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 ring_stretch_min = 0.01
+# 配置项：Token / 限制 / 圆环 拉伸 最大；用途：设置 Token / 限制 的圆环 拉伸 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 ring_stretch_max = 4.0
+# 配置项：Token / 限制 / 分割 ANGLE 最小；用途：设置 Token / 限制 的分割 ANGLE 最小；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 split_angle_min = 0
+# 配置项：Token / 限制 / 分割 ANGLE 最大；用途：设置 Token / 限制 的分割 ANGLE 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 split_angle_max = 359
+# 配置项：Token / 限制 / 分割 高度 最小；用途：设置 Token / 限制 的分割 高度 最小；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 split_height_min = -100
+# 配置项：Token / 限制 / 分割 高度 最大；用途：设置 Token / 限制 的分割 高度 最大；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 split_height_max = 100
 
 [token.export.defaults]
+# 配置项：Token / Handout 导出 / 默认值 / 格式；用途：设置 Token / Handout 导出 / 默认值 的格式；格式：字符串或枚举值；生效：保存并重启应用后。
 format = "png"
+# 配置项：Token / Handout 导出 / 默认值 / 尺寸；用途：设置 Token / Handout 导出 / 默认值 的尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 size = 512
+# 配置项：Token / Handout 导出 / 默认值 / PNG 优化 等级；用途：设置 Token / Handout 导出 / 默认值 的PNG 优化 等级；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 png_optimization_level = 3
+# 配置项：Token / Handout 导出 / 默认值 / PNG OPTIMIZE Alpha；用途：设置 Token / Handout 导出 / 默认值 的PNG OPTIMIZE Alpha；取值：true 或 false；生效：保存并重启应用后。
 png_optimize_alpha = true
+# 配置项：Token / Handout 导出 / 默认值 / PNG 保留 元数据；用途：设置 Token / Handout 导出 / 默认值 的PNG 保留 元数据；取值：true 或 false；生效：保存并重启应用后。
 png_preserve_metadata = false
+# 配置项：Token / Handout 导出 / 默认值 / PNG Zopfli；用途：设置 Token / Handout 导出 / 默认值 的PNG Zopfli；取值：true 或 false；生效：保存并重启应用后。
 png_zopfli = false
+# 配置项：Token / Handout 导出 / 默认值 / JPEG 质量；用途：设置 Token / Handout 导出 / 默认值 的JPEG 质量；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jpeg_quality = 85
+# 配置项：Token / Handout 导出 / 默认值 / JPEG 渐进式；用途：设置 Token / Handout 导出 / 默认值 的JPEG 渐进式；取值：true 或 false；生效：保存并重启应用后。
 jpeg_progressive = true
+# 配置项：Token / Handout 导出 / 默认值 / JPEG DERINGING；用途：设置 Token / Handout 导出 / 默认值 的JPEG DERINGING；取值：true 或 false；生效：保存并重启应用后。
 jpeg_deringing = true
+# 配置项：Token / Handout 导出 / 默认值 / JPEG CHROMA SUBSAMPLING；用途：设置 Token / Handout 导出 / 默认值 的JPEG CHROMA SUBSAMPLING；格式：字符串或枚举值；生效：保存并重启应用后。
 jpeg_chroma_subsampling = "422"
+# 配置项：Token / Handout 导出 / 默认值 / WebP 质量；用途：设置 Token / Handout 导出 / 默认值 的WebP 质量；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 webp_quality = 90
+# 配置项：Token / Handout 导出 / 默认值 / WebP 无损；用途：设置 Token / Handout 导出 / 默认值 的WebP 无损；取值：true 或 false；生效：保存并重启应用后。
 webp_lossless = false
+# 配置项：Token / Handout 导出 / 默认值 / WebP 编码 STRENGTH；用途：设置 Token / Handout 导出 / 默认值 的WebP 编码 STRENGTH；格式：字符串或枚举值；生效：保存并重启应用后。
 webp_encoding_strength = "balanced"
+# 配置项：Token / Handout 导出 / 默认值 / JXL 无损；用途：设置 Token / Handout 导出 / 默认值 的JXL 无损；取值：true 或 false；生效：保存并重启应用后。
 jxl_lossless = false
+# 配置项：Token / Handout 导出 / 默认值 / JXL 距离；用途：设置 Token / Handout 导出 / 默认值 的JXL 距离；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jxl_distance = 1.0
+# 配置项：Token / Handout 导出 / 默认值 / JXL 压缩强度；用途：设置 Token / Handout 导出 / 默认值 的JXL 压缩强度；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_effort = 7
+# 配置项：Token / Handout 导出 / 默认值 / JXL 渐进式；用途：设置 Token / Handout 导出 / 默认值 的JXL 渐进式；取值：true 或 false；生效：保存并重启应用后。
 jxl_progressive = true
+# 配置项：Token / Handout 导出 / 默认值 / JXL 解码 速度；用途：设置 Token / Handout 导出 / 默认值 的JXL 解码 速度；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_decoding_speed = 0
+# 配置项：Token / Handout 导出 / 默认值 / 随机 背景；用途：设置 Token / Handout 导出 / 默认值 的随机 背景；取值：true 或 false；生效：保存并重启应用后。
 random_background = false
+# 配置项：Token / Handout 导出 / 默认值 / 随机 圆环 颜色；用途：设置 Token / Handout 导出 / 默认值 的随机 圆环 颜色；取值：true 或 false；生效：保存并重启应用后。
 random_ring_color = false
 
 [token.export.limits]
+# 配置项：Token / Handout 导出 / 限制 / 尺寸 最小；用途：设置 Token / Handout 导出 / 限制 的尺寸 最小；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 size_min = 64
+# 配置项：Token / Handout 导出 / 限制 / 尺寸 最大；用途：设置 Token / Handout 导出 / 限制 的尺寸 最大；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 size_max = 2048
+# 配置项：Token / Handout 导出 / 限制 / PNG 优化 等级 最小；用途：设置 Token / Handout 导出 / 限制 的PNG 优化 等级 最小；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 png_optimization_level_min = 0
+# 配置项：Token / Handout 导出 / 限制 / PNG 优化 等级 最大；用途：设置 Token / Handout 导出 / 限制 的PNG 优化 等级 最大；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 png_optimization_level_max = 6
+# 配置项：Token / Handout 导出 / 限制 / JPEG 质量 最小；用途：设置 Token / Handout 导出 / 限制 的JPEG 质量 最小；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jpeg_quality_min = 1
+# 配置项：Token / Handout 导出 / 限制 / JPEG 质量 最大；用途：设置 Token / Handout 导出 / 限制 的JPEG 质量 最大；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jpeg_quality_max = 100
+# 配置项：Token / Handout 导出 / 限制 / WebP 质量 最小；用途：设置 Token / Handout 导出 / 限制 的WebP 质量 最小；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 webp_quality_min = 1
+# 配置项：Token / Handout 导出 / 限制 / WebP 质量 最大；用途：设置 Token / Handout 导出 / 限制 的WebP 质量 最大；单位：百分级质量；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 webp_quality_max = 100
+# 配置项：Token / Handout 导出 / 限制 / JXL 距离 最小；用途：设置 Token / Handout 导出 / 限制 的JXL 距离 最小；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jxl_distance_min = 0.0
+# 配置项：Token / Handout 导出 / 限制 / JXL 距离 最大；用途：设置 Token / Handout 导出 / 限制 的JXL 距离 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 jxl_distance_max = 5.0
+# 配置项：Token / Handout 导出 / 限制 / JXL 压缩强度 最小；用途：设置 Token / Handout 导出 / 限制 的JXL 压缩强度 最小；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_effort_min = 1
+# 配置项：Token / Handout 导出 / 限制 / JXL 压缩强度 最大；用途：设置 Token / Handout 导出 / 限制 的JXL 压缩强度 最大；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_effort_max = 9
+# 配置项：Token / Handout 导出 / 限制 / JXL 解码 速度 最小；用途：设置 Token / Handout 导出 / 限制 的JXL 解码 速度 最小；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_decoding_speed_min = 0
+# 配置项：Token / Handout 导出 / 限制 / JXL 解码 速度 最大；用途：设置 Token / Handout 导出 / 限制 的JXL 解码 速度 最大；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 jxl_decoding_speed_max = 4
+# 配置项：Token / Handout 导出 / 限制 / 最大 画布 尺寸；用途：设置 Token / Handout 导出 / 限制 的最大 画布 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 max_canvas_size = 4096
 
 [token.export.rendering]
+# 配置项：Token / Handout 导出 / 渲染 / 重采样 FILTER；用途：设置 Token / Handout 导出 / 渲染 的重采样 FILTER；格式：字符串或枚举值；生效：保存并重启应用后。
 resample_filter = "lanczos3"
+# 配置项：Token / Handout 导出 / 渲染 / 裁切 透明 BOUNDS；用途：设置 Token / Handout 导出 / 渲染 的裁切 透明 BOUNDS；取值：true 或 false；生效：保存并重启应用后。
 trim_transparent_bounds = true
+# 配置项：Token / Handout 导出 / 渲染 / JPEG MATTE 颜色；用途：设置 Token / Handout 导出 / 渲染 的JPEG MATTE 颜色；格式：十六进制颜色或颜色数组；生效：保存并重启应用后。
 jpeg_matte_color = "#FFFFFFFF"
 
 [token.export.naming]
+# 配置项：Token / Handout 导出 / 命名 / 重名冲突 分隔符；用途：设置 Token / Handout 导出 / 命名 的重名冲突 分隔符；格式：字符串或枚举值；生效：保存并重启应用后。
 collision_separator = "_"
+# 配置项：Token / Handout 导出 / 命名 / 重名冲突 起始值；用途：设置 Token / Handout 导出 / 命名 的重名冲突 起始值；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 collision_start = 2
 
 [token.export.random_colors]
+# 配置项：Token / Handout 导出 / random_colors / 调色板；用途：设置 Token / Handout 导出 / random_colors 的调色板；格式：十六进制颜色或颜色数组；生效：保存并重启应用后。
 palette = ["#0B1020", "#102A43", "#3B0A57", "#5A0B2E", "#5B1A00", "#064E3B", "#164E63", "#3F3F46", "#F8FAFC", "#FFF3BF", "#FFD166", "#FF8FAB", "#FF6B6B", "#C4B5FD", "#7DD3FC", "#5EEAD4", "#86EFAC", "#FDE68A"]
+# 配置项：Token / Handout 导出 / random_colors / 最小 对比度 比例；用途：设置 Token / Handout 导出 / random_colors 的最小 对比度 比例；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 minimum_contrast_ratio = 4.5
+# 配置项：Token / Handout 导出 / random_colors / 最小 OKLab 距离；用途：设置 Token / Handout 导出 / random_colors 的最小 OKLab 距离；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 minimum_oklab_distance = 0.12
 
 [[token.export.webp_strength_profiles]]
+# 配置项：Token / Handout 导出 / webp_strength_profiles / ID；用途：设置 Token / Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "fast"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 名称；用途：设置 Token / Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "快速"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 方法；用途：设置 Token / Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 2
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Token / Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 1
 
 [[token.export.webp_strength_profiles]]
+# 配置项：Token / Handout 导出 / webp_strength_profiles / ID；用途：设置 Token / Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "balanced"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 名称；用途：设置 Token / Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "均衡"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 方法；用途：设置 Token / Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 4
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Token / Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 2
 
 [[token.export.webp_strength_profiles]]
+# 配置项：Token / Handout 导出 / webp_strength_profiles / ID；用途：设置 Token / Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "strong"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 名称；用途：设置 Token / Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "高压缩"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 方法；用途：设置 Token / Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 5
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Token / Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 6
 
 [[token.export.webp_strength_profiles]]
+# 配置项：Token / Handout 导出 / webp_strength_profiles / ID；用途：设置 Token / Handout 导出 / webp_strength_profiles 的ID；格式：字符串或枚举值；生效：保存并重启应用后。
 id = "maximum"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 名称；用途：设置 Token / Handout 导出 / webp_strength_profiles 的名称；格式：字符串或枚举值；生效：保存并重启应用后。
 label = "极限"
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 方法；用途：设置 Token / Handout 导出 / webp_strength_profiles 的方法；范围：按该字段的业务约束；生效：保存并重启应用后。
 method = 6
+# 配置项：Token / Handout 导出 / webp_strength_profiles / 遍数；用途：设置 Token / Handout 导出 / webp_strength_profiles 的遍数；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 passes = 10
 
 [token.preview]
+# 配置项：Token / 预览 / 显示 TOKEN 尺寸；用途：设置 Token / 预览 的显示 TOKEN 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 display_token_size = 400
+# 配置项：Token / 预览 / 最小 世界坐标 尺寸；用途：设置 Token / 预览 的最小 世界坐标 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 minimum_world_size = 512
+# 配置项：Token / 预览 / 世界坐标 尺寸 步长；用途：设置 Token / 预览 的世界坐标 尺寸 步长；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 world_size_step = 128
+# 配置项：Token / 预览 / 渲染器；用途：设置 Token / 预览 的渲染器；格式：字符串或枚举值；生效：保存并重启应用后。
 renderer = "webgl"
+# 配置项：Token / 预览 / 抗锯齿；用途：设置 Token / 预览 的抗锯齿；取值：true 或 false；生效：保存并重启应用后。
 antialias = true
+# 配置项：Token / 预览 / 设备 PIXEL 比例 最大；用途：设置 Token / 预览 的设备 PIXEL 比例 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 device_pixel_ratio_max = 2.0
 
 [token.preview.guide]
+# 配置项：Token / 预览 / 参考线 / DASH 长度；用途：设置 Token / 预览 / 参考线 的DASH 长度；范围：按该字段的业务约束；生效：保存并重启应用后。
 dash_length = 6
+# 配置项：Token / 预览 / 参考线 / 间隔 长度；用途：设置 Token / 预览 / 参考线 的间隔 长度；范围：按该字段的业务约束；生效：保存并重启应用后。
 gap_length = 4
+# 配置项：Token / 预览 / 参考线 / 线条 宽度；用途：设置 Token / 预览 / 参考线 的线条 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 line_width = 1
+# 配置项：Token / 预览 / 参考线 / 线条 颜色；用途：设置 Token / 预览 / 参考线 的线条 颜色；格式：十六进制颜色或颜色数组；生效：保存并重启应用后。
 line_color = "#FFFFFF"
+# 配置项：Token / 预览 / 参考线 / 线条 Alpha；用途：设置 Token / 预览 / 参考线 的线条 Alpha；范围：0 到 1，或按字段定义的百分比；生效：保存并重启应用后。
 line_alpha = 0.5
+# 配置项：Token / 预览 / 参考线 / 端点 半径；用途：设置 Token / 预览 / 参考线 的端点 半径；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 endpoint_radius = 3
+# 配置项：Token / 预览 / 参考线 / 端点 Alpha；用途：设置 Token / 预览 / 参考线 的端点 Alpha；范围：0 到 1，或按字段定义的百分比；生效：保存并重启应用后。
 endpoint_alpha = 0.7
 
 [token.layout]
+# 配置项：Token / 布局 / LEFT 宽度；用途：设置 Token / 布局 的LEFT 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 left_width = 280
+# 配置项：Token / 布局 / RIGHT 宽度；用途：设置 Token / 布局 的RIGHT 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 right_width = 400
+# 配置项：Token / 布局 / LEFT 最小 宽度；用途：设置 Token / 布局 的LEFT 最小 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 left_min_width = 200
+# 配置项：Token / 布局 / CENTER 最小 宽度；用途：设置 Token / 布局 的CENTER 最小 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 center_min_width = 400
+# 配置项：Token / 布局 / RIGHT 最小 宽度；用途：设置 Token / 布局 的RIGHT 最小 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 right_min_width = 300
+# 配置项：Token / 布局 / RESIZE HANDLE 宽度；用途：设置 Token / 布局 的RESIZE HANDLE 宽度；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 resize_handle_width = 4
 
 [token.files]
+# 配置项：Token / files / 缩略图 尺寸；用途：设置 Token / files 的缩略图 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 thumbnail_size = 56
+# 配置项：Token / files / 导入 格式列表；用途：设置 Token / files 的导入 格式列表；格式：TOML 数组；生效：保存并重启应用后。
 import_formats = ["png", "jpg", "jpeg", "webp", "bmp"]
+# 配置项：Token / files / 导出 格式列表；用途：设置 Token / files 的导出 格式列表；格式：TOML 数组；生效：保存并重启应用后。
 export_formats = ["png", "jpg", "webp", "jxl"]
 
 [token.history]
+# 配置项：Token / 历史 / 最大 ENTRIES；用途：设置 Token / 历史 的最大 ENTRIES；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 maximum_entries = 50
 
 [token.rings]
+# 配置项：Token / rings / 缩略图 尺寸；用途：设置 Token / rings 的缩略图 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 thumbnail_size = 64
+# 配置项：Token / rings / 请求 防抖 MS；用途：设置 Token / rings 的请求 防抖 MS；单位：毫秒；范围：非负数；生效：保存并重启应用后。
 request_debounce_ms = 50
+# 配置项：Token / rings / 前端 缓存 ENTRIES；用途：设置 Token / rings 的前端 缓存 ENTRIES；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 frontend_cache_entries = 32
+# 配置项：Token / rings / 后端 缓存 ENTRIES；用途：设置 Token / rings 的后端 缓存 ENTRIES；范围：非负整数或对应 limits 范围；生效：保存并重启应用后。
 backend_cache_entries = 64
+# 配置项：Token / rings / 最大 上传 字节；用途：设置 Token / rings 的最大 上传 字节；单位：字节或容量字符串；范围：正数；生效：保存并重启应用后。
 max_upload_bytes = 33554432
+# 配置项：Token / rings / 最大 源图片 尺寸；用途：设置 Token / rings 的最大 源图片 尺寸；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 max_source_dimension = 16384
+# 配置项：Token / rings / 自定义 缩放 最小；用途：设置 Token / rings 的自定义 缩放 最小；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 custom_scale_min = 10
+# 配置项：Token / rings / 自定义 缩放 最大；用途：设置 Token / rings 的自定义 缩放 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 custom_scale_max = 500
 
 [token.notifications]
+# 配置项：Token / 通知 / 提示消息 DURATION MS；用途：设置 Token / 通知 的提示消息 DURATION MS；单位：毫秒；范围：非负数；生效：保存并重启应用后。
 toast_duration_ms = 3000

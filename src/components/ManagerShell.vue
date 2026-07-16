@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Ref } from 'vue'
 import { inject } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus, Save, Settings } from '@lucide/vue'
 import { VueFinder } from 'vuefinder'
 import 'vuefinder/dist/vuefinder.css'
@@ -10,22 +11,17 @@ import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import CreateHandoutDialog from '@/components/handout/CreateHandoutDialog.vue'
 import ConfigurationDialog from '@/components/settings/ConfigurationDialog.vue'
 import { useEditorStore } from '@/stores/editor'
 import { useTokenStore } from '@/stores/token'
 import type { LibraryRecord } from '@/lib/backend'
 
 const editor = useEditorStore()
+const { t } = useI18n()
 
 const ctx = inject<Record<string, unknown>>('manager-context')!
 
 const isSettingsDialogOpen = ctx.isSettingsDialogOpen as Ref<boolean>
-const isCreateDialogOpen = ctx.isCreateDialogOpen as Ref<boolean>
-const newProjectTitle = ctx.newProjectTitle as Ref<string>
-const createMode = ctx.createMode as Ref<'blank' | 'upload-background'>
-const blankWidth = ctx.blankWidth as Ref<number>
-const blankHeight = ctx.blankHeight as Ref<number>
 const fontSearch = ctx.fontSearch as Ref<string>
 const finderRevision = ctx.finderRevision as Record<'background' | 'asset' | 'font', number>
 const handoutFinderStyle = ctx.handoutFinderStyle as Record<string, string>
@@ -44,9 +40,6 @@ const selectedHandoutProject = ctx.selectedHandoutProject as () => unknown
 const isSelectedHandoutExporting = ctx.isSelectedHandoutExporting as () => boolean
 const exportSelectedHandout = ctx.exportSelectedHandout as () => void
 const cloneHandoutProject = ctx.cloneHandoutProject as (project: unknown) => void
-const createProject = ctx.createProject as () => void
-const handleCreateBackgroundDrop = ctx.handleCreateBackgroundDrop as (event: DragEvent) => void
-const handleCreateBackgroundInput = ctx.handleCreateBackgroundInput as (event: Event) => void
 const selectedImageStatus = ctx.selectedImageStatus as (kind: string) => string
 const selectedImageRecord = ctx.selectedImageRecord as (kind: string) => unknown
 const createHandoutFromFinderImage = ctx.createHandoutFromFinderImage as (kind: string) => void
@@ -63,36 +56,34 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
   <div class="manager-shell">
     <header class="manager-header">
       <div>
-        <h1>Handout Generator</h1>
-        <p>Manage handouts, assets, and fonts before opening the canvas editor.</p>
+        <h1>{{ t('APP_NAME') }}</h1>
+        <p>{{ t('MANAGER_DESCRIPTION') }}</p>
       </div>
       <div class="manager-header-actions">
-        <Button variant="outline" size="sm" @click="isSettingsDialogOpen = true">
+        <Badge
+          data-testid="manager-status"
+          variant="secondary"
+          aria-live="polite"
+          :title="editor.status"
+        >
+          {{ editor.status }}
+        </Badge>
+        <Button data-testid="manager-settings" variant="outline" size="sm" @click="isSettingsDialogOpen = true">
           <Settings data-icon="inline-start" />
-          Settings
+          {{ t('SETTINGS') }}
         </Button>
-        <Badge variant="secondary">{{ editor.status }}</Badge>
       </div>
     </header>
 
     <Tabs default-value="handouts" class="manager-tabs">
       <TabsList class="manager-tab-list">
-        <TabsTrigger value="handouts">Handouts</TabsTrigger>
-        <TabsTrigger value="tokens">Tokens</TabsTrigger>
-        <TabsTrigger value="assets">Assets</TabsTrigger>
-        <TabsTrigger value="fonts">Fonts</TabsTrigger>
+        <TabsTrigger value="handouts">{{ t('HANDOUTS') }}</TabsTrigger>
+        <TabsTrigger value="tokens">{{ t('TOKENS') }}</TabsTrigger>
+        <TabsTrigger value="assets">{{ t('ASSETS') }}</TabsTrigger>
+        <TabsTrigger value="fonts">{{ t('FONTS') }}</TabsTrigger>
       </TabsList>
 
       <TabsContent value="handouts" class="manager-tab-content">
-        <section class="manager-actions">
-          <div class="create-header">
-            <Button @click="isCreateDialogOpen = true">
-              <Plus data-icon="inline-start" />
-              New handout
-            </Button>
-          </div>
-        </section>
-
         <VueFinder
           id="handout-finder"
           class="manager-finder large-grid-finder"
@@ -109,8 +100,8 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
         >
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
-              <span>{{ count }} items · {{ selectedHandoutStatus() }}</span>
-              <ButtonGroup class="finder-status-actions" aria-label="Selected handout actions">
+              <span>{{ t('FINDER_ITEMS_COUNT', { count }) }} · {{ selectedHandoutStatus() }}</span>
+              <ButtonGroup class="finder-status-actions" :aria-label="t('SELECTED_HANDOUT_ACTIONS_ARIA')">
                 <Button
                   size="sm"
                   variant="outline"
@@ -118,7 +109,7 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
                   @click="selectedHandoutProject() && cloneHandoutProject(selectedHandoutProject()!)"
                 >
                   <Plus data-icon="inline-start" />
-                  Clone
+                  {{ t('CLONE') }}
                 </Button>
                 <Button
                   size="sm"
@@ -126,7 +117,7 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
                   @click="exportSelectedHandout"
                 >
                   <Save data-icon="inline-start" />
-                  Export PNG
+                  {{ t('EXPORT_PNG') }}
                 </Button>
               </ButtonGroup>
             </div>
@@ -151,7 +142,7 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
         >
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
-              <span>{{ count }} items · {{ tokenStore.projects.length }} token projects</span>
+              <span>{{ t('FINDER_ITEMS_COUNT', { count }) }} · {{ t('TOKEN_PROJECTS_COUNT', { count: tokenStore.projects.length }) }}</span>
             </div>
           </template>
         </VueFinder>
@@ -176,8 +167,8 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
         >
           <template #status-bar="{ count }">
             <div class="finder-status-bar">
-              <span>{{ count }} items · {{ selectedImageStatus('asset') }}</span>
-              <ButtonGroup aria-label="Selected asset actions">
+              <span>{{ t('FINDER_ITEMS_COUNT', { count }) }} · {{ selectedImageStatus('asset') }}</span>
+              <ButtonGroup :aria-label="t('SELECTED_ASSET_ACTIONS_ARIA')">
                 <Button
                   size="sm"
                   variant="outline"
@@ -185,11 +176,11 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
                   @click="createHandoutFromFinderImage('asset')"
                 >
                   <Plus data-icon="inline-start" />
-                  Create handout
+                  {{ t('CREATE_HANDOUT') }}
                 </Button>
                 <Button size="sm" :disabled="!selectedTokenAssets().length" @click="createTokenFromSelectedAssets">
                   <Plus data-icon="inline-start" />
-                  Create token
+                  {{ t('CREATE_TOKEN') }}
                 </Button>
               </ButtonGroup>
             </div>
@@ -213,30 +204,20 @@ const selectedTokenAssets = ctx.selectedTokenAssets as () => LibraryRecord[]
           @dragover.capture="handleDirectFinderDragover('font', $event as DragEvent)"
           @drop.capture="handleDirectFinderDrop('font', $event as DragEvent)"
         />
-        <Input v-model="fontSearch" placeholder="Search fonts or tags" />
+        <Input v-model="fontSearch" :placeholder="t('SEARCH_FONTS_OR_TAGS')" />
         <div class="font-grid">
           <div v-for="font in filteredFonts" :key="font.id" class="font-card">
             <span class="font-card-preview">
               <img v-if="font.thumbnailPath" :src="fontPreviewSource(font)" alt="" draggable="false" />
-              <span v-else :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
+              <span v-else :style="{ fontFamily: fontFamily(font) }">{{ t('FONT_SAMPLE') }}</span>
             </span>
             <strong>{{ font.name }}</strong>
-            <span>{{ font.tags.join(', ') || 'No tags' }}</span>
+            <span>{{ font.tags.join(', ') || t('NO_TAGS') }}</span>
           </div>
         </div>
       </TabsContent>
     </Tabs>
 
-    <CreateHandoutDialog
-      v-model:open="isCreateDialogOpen"
-      v-model:title="newProjectTitle"
-      v-model:mode="createMode"
-      v-model:width="blankWidth"
-      v-model:height="blankHeight"
-      @blank="createProject"
-      @background-drop="handleCreateBackgroundDrop"
-      @background-input="handleCreateBackgroundInput"
-    />
     <ConfigurationDialog v-model:open="isSettingsDialogOpen" />
   </div>
 </template>

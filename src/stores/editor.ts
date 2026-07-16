@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
+import { translate } from '@/i18n'
 
 import {
   addImageLayer,
@@ -59,7 +60,7 @@ export const useEditorStore = defineStore('editor', () => {
   const selectedLayerId = ref<string>()
   const selectedLayerIds = ref<string[]>([])
   const library = ref<LibraryIndex>(emptyLibrary())
-  const status = ref('Ready')
+  const status = ref(translate('READY'))
   const continuousEditKey = ref<string>()
   const lastTextFontId = ref<string>()
   const toolSettings = ref({
@@ -635,6 +636,7 @@ export const useEditorStore = defineStore('editor', () => {
     importAssetFile: libraryStore.importAssetFile,
     importBackgroundFile: libraryStore.importBackgroundFile,
     importFontFile: libraryStore.importFontFile,
+    importFiles: libraryStore.importFiles,
     createResourceFolder: libraryStore.createResourceFolder,
     renameResource: libraryStore.renameResource,
     renameResourceFolder: libraryStore.renameResourceFolder,
@@ -675,6 +677,7 @@ export const useEditorStore = defineStore('editor', () => {
     addProjectFolder: projectStore.addProjectFolder,
     renameProjectFolderPath: projectStore.renameProjectFolderPath,
     renameProject: projectStore.renameProject,
+    renameCurrentProject: projectStore.renameCurrentProject,
     moveProjectToFolder: projectStore.moveProjectToFolder,
     deleteProjectEntriesFromLibrary: projectStore.deleteProjectEntriesFromLibrary,
     saveCurrentProject: projectStore.saveCurrentProject,

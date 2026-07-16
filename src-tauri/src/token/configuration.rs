@@ -25,9 +25,13 @@ config_struct!(AppConfiguration {
     rings: RingsConfig,
     history: HistoryConfig,
     notifications: NotificationsConfig,
-    diagnostics: DiagnosticsConfig
+    diagnostics: DiagnosticsConfig,
+    foreground_segmentation: ForegroundSegmentationConfig
 });
-config_struct!(ApplicationConfig { title: String });
+config_struct!(ApplicationConfig {
+    title: String,
+    locale: String
+});
 config_struct!(WindowConfig {
     width: u32,
     height: u32,
@@ -181,6 +185,67 @@ config_struct!(NotificationsConfig {
 config_struct!(DiagnosticsConfig {
     log_directory: String
 });
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    default,
+    deny_unknown_fields,
+    rename_all(serialize = "camelCase", deserialize = "snake_case")
+)]
+pub struct ForegroundSegmentationConfig {
+    pub enabled: bool,
+    pub model: String,
+    pub device: String,
+    pub worker_threads: usize,
+    pub intra_threads: usize,
+    pub inter_threads: usize,
+    pub download_missing_models: bool,
+    pub download_timeout_seconds: u64,
+    pub model_cache_directory: String,
+    pub output_suffix: String,
+    pub max_source_dimension: u32,
+    pub max_source_pixels: u64,
+    #[serde(skip_serializing)]
+    pub model_id: Option<String>,
+    #[serde(skip_serializing)]
+    pub model_resource: Option<String>,
+    #[serde(skip_serializing)]
+    pub backend: Option<String>,
+    #[serde(skip_serializing)]
+    pub device_id: Option<u32>,
+}
+
+impl Default for ForegroundSegmentationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model: "birefnet-general".into(),
+            device: "auto".into(),
+            worker_threads: 1,
+            intra_threads: 0,
+            inter_threads: 1,
+            download_missing_models: true,
+            download_timeout_seconds: 600,
+            model_cache_directory: "./models/foreground-segmentation".into(),
+            output_suffix: "-foreground".into(),
+            max_source_dimension: 16_384,
+            max_source_pixels: 67_108_864,
+            model_id: None,
+            model_resource: None,
+            backend: None,
+            device_id: None,
+        }
+    }
+}
+
+impl ForegroundSegmentationConfig {
+    pub fn resolved_model(&self) -> &str {
+        self.model_id.as_deref().unwrap_or(&self.model)
+    }
+
+    pub fn resolved_device(&self) -> &str {
+        self.backend.as_deref().unwrap_or(&self.device)
+    }
+}
 config_struct!(HandoutExportConfig {
     default_scale: f32,
     min_scale: f32,
@@ -253,8 +318,10 @@ impl AppConfiguration {
         if self.schema_version != 1 {
             return Err("仅支持 schema_version = 1".into());
         }
-        if self.application.title.trim().is_empty() {
-            return Err("application.title 不能为空".into());
+        if self.application.title.trim().is_empty()
+            || !matches!(self.application.locale.as_str(), "auto" | "zh-CN" | "en-US")
+        {
+            return Err("application.title 或 application.locale 无效".into());
         }
         if self.window.width == 0
             || self.window.height == 0
@@ -443,6 +510,28 @@ impl AppConfiguration {
         {
             return Err("文件、历史、通知或命名配置无效".into());
         }
+        let segmentation = &self.foreground_segmentation;
+        if !matches!(
+            segmentation.resolved_model(),
+            "birefnet-general" | "u2net" | "ben2" | "macos-vision"
+        ) || !matches!(
+            segmentation.resolved_device(),
+            "auto" | "cpu" | "coreml" | "directml" | "cuda"
+        ) || segmentation.worker_threads == 0
+            || segmentation.inter_threads == 0
+            || segmentation.download_timeout_seconds == 0
+            || segmentation.model_cache_directory.trim().is_empty()
+            || Path::new(&segmentation.model_cache_directory).is_absolute()
+            || Path::new(&segmentation.model_cache_directory)
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+            || segmentation.output_suffix.trim().is_empty()
+            || segmentation.output_suffix.contains(['/', '\\'])
+            || segmentation.max_source_dimension == 0
+            || segmentation.max_source_pixels == 0
+        {
+            return Err("前景分割配置无效".into());
+        }
         Ok(())
     }
 }
@@ -555,7 +644,13 @@ pub fn parse_handout_configuration(source: &str) -> Result<AppConfiguration, Str
             .ok_or_else(|| format!("配置缺少 [token.{name}]"))
     };
     let mut value = toml::map::Map::new();
-    for name in ["schema_version", "application", "window", "diagnostics"] {
+    for name in [
+        "schema_version",
+        "application",
+        "window",
+        "diagnostics",
+        "foreground_segmentation",
+    ] {
         value.insert(
             name.into(),
             root.get(name)
@@ -734,6 +829,7 @@ mod tests {
     fn bundled_configuration_parses_and_matches_current_defaults() {
         let c = parse_handout_configuration(BASE).unwrap();
         assert_eq!(c.schema_version, 1);
+        assert_eq!(c.application.locale, "auto");
         assert_eq!(c.token.defaults.design_size, 512);
         assert_eq!(c.token.defaults.ring_inner_radius, 225);
         assert_eq!(c.token.defaults.ring_outer_radius, 250);
@@ -753,6 +849,43 @@ mod tests {
         assert_eq!(c.export.limits.jxl_effort_max, 9);
         assert!(c.files.export_formats.contains(&"jxl".to_string()));
         assert_eq!(c.preview.minimum_world_size, 512);
+        assert_eq!(c.foreground_segmentation.model, "birefnet-general");
+        assert_eq!(c.foreground_segmentation.device, "auto");
+        assert_eq!(c.foreground_segmentation.worker_threads, 1);
+        assert_eq!(c.foreground_segmentation.inter_threads, 1);
+    }
+
+    #[test]
+    fn validates_foreground_segmentation_configuration() {
+        assert!(merge_and_parse(BASE, "[foreground_segmentation]\ndevice='metal'").is_err());
+        assert!(merge_and_parse(BASE, "[foreground_segmentation]\nworker_threads=0").is_err());
+        assert!(merge_and_parse(BASE, "[foreground_segmentation]\nmax_source_pixels=0").is_err());
+        assert!(
+            merge_and_parse(
+                BASE,
+                "[foreground_segmentation]\nmodel_cache_directory='../models'"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn accepts_legacy_foreground_segmentation_fields() {
+        let config = merge_and_parse(
+            BASE,
+            "[foreground_segmentation]\nmodel_id='birefnet-general'\nbackend='cpu'\ndevice_id=0\nmodel_resource='resources/models/legacy.onnx'",
+        )
+        .unwrap();
+        assert_eq!(
+            config.foreground_segmentation.resolved_model(),
+            "birefnet-general"
+        );
+        assert_eq!(config.foreground_segmentation.resolved_device(), "cpu");
+    }
+
+    #[test]
+    fn rejects_unsupported_application_locale() {
+        assert!(merge_and_parse(BASE, "[application]\nlocale='fr-FR'").is_err());
     }
 
     #[test]

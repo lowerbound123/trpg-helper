@@ -18,7 +18,7 @@ defineProps<{
         <button
           type="button"
           data-parameter-label="true"
-          :aria-label="`解释 ${label}`"
+          :aria-label="$t('EXPLAIN_PARAMETER', { label })"
           class="cursor-help border-b border-dashed border-muted-foreground/60 text-left text-xs font-medium text-muted-foreground outline-none focus-visible:border-foreground focus-visible:text-foreground"
         >
           {{ label }}

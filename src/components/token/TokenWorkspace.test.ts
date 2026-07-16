@@ -3,6 +3,7 @@
 import { createPinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import { translate } from '@/i18n'
 
 vi.mock('./TokenPreview.vue', () => ({ default: { template: '<div />' } }))
 
@@ -26,9 +27,9 @@ describe('TokenWorkspace', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('文件列表')
-    expect(wrapper.text()).toContain('实时预览')
-    expect(wrapper.text()).toContain('控制面板')
-    expect(wrapper.text()).toContain('拖动预览区域可移动 Token，滚轮可缩放')
+    expect(wrapper.text()).toContain(translate('TOKEN_PROJECT'))
+    expect(wrapper.text()).toContain(translate('TOKEN_PREVIEW'))
+    expect(wrapper.text()).toContain(translate('TOKEN_CONTROL_PANEL'))
+    expect(wrapper.text()).toContain(translate('TOKEN_PREVIEW_DRAG_HELP'))
   })
 })

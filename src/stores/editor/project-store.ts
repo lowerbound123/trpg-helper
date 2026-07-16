@@ -20,6 +20,7 @@ import {
 } from '@/lib/backend'
 import { createDefaultHandout, type HandoutDocument } from '@/lib/handout'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { translate } from '@/i18n'
 
 export function createProjectStore(deps: {
   document: ComputedRef<HandoutDocument>
@@ -45,34 +46,45 @@ export function createProjectStore(deps: {
 
   async function addProjectFolder(folder: string) {
     projectFolders.value = await createProjectFolder(folder)
-    deps.status.value = `Created handout folder ${folder.trim()}`
+    deps.status.value = translate('HANDOUT_FOLDER_CREATED', { name: folder.trim() })
   }
 
   async function renameProjectFolderPath(oldFolder: string, newFolder: string) {
     projectFolders.value = await renameProjectFolder(oldFolder, newFolder)
     await refreshProjects()
-    deps.status.value = `Renamed folder ${oldFolder} to ${newFolder.trim()}`
+    deps.status.value = translate('LIBRARY_RENAMED_FOLDER', { oldName: oldFolder, newName: newFolder.trim() })
   }
 
   async function renameProject(projectId: string, title: string) {
     const payload = await renameManagedProject(projectId, title)
-    if (currentProjectId.value === projectId) deps.replaceDocument(payload.document)
+    if (currentProjectId.value === projectId) deps.document.value.title = payload.document.title
     await refreshProjects()
-    deps.status.value = `Renamed project to ${title.trim()}`
+    deps.status.value = translate('HANDOUT_PROJECT_RENAMED', { name: title.trim() })
+  }
+
+  async function renameCurrentProject(title: string) {
+    const nextTitle = title.trim()
+    if (!nextTitle || nextTitle === deps.document.value.title) return
+    if (currentProjectId.value) {
+      await renameProject(currentProjectId.value, nextTitle)
+      return
+    }
+    deps.document.value.title = nextTitle
+    await saveCurrentProject()
   }
 
   async function moveProjectToFolder(projectId: string, folder: string) {
     const payload = await moveManagedProject(projectId, folder)
     if (currentProjectId.value === projectId) deps.replaceDocument(payload.document)
     await refreshProjects()
-    deps.status.value = `Moved project to ${folder.trim() || 'root'}`
+    deps.status.value = translate('HANDOUT_PROJECT_MOVED', { folder: folder.trim() || translate('ROOT_FOLDER') })
   }
 
   async function deleteProjectEntriesFromLibrary(entries: { ids: string[]; folders: string[] }) {
     projectFolders.value = await deleteProjectEntries(entries)
     if (currentProjectId.value && entries.ids.includes(currentProjectId.value)) await closeEditor({ save: false })
     await refreshProjects()
-    deps.status.value = `Deleted handout item${entries.ids.length + entries.folders.length === 1 ? '' : 's'}`
+    deps.status.value = translate('HANDOUT_PROJECT_DELETED', { count: entries.ids.length + entries.folders.length })
   }
 
   async function saveCurrentProject() {
@@ -80,15 +92,15 @@ export function createProjectStore(deps: {
     if (currentProjectId.value) {
       await saveManagedProject(currentProjectId.value, deps.document.value)
       await refreshProjects()
-      deps.status.value = `Saved project ${deps.document.value.title}`
+      deps.status.value = translate('HANDOUT_PROJECT_SAVED', { name: deps.document.value.title })
       return true
     }
     if (!projectDir.value.trim()) {
-      deps.status.value = 'Set a project folder path before saving.'
+      deps.status.value = translate('HANDOUT_PROJECT_FOLDER_REQUIRED')
       return false
     }
     await saveProject(projectDir.value.trim(), deps.document.value)
-    deps.status.value = `Saved project to ${projectDir.value.trim()}`
+    deps.status.value = translate('HANDOUT_PROJECT_SAVED_TO', { path: projectDir.value.trim() })
     return true
   }
 
@@ -115,7 +127,7 @@ export function createProjectStore(deps: {
     deps.replaceDocument(payload.document, path.trim())
     currentProjectId.value = undefined
     workspace.openHandoutEditor()
-    deps.status.value = `Opened project from ${path.trim()}`
+    deps.status.value = translate('HANDOUT_PROJECT_OPENED_FROM', { path: path.trim() })
   }
 
   async function createManagedHandout(
@@ -140,7 +152,7 @@ export function createProjectStore(deps: {
     currentProjectId.value = String(payload.metadata.id ?? '')
     workspace.openHandoutEditor()
     await refreshProjects()
-    deps.status.value = `Created project ${payload.document.title}`
+    deps.status.value = translate('HANDOUT_PROJECT_CREATED', { name: payload.document.title })
   }
 
   function nextProjectCloneTitle(title: string, folder: string) {
@@ -172,7 +184,7 @@ export function createProjectStore(deps: {
     const targetProjectId = String(cloned.metadata.id ?? '')
     if (targetProjectId) await copyProjectMasks(projectId, targetProjectId)
     await refreshProjects()
-    deps.status.value = `Cloned project ${title}`
+    deps.status.value = translate('HANDOUT_PROJECT_CLONED', { name: title })
   }
 
   async function openManagedHandout(projectId: string) {
@@ -180,7 +192,7 @@ export function createProjectStore(deps: {
     deps.replaceDocument(payload.document)
     currentProjectId.value = projectId
     workspace.openHandoutEditor()
-    deps.status.value = `Opened project ${payload.document.title}`
+    deps.status.value = translate('HANDOUT_PROJECT_OPENED', { name: payload.document.title })
   }
 
   async function closeEditor(options: { save?: boolean } = {}) {
@@ -203,6 +215,7 @@ export function createProjectStore(deps: {
     addProjectFolder,
     renameProjectFolderPath,
     renameProject,
+    renameCurrentProject,
     moveProjectToFolder,
     deleteProjectEntriesFromLibrary,
     saveCurrentProject,

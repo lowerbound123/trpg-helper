@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import type { PreviewImageSource } from '../preview/imageLoader'
+import { loadPreviewImage } from '../preview/imageLoader'
 import type { TokenFeatureConfiguration } from '../configuration'
 import type { CustomRingConfig, RingDescriptor } from '../types'
 import { BUILTIN_RING_SVGS } from './builtinAssets'
@@ -167,7 +168,10 @@ export class AppFrontendRingProvider implements FrontendRingProvider {
   async loadCustomAsset(id: string): Promise<PreviewImageSource> {
     const existing = this.customAssets.get(id)
     if (existing) return existing
-    const loading = this.invokeBinary('read_custom_ring_asset', { id }).then(this.decodeBinary)
+    const path = this.descriptor(id)?.assetPath
+    const loading = path
+      ? loadPreviewImage(path)
+      : this.invokeBinary('read_custom_ring_asset', { id }).then(this.decodeBinary)
     this.customAssets.set(id, loading)
     try {
       return await loading

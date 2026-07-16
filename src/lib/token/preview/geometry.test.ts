@@ -7,6 +7,7 @@ import {
   calculateCustomRingLayout,
   calculateGuideSegment,
   calculateHalfPlanePolygon,
+  calculatePreviewCameraTransform,
   offsetFromDragDelta,
   parseRgbaHex,
 } from './geometry'
@@ -160,5 +161,18 @@ describe('preview geometry', () => {
   it('parses RGB and RGBA colors for Pixi', () => {
     expect(parseRgbaHex('#FF8040')).toEqual({ color: 0xff8040, alpha: 1 })
     expect(parseRgbaHex('#FF804080')).toEqual({ color: 0xff8040, alpha: 128 / 255 })
+  })
+
+  it('applies an independent viewport zoom around the world centre', () => {
+    expect(calculatePreviewCameraTransform(800, 600, 512, 2)).toEqual({
+      scale: 2,
+      x: -112,
+      y: -212,
+    })
+    expect(calculatePreviewCameraTransform(800, 600, 512, 1)).toEqual({
+      scale: 1,
+      x: 144,
+      y: 44,
+    })
   })
 })

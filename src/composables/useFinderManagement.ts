@@ -8,8 +8,11 @@ import {
   renameTokenProject,
   renameTokenProjectFolder,
   type LibraryRecord,
+  type BatchImportResult,
   type ProjectSummary,
 } from '@/lib/backend'
+import { appConfiguration } from '@/lib/configuration'
+import { translate } from '@/i18n'
 import type { TokenProjectSummary } from '@/lib/token'
 import { useEditorStore } from '@/stores/editor'
 import { useTokenStore } from '@/stores/token'
@@ -49,8 +52,9 @@ type UseFinderOptions = {
   createHandoutFromImageRecord: (kind: 'background' | 'asset', record: LibraryRecord) => void | Promise<void>
   cloneHandoutProject: (project: ProjectSummary) => void | Promise<void>
   exportHandoutProject: (project: ProjectSummary) => void | Promise<void>
-  uploadFiles: (kind: 'background' | 'asset' | 'font', files: File[], folder: string) => unknown | Promise<unknown>
+  uploadFiles: (kind: 'background' | 'asset' | 'font', files: File[], folder: string) => Promise<BatchImportResult>
   previewUrl: (record: LibraryRecord) => string
+  segmentAssetsForeground: (records: LibraryRecord[]) => void | Promise<void>
   selectedFolders: {
     handout: Ref<string>
     token: Ref<string>
@@ -58,6 +62,13 @@ type UseFinderOptions = {
     asset: Ref<string>
     font: Ref<string>
   }
+}
+
+export function foregroundSegmentationTargets(target: DirEntry | null, selectedItems: DirEntry[]) {
+  if (!target || !isImageFinderEntry(target)) return []
+  const targetIsSelected = selectedItems.some((entry) => entry.path === target.path)
+  if (!targetIsSelected) return [target]
+  return selectedItems.filter(isImageFinderEntry)
 }
 
 const finderStorages: Record<FinderKind, string> = {
@@ -74,9 +85,8 @@ export function folderMatches(recordFolder: string | undefined, selectedFolder: 
 
 export function filterRecords(records: LibraryRecord[], queryText: string, selectedFolder: string) {
   const query = queryText.trim().toLowerCase()
-  const scoped = records.filter((record) => folderMatches(record.folder, selectedFolder))
-  if (!query) return scoped
-  return scoped.filter((record) =>
+  if (!query) return records.filter((record) => folderMatches(record.folder, selectedFolder))
+  return records.filter((record) =>
     [record.name, ...record.tags].some((part) => part.toLowerCase().includes(query)),
   )
 }
@@ -414,7 +424,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
 
   function createFinderDriver(kind: FinderKind): Driver {
     const unsupported = async () => {
-      throw new Error('This file operation is not supported in the handout library yet.')
+      throw new Error(translate('UNSUPPORTED_FILE_OPERATION'))
     }
 
     return {
@@ -425,13 +435,25 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
             .map((id) => uppy.getFile(id))
             .filter(Boolean)
           const folder = normalizeFinderFolder(context.getTargetPath())
-          await options.uploadFiles(kind, files.map((file) => file.data as File), folder)
-          for (const file of files) {
-            uppy.emit('upload-success', file, { status: 200, body: {} })
+          const result = await options.uploadFiles(kind, files.map((file) => file.data as File), folder)
+          const successful: string[] = []
+          const failed: string[] = []
+          for (const item of result.results) {
+            const index = Number(item.clientId)
+            const file = files[index]
+            const fileId = fileIDs[index]
+            if (!file || !fileId) continue
+            if (item.record) {
+              successful.push(fileId)
+              uppy.emit('upload-success', file, { status: 200, body: {} })
+            } else {
+              failed.push(fileId)
+              uppy.emit('upload-error', file, new Error(item.error || translate('LIBRARY_IMPORT_FILE_FAILED', { name: item.fileName })))
+            }
           }
           return {
-            successful: fileIDs,
-            failed: [],
+            successful,
+            failed,
           }
         })
       },
@@ -510,7 +532,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     let contextTarget: DirEntry | null = null
     const createItem: Item = {
       id: `create_${kind}_handout`,
-      title: () => 'Create handout',
+      title: () => translate('CREATE_HANDOUT'),
       order: 45,
       show(_app, context) {
         contextTarget = context.target
@@ -522,7 +544,31 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
         if (record) void options.createHandoutFromImageRecord(kind, record)
       },
     }
-    return [...defaultContextMenuItems, createItem]
+    if (kind !== 'asset' || !appConfiguration.foregroundSegmentation.enabled) {
+      return [...defaultContextMenuItems, createItem]
+    }
+    return [...defaultContextMenuItems, createItem, createForegroundSegmentationContextMenuItem(46)]
+  }
+
+  function createForegroundSegmentationContextMenuItem(order: number): Item {
+    let contextTarget: DirEntry | null = null
+    return {
+      id: 'segment_asset_foreground',
+      title: () => translate('FOREGROUND_SEGMENTATION'),
+      order,
+      show(_app, context) {
+        contextTarget = context.target
+        return foregroundSegmentationTargets(context.target, context.items).some((entry) =>
+          Boolean(imageRecordFromFinderEntry('asset', entry)),
+        )
+      },
+      action(_app, selectedItems) {
+        const records = foregroundSegmentationTargets(contextTarget, selectedItems)
+          .map((entry) => imageRecordFromFinderEntry('asset', entry))
+          .filter((record): record is LibraryRecord => Boolean(record))
+        if (records.length) void options.segmentAssetsForeground(records)
+      },
+    }
   }
 
   const imageHandoutContextMenuItems = computed<Record<'background' | 'asset', Item[]>>(() => ({
@@ -534,7 +580,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     let contextTarget: DirEntry | null = null
     const addItem: Item = {
       id: 'add_assets_to_token_project',
-      title: () => '添加到当前 Token 项目',
+      title: () => translate('ADD_TO_CURRENT_TOKEN_PROJECT'),
       order: 44,
       show(_app, context) {
         contextTarget = context.target
@@ -547,10 +593,17 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
           : [contextTarget]
         const assets = collectImageAssetsForFinderEntries(targets, editor.library.assets)
         const added = tokenStore.addAssets(assets)
-        tokenStore.status = `已添加 ${added} 个 Asset，跳过 ${Math.max(0, assets.length - added)} 个重复项`
+        tokenStore.status = translate('TOKEN_ASSETS_ADDED', {
+          added,
+          skipped: Math.max(0, assets.length - added),
+        })
       },
     }
-    return [...defaultContextMenuItems, addItem]
+    const items = [...defaultContextMenuItems, addItem]
+    if (appConfiguration.foregroundSegmentation.enabled) {
+      items.push(createForegroundSegmentationContextMenuItem(46))
+    }
+    return items
   }
 
   const tokenAssetContextMenuItems = computed(() => createTokenAssetContextMenu())
@@ -559,7 +612,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     let contextTarget: DirEntry | null = null
     const exportItem: Item = {
       id: 'export_handout_png',
-      title: () => 'Export PNG',
+      title: () => translate('EXPORT_PNG'),
       order: 46,
       show(_app, context) {
         contextTarget = context.target
@@ -572,7 +625,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     }
     const cloneItem: Item = {
       id: 'clone_handout',
-      title: () => 'Clone handout',
+      title: () => translate('CLONE_HANDOUT'),
       order: 45,
       show(_app, context) {
         contextTarget = context.target
@@ -592,7 +645,7 @@ export function useFinderManagement(editor: ReturnType<typeof useEditorStore>, o
     let contextTarget: DirEntry | null = null
     const cloneItem: Item = {
       id: 'clone_token_project',
-      title: () => 'Clone token project',
+      title: () => translate('CLONE_TOKEN_PROJECT'),
       order: 45,
       show(_app, context) {
         contextTarget = context.target

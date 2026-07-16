@@ -14,6 +14,11 @@ dist
 dist-ssr
 data
 src-tauri/target
+src-tauri/resources/models/*.onnx
+src-tauri/resources/onnxruntime/
+!src-tauri/resources/onnxruntime/
+src-tauri/resources/onnxruntime/*
+!src-tauri/resources/onnxruntime/.gitkeep
 src-tauri/~
 .superpowers
 *.local

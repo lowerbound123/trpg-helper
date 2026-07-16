@@ -127,8 +127,10 @@ fn validate_params(params: &TokenParams) -> Result<(), String> {
     {
         return Err("圆环拉伸必须大于 0 且不超过 4".into());
     }
-    if !(10.0..=500.0).contains(&params.ring_image_scale_x)
-        || !(10.0..=500.0).contains(&params.ring_image_scale_y)
+    if !(config.rings.custom_scale_min..=config.rings.custom_scale_max)
+        .contains(&params.ring_image_scale_x)
+        || !(config.rings.custom_scale_min..=config.rings.custom_scale_max)
+            .contains(&params.ring_image_scale_y)
         || params.ring_image_offset_x.abs() > params.size as f32
         || params.ring_image_offset_y.abs() > params.size as f32
     {
@@ -613,7 +615,8 @@ where
                     image_offset_x: render_params.ring_image_offset_x,
                     image_offset_y: render_params.ring_image_offset_y,
                 },
-                render_params.size, alpha,
+                render_params.size,
+                alpha,
             )?;
         } else if render_params.ring_style == "solid"
             && render_params.ring_stretch_x == 1.0
@@ -765,7 +768,30 @@ fn process_token(input: &PathBuf, output: &PathBuf, params: &TokenParams) -> Res
 
 fn randomize_export_items(items: &mut [BatchGenerateItem]) {
     let config = &active_configuration().export.random_colors;
-    apply_random_colors(items, config, &mut rng(), |_| None);
+    apply_random_colors(items, config, &mut rng(), representative_ring_color);
+}
+
+fn representative_ring_color(path: &str) -> Option<[u8; 3]> {
+    let image = image::open(path).ok()?.to_rgba8();
+    let mut alpha_sum = 0u64;
+    let mut channels = [0u64; 3];
+    for pixel in image.pixels() {
+        let alpha = u64::from(pixel.0[3]);
+        if alpha == 0 {
+            continue;
+        }
+        alpha_sum += alpha;
+        channels[0] += u64::from(pixel.0[0]) * alpha;
+        channels[1] += u64::from(pixel.0[1]) * alpha;
+        channels[2] += u64::from(pixel.0[2]) * alpha;
+    }
+    (alpha_sum > 0).then(|| {
+        [
+            (channels[0] / alpha_sum) as u8,
+            (channels[1] / alpha_sum) as u8,
+            (channels[2] / alpha_sum) as u8,
+        ]
+    })
 }
 
 #[tauri::command]

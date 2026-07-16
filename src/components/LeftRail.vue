@@ -10,11 +10,13 @@ import { ButtonGroup } from '@/components/ui/button-group'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import EditableProjectTitle from '@/components/editor/EditableProjectTitle.vue'
 import { useEditorStore } from '@/stores/editor'
 import type { LibraryRecord } from '@/lib/backend'
 import type { HandoutLayer, LayerGroup } from '@/lib/handout'
 import { shapeItems } from '@/lib/shape-items'
 import { shapePreviewPoints } from '@/lib/shape-rendering'
+import { translate } from '@/i18n'
 
 const editor = useEditorStore()
 
@@ -32,6 +34,7 @@ const finderRevision = ctx.finderRevision as Record<string, number>
 const finderUploadConfig = ctx.finderUploadConfig as Record<string, any>
 const finderDrivers = ctx.finderDrivers as Record<string, any>
 const finderFeaturesForKind = ctx.finderFeaturesForKind as (kind: string) => any
+const imageHandoutContextMenuItems = ctx.imageHandoutContextMenuItems as Record<'background' | 'asset', any[]>
 const handleFinderFileDoubleClick = ctx.handleFinderFileDoubleClick as (kind: string, event: unknown) => void
 const handleFinderPathChange = ctx.handleFinderPathChange as (kind: string, path: string) => void
 const handleDirectFinderDrop = ctx.handleDirectFinderDrop as (kind: string, event: DragEvent) => void
@@ -78,46 +81,39 @@ const isFlatteningLayers = ctx.isFlatteningLayers as Ref<boolean>
 const flattenSelectedLayers = ctx.flattenSelectedLayers as () => void
 const deleteLayer = ctx.deleteLayer as (layerId?: string) => void
 const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
+
+async function renameProject(title: string) {
+  try {
+    await editor.renameCurrentProject(title)
+  } catch (error) {
+    editor.status = translate('RENAME_FAILED')
+  }
+}
 </script>
 
 <template>
   <aside class="left-rail">
-    <div class="brand-strip">
-      <Button variant="outline" size="sm" @click="editor.closeEditor()">
-        <ArrowLeft data-icon="inline-start" />
-        Projects
-      </Button>
-      <div>
-        <h1>{{ editor.document.title }}</h1>
-        <p>Single-page canvas editor</p>
+    <header class="panel-topbar panel-topbar-project">
+      <Button variant="ghost" size="icon" :title="$t('BACK_TO_PROJECTS')" @click="editor.closeEditor()"><ArrowLeft /></Button>
+      <div class="project-heading-copy">
+        <EditableProjectTitle :title="editor.document.title" @commit="renameProject" />
+        <span>{{ editor.status }}</span>
       </div>
-    </div>
+    </header>
 
     <Tabs v-model="activeRailTab" default-value="assets" class="rail-tabs">
       <TabsList class="grid grid-cols-4">
-        <TabsTrigger value="assets">Assets</TabsTrigger>
-        <TabsTrigger value="fonts">Fonts</TabsTrigger>
-        <TabsTrigger value="graph">Graph</TabsTrigger>
-        <TabsTrigger value="layers">Layers</TabsTrigger>
+        <TabsTrigger value="assets">{{ $t('ASSETS') }}</TabsTrigger>
+        <TabsTrigger value="fonts">{{ $t('FONTS') }}</TabsTrigger>
+        <TabsTrigger value="graph">{{ $t('GRAPH') }}</TabsTrigger>
+        <TabsTrigger value="layers">{{ $t('LAYERS') }}</TabsTrigger>
       </TabsList>
 
       <TabsContent value="assets" class="rail-tab-content">
-        <VueFinder
-          :key="`editor-asset-${finderRevision.asset}`"
-          id="editor-asset-finder"
-          class="rail-finder"
-          :driver="finderDrivers.asset"
-          :features="finderFeaturesForKind('asset')"
-          :config="finderUploadConfig"
-          selection-mode="single"
-          selection-filter-type="both"
-          @path-change="(path) => handleFinderPathChange('asset', path)"
-          @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
-          @dragover.capture="handleDirectFinderDragover('asset', $event as DragEvent)"
-          @drop.capture="handleDirectFinderDrop('asset', $event as DragEvent)"
-        />
-        <Input v-model="assetSearch" placeholder="Search assets or tags" />
-        <ScrollArea class="rail-scroll">
+        <Input v-model="assetSearch" :placeholder="$t('SEARCH_ASSETS_OR_TAGS')" />
+        <template v-if="assetSearch.trim()">
+          <p class="asset-search-summary">{{ $t('RAIL_SEARCH_RESULTS', { count: filteredAssets.length }) }}</p>
+          <ScrollArea class="rail-scroll">
           <button
             v-for="asset in filteredAssets"
             :key="asset.id"
@@ -131,10 +127,28 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
             <span class="asset-thumb"><img :src="previewUrl(asset)" alt="" draggable="false" /></span>
             <span class="asset-meta">
               <strong>{{ asset.name }}</strong>
-              <span>Click or drag to add · {{ asset.tags.join(', ') || 'No tags' }}</span>
+              <span>{{ $t('RAIL_ASSET_HELP', { tags: asset.tags.join(', ') || $t('NO_TAGS') }) }}</span>
             </span>
           </button>
-        </ScrollArea>
+          <p v-if="filteredAssets.length === 0" class="rail-empty-state">{{ $t('NO_MATCHING_ASSETS') }}</p>
+          </ScrollArea>
+        </template>
+        <VueFinder
+          v-else
+          :key="`editor-asset-${finderRevision.asset}`"
+          id="editor-asset-finder"
+          class="rail-finder rail-finder-fill"
+          :driver="finderDrivers.asset"
+          :features="finderFeaturesForKind('asset')"
+          :config="finderUploadConfig"
+          :context-menu-items="imageHandoutContextMenuItems.asset"
+          selection-mode="multiple"
+          selection-filter-type="both"
+          @path-change="(path) => handleFinderPathChange('asset', path)"
+          @file-dclick="(event) => handleFinderFileDoubleClick('asset', event)"
+          @dragover.capture="handleDirectFinderDragover('asset', $event as DragEvent)"
+          @drop.capture="handleDirectFinderDrop('asset', $event as DragEvent)"
+        />
       </TabsContent>
 
       <TabsContent value="fonts" class="rail-tab-content">
@@ -152,7 +166,7 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
           @dragover.capture="handleDirectFinderDragover('font', $event as DragEvent)"
           @drop.capture="handleDirectFinderDrop('font', $event as DragEvent)"
         />
-        <Input v-model="fontSearch" placeholder="Search fonts or tags" />
+        <Input v-model="fontSearch" :placeholder="$t('SEARCH_FONTS_OR_TAGS')" />
         <ScrollArea class="rail-scroll">
           <button
             v-for="font in filteredFonts"
@@ -166,11 +180,11 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
           >
             <span class="font-preview">
               <img v-if="font.thumbnailPath" :src="fontPreviewSource(font)" alt="" draggable="false" />
-              <span v-else :style="{ fontFamily: fontFamily(font) }">Ag 字</span>
+              <span v-else :style="{ fontFamily: fontFamily(font) }">{{ $t('FONT_SAMPLE') }}</span>
             </span>
             <span class="font-meta">
               <strong>{{ font.name }}</strong>
-              <span>Click to apply/create · drag for New Text · {{ font.tags.join(', ') || 'No tags' }}</span>
+              <span>{{ $t('RAIL_FONT_HELP', { tags: font.tags.join(', ') || $t('NO_TAGS') }) }}</span>
             </span>
           </button>
         </ScrollArea>
@@ -232,22 +246,22 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
               />
             </svg>
             <span>
-              <strong>{{ shape.label }}</strong>
-              <em>{{ shape.detail }}</em>
+              <strong>{{ $t(shape.labelKey) }}</strong>
+              <em>{{ $t(shape.detailKey) }}</em>
             </span>
           </button>
         </ScrollArea>
       </TabsContent>
 
       <TabsContent value="layers" class="rail-tab-content">
-        <ButtonGroup class="layer-actions" aria-label="Layer creation actions">
+        <ButtonGroup class="layer-actions" :aria-label="$t('LAYER_CREATION_ACTIONS_ARIA')">
           <Button size="sm" variant="outline" @click="editor.addText()">
             <Type data-icon="inline-start" />
-            Text
+            {{ $t('LAYER_TEXT') }}
           </Button>
           <Button size="sm" variant="outline" @click="editor.addPaint()">
             <Brush data-icon="inline-start" />
-            Paint
+            {{ $t('LAYER_PAINT') }}
           </Button>
           <Button
             v-if="maskFeatureEnabled"
@@ -255,7 +269,7 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
             size="sm"
             variant="outline"
             :disabled="!selectedMaskControlLayers.length"
-            :title="selectedMaskControlDeletes ? 'Delete masks from selected layers' : 'Add masks to selected layers without one'"
+            :title="selectedMaskControlDeletes ? $t('DELETE_MASKS_FROM_SELECTED_LAYERS') : $t('ADD_MASKS_TO_SELECTED_LAYERS')"
             @click="toggleSelectedLayerMask"
           >
             Mask {{ selectedMaskControlDeletes ? '-' : '+' }}
@@ -281,7 +295,7 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
               <ChevronDown v-else class="layer-icon" />
               <span>
                 <strong>{{ item.group.name }}</strong>
-                <em>{{ item.layers.length }} layers · drag group to reorder</em>
+                <em>{{ $t('GROUP_LAYER_COUNT', { count: item.layers.length }) }}</em>
               </span>
               <Button
                 class="layer-visibility"
@@ -297,7 +311,7 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
                 class="row-delete"
                 size="icon"
                 variant="ghost"
-                title="Ungroup"
+                :title="$t('UNGROUP')"
                 @click.stop="editor.ungroupGroup(item.group.id)"
               >
                 <Trash2 />
@@ -331,7 +345,7 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
                   class="mask-preview"
                   :class="maskPreviewClass(layer)"
                   draggable="true"
-                  title="Click to enter or exit mask edit, double click to enable or disable"
+                  :title="$t('MASK_EDIT_TOGGLE_HELP')"
                   @click="toggleMaskEditFromLayerRow(layer, $event)"
                   @dblclick="toggleMaskEnabledFromLayerRow(layer, $event)"
                   @dragstart.stop="startMaskDrag(layer, $event)"
@@ -363,8 +377,8 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
           <div class="layer-row background-layer-row" role="button" tabindex="-1">
             <Layers class="layer-icon" />
             <span>
-              <strong>Background</strong>
-              <em>locked · bottom layer</em>
+              <strong>{{ $t('BACKGROUND_LAYER') }}</strong>
+              <em>{{ $t('LOCKED_BOTTOM_LAYER') }}</em>
             </span>
             <Button
               class="layer-visibility"
@@ -378,22 +392,22 @@ const toggleBackgroundVisibility = ctx.toggleBackgroundVisibility as () => void
             </Button>
           </div>
         </ScrollArea>
-        <ButtonGroup class="layer-actions layer-actions-bottom" aria-label="Selected layer actions">
+        <ButtonGroup class="layer-actions layer-actions-bottom" :aria-label="$t('SELECTED_LAYER_ACTIONS_ARIA')">
           <Button size="sm" variant="outline" :disabled="!editor.selectedLayerIds.length" @click="editor.mergeSelectedLayersIntoGroup()">
-            Merge
+            {{ $t('LAYER_MERGE') }}
           </Button>
           <Button size="sm" variant="outline" :disabled="!editor.selectedLayerIds.length || isFlatteningLayers" @click="flattenSelectedLayers">
-            Flat
+            {{ $t('LAYER_FLATTEN') }}
           </Button>
-          <Button size="icon" variant="outline" title="Move up" @click="editor.moveSelectedLayer(1)">
+          <Button size="icon" variant="outline" :title="$t('MOVE_UP')" @click="editor.moveSelectedLayer(1)">
             <ArrowUp />
           </Button>
-          <Button size="icon" variant="outline" title="Move down" @click="editor.moveSelectedLayer(-1)">
+          <Button size="icon" variant="outline" :title="$t('MOVE_DOWN')" @click="editor.moveSelectedLayer(-1)">
             <ArrowDown />
           </Button>
           <Button size="sm" variant="destructive" :disabled="!editor.selectedLayer" @click="deleteLayer()">
             <Trash2 data-icon="inline-start" />
-            Delete
+            {{ $t('LAYER_DELETE') }}
           </Button>
         </ButtonGroup>
       </TabsContent>

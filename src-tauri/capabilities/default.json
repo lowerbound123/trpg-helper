@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "dialog:allow-confirm",
+    "dialog:allow-open",
     "fs:allow-app-write-recursive"
   ]
 }

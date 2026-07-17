@@ -1,4 +1,4 @@
-# Handout Generator — 项目文档
+# TRPG Helper — 项目文档
 
 > 本地桌面 Handout 与 Token 生成器，基于 Tauri 2 + Vue 3 + TypeScript + Konva.js + PixiJS 构建。
 
@@ -18,18 +18,21 @@
 - [10. 数据流与架构](#10-数据流与架构)
 - [11. 关键设计决策](#11-关键设计决策)
 - [12. Token Generator 领域](#12-token-generator-领域)
+- [13. 开源发布与自动化](#13-开源发布与自动化)
 
 ---
 
 ## 1. 项目概览
 
-**Handout Generator** 是一个本地桌面应用，用于创建、编辑、导出单页图形讲义/海报以及批量 TRPG Token。用户通过文件浏览器管理 Handout、Token、图像素材和字体；Handout 编辑器使用 Konva 图层系统，Token 编辑器使用 PixiJS 实时预览，最终支持 PNG/JPEG/WebP/JXL 导出。
+**TRPG Helper** 是一个本地桌面应用，用于创建、编辑、导出单页图形讲义/海报以及批量 TRPG Token。用户通过文件浏览器管理 Handout、Token、图像素材和字体；Handout 编辑器使用 Konva 图层系统，Token 编辑器使用 PixiJS 实时预览，最终支持 PNG/JPEG/WebP/JXL 导出。
 
 - **应用类型**：Tauri 2 桌面应用（Rust 后端 + Vue 3 前端），支持浏览器独立开发预览
-- **包管理器**：pnpm 11.8.0（强制声明于 `package.json` 的 `devEngines`）
+- **包管理器**：pnpm 11.8.0（固定声明于 `package.json` 的 `packageManager`）
 - **模块系统**：ESM（`"type": "module"`）
 - **工作区**：单包仓库，`pnpm-workspace.yaml` 仅配置本地存储与构建排除项
-- **标识符**：`com.tonychow.handoutgenerator`
+- **标识符**：`com.tonychow.trpghelper`
+- **内部版本**：`1.0.0`；首个公开发布标签为 `v1.0`
+- **开源许可**：GNU GPL v3.0 only
 
 ---
 
@@ -118,7 +121,7 @@ cd src-tauri && cargo build   # Rust 编译
 ## 4. 目录结构总览
 
 ```
-handout-generator/
+trpg-helper/
 ├── package.json                  # 项目元数据与脚本
 ├── pnpm-workspace.yaml           # 工作区与存储配置
 ├── vite.config.ts                # Vite 构建配置
@@ -241,7 +244,7 @@ handout-generator/
 | 段 | 键 | 默认值 | 说明 |
 |---|---|---|---|
 | 根 | `schema_version` | `1` | 配置 schema 版本，Rust 只接受已支持版本 |
-| `[application]` | `title` | `Handout Generator` | 应用和主窗口标题 |
+| `[application]` | `title` | `TRPG Helper` | 应用和主窗口标题 |
 | | `locale` | `auto` | UI 语言：`auto`、`zh-CN` 或 `en-US`；修改后重启生效 |
 | `[window]` | `width` / `height` | `1440` / `920` | 启动时应用的窗口尺寸 |
 | | `min_width` / `min_height` | `1180` / `760` | 最小窗口尺寸 |
@@ -282,7 +285,7 @@ handout-generator/
 
 `[export.defaults]` / `[export.limits]` / `[export.rendering]` / `[[export.webp_strength_profiles]]` 是 Handout 编码配置；`[token.*]` 是独立的完整 Token 配置命名空间，包含 `defaults`、`limits`、`export.*`、`preview`、`layout`、`files`、`rings`、`history` 和 `notifications`。前端由 `js-toml` 完整往返；Rust 在启动和 Settings 写入前严格校验 Token 与 Handout 导出配置。根目录 `configuration.toml` 是唯一配置文件，`src-tauri/configuration.toml` 已移除。
 
-桌面端启动时加载并激活 `~/Documents/trpg-helper/configuration.toml`；浏览器开发环境使用 localStorage（key: `handout-generator.configuration.toml`）覆盖内联默认配置。Settings 保存后需要重启的字段会在下次桌面启动生效。`application.locale = "auto"` 时，系统语言以 `zh` 开头则使用简体中文，其余语言回退英文；文件名、项目名和用户输入内容不参与翻译。
+桌面端启动时加载并激活 `~/Documents/trpg-helper/configuration.toml`；浏览器开发环境使用 localStorage（key: `trpg-helper.configuration.toml`）覆盖内联默认配置，并自动迁移旧 key。Settings 保存后需要重启的字段会在下次桌面启动生效。`application.locale = "auto"` 时，系统语言以 `zh` 开头则使用简体中文，其余语言回退英文；文件名、项目名和用户输入内容不参与翻译。
 
 ---
 
@@ -366,7 +369,7 @@ handout-generator/
 
 | 文件 | 行数 | 用途 |
 |---|---|---|
-| `BootSplash.vue` | 11 | 启动加载画面（三点跳动动画 + "Handout Generator" 标题） |
+| `BootSplash.vue` | 11 | 启动加载画面（三点跳动动画 + "TRPG Helper" 标题） |
 | `EditorTopBar.vue` | 61 | 编辑器顶栏：Save 按钮 + ButtonGroup 工具切换（Select/Brush/Eraser/Polygon）+ ButtonGroup Undo/Redo。Props: `activeTool`/`canUndo`/`canRedo`；Emits: `save`/`set-tool`/`undo`/`redo` |
 | `ManagerShell.vue` | 管理器视图：Handouts/Tokens/Assets/Fonts 四标签 VueFinder，包含 Handout/Token 创建、Clone、Export 与 Settings |
 | `LeftRail.vue` | 402 | 编辑器左栏：四标签页（Assets/Fonts/Graph/Layers）+ VueFinder + 搜索 + 可拖拽素材/字体列表 + SVG 形状预览（含 Polygon 入口）+ 图层/分组列表（拖拽排序、mask 预览、可见性切换、Merge/Flat/Move/Delete）。通过 `inject('left-rail-context')` 获取 57 个共享值 |
@@ -563,7 +566,7 @@ handout-generator/
 
 | 文件 | 用途 |
 |---|---|
-| `src/main.rs` | 6 行。二进制入口，release 模式隐藏 Windows 控制台，调用 `app_lib::run()` |
+| `src/main.rs` | 6 行。二进制入口，release 模式隐藏 Windows 控制台，调用 `trpg_helper_lib::run()` |
 | `src/lib.rs` | Tauri 入口：解析根配置、应用窗口标题/尺寸/最小尺寸/resizable，初始化 Token 与 Handout 导出配置，注册所有 IPC 命令 |
 | `src/foreground_segmentation.rs` | 前景分割外围 adapter：Asset 路径安全、批量 worker、Channel 进度、透明 PNG/缩略图和单次 Library index 事务 |
 | `src/foreground_segmentation/engine.rs` | 与 Tauri/Library 解耦的推理核心：方向修正、模型预处理、Session pool、soft mask 和 PNG 输出 |
@@ -954,7 +957,7 @@ Assets 初始化会确保逻辑目录 `rings`、`token-backgrounds` 和 `token-t
 
 ### 12.6 当前验证基线
 
-- `pnpm exec vitest run`：64 个测试文件、253 项测试。
+- `pnpm exec vitest run`：65 个测试文件、257 项测试。
 - `pnpm run typecheck`：通过。
 - `pnpm run build`：通过，无构建 warning。
 - VueFinder 包含预打包的 CodeMirror 模块，必须保持为单一 vendor chunk；禁止通过 `maxSize` 强制拆分，否则会形成循环初始化并导致打包应用启动白屏。`chunkSizeWarningLimit=850` 仅覆盖该已知 812 kB 第三方 chunk，其他更大 chunk 仍会报警。
@@ -962,13 +965,42 @@ Assets 初始化会确保逻辑目录 `rings`、`token-backgrounds` 和 `token-t
 
 ### 12.7 前景分割资源与运行时
 
-`scripts/prepare-segmentation-resources.mjs` 依据 `--target`、`TAURI_ENV_TARGET_TRIPLE` 或 host target 下载并校验 ONNX Runtime 1.22 动态库。当前打包目标为 `aarch64-apple-darwin`、`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`；未知目标在构建阶段失败。运行库缓存位于 `~/.cache/handout-generator/segmentation-resources` 并作为 Tauri resource 打包。
+`scripts/prepare-segmentation-resources.mjs` 依据 `--target`、`TAURI_ENV_TARGET_TRIPLE` 或 host target 下载并校验 ONNX Runtime 1.22 动态库。当前打包目标为 `aarch64-apple-darwin`、`x86_64-pc-windows-msvc`、`x86_64-unknown-linux-gnu`；未知目标在构建阶段失败。运行库缓存位于 `~/.cache/trpg-helper/segmentation-resources` 并作为 Tauri resource 打包。
 
 BiRefNet General、U²-Net 和 BEN2 不进入应用 bundle；首次选择模型时由 Rust 下载到 `~/Documents/trpg-helper/models/foreground-segmentation/<model>/<revision>/`，写入 `.partial` 后校验 SHA-256，再原子替换正式文件。完整校验成功后会写入与模型 ID、revision、SHA-256、文件大小和修改时间绑定的 `.verified.json` 侧车文件；后续启动在文件指纹未变化时直接复用校验结果，模型被替换或修改后自动重新执行完整校验。同一模型下载与首次校验由 single-flight 锁去重，失败不破坏已有缓存。`macos-vision` 使用 macOS 14+ 的 `VNGenerateForegroundInstanceMaskRequest`，不可用时自动回退 BiRefNet。
 
 桌面端命令只接收文件路径，不通过 IPC 传 Base64 或 Tensor。Rust 再次核对 Asset ID、index 路径和 canonical Assets 根目录，拒绝伪造路径及符号链接逃逸。Windows/Linux 的 ONNX 路径先注册随包分发的 ONNX Runtime，再检测 Provider，且不执行模型基准。macOS 不再使用 ORT CoreML Execution Provider：`pnpm compile:segmentation-coreml` 将用户提供的 `.mlmodel` / `.mlpackage` 通过 `coremlcompiler` 原子持久化为模型 revision 目录下唯一的 `native-coreml/model.mlmodelc` 和 manifest；运行时由 `objc2-core-ml` 原生 `MLModel` 加载，并将 compute units 设为 All。`device = "auto"` 或 `"coreml"` 找不到匹配 model/revision/SHA-256 的单一产物时会记录具体路径并回退 CPU，不会触发 ORT 分区编译。Windows 依次尝试 CUDA/DirectML，Linux 优先 CUDA，都不可用时回退 CPU。Session pool 按 model/device/线程配置分别缓存，数量由 `worker_threads` 控制。模型缓存检查、下载进度、SHA-256 校验、设备选择、Session 加载、推理、后处理和写入阶段会同步更新右上角状态，并逐条写入 `logs/segmentation.log`。输出保留原图 RGB，Alpha 为 `原 Alpha × soft mask`；批量任务逐项隔离失败，文件和缩略图完成后仅写一次 Library index，事务失败会清理半成品。
 
 真实模型 smoke test 默认使用 CPU，测试在系统临时目录生成输入与 `segmented-output.png`，并输出 Session、推理和后处理耗时。CoreML smoke 只会加载已经存在的单一 `mlmodelc`，不会在测试进程中转换 ONNX；缺失时明确回退 CPU。动态加载 ORT 的测试进程在 macOS 退出阶段可能触发上游 C++ 全局析构异常，因此 runner 以推理完成后写入的成功标记和可解码输出为准；常驻 Tauri 进程不会在每次分割后卸载 ORT。
+
+---
+
+## 13. 开源发布与自动化
+
+仓库以 GNU GPL v3.0 only 发布，根目录提供 `LICENSE`、`THIRD_PARTY_NOTICES.md`、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md` 和 `CHANGELOG.md`。项目数据、模型缓存、日志、密钥、构建产物和安装包均被 `.gitignore` 排除；ONNX 模型在运行时下载，不提交到 Git，也不随发布包分发。应用不包含遥测，诊断日志仅写入本地 `~/Documents/trpg-helper/logs/`，提交问题前应检查并移除可能出现的本地路径。
+
+`.github/workflows/ci.yml` 在 push、pull request 和手动触发时执行冻结依赖安装、版本元数据检查、Vitest、TypeScript 类型检查、前端构建，以及 Rust fmt、Clippy 和测试。`.github/workflows/release.yml` 在 `v*` 标签或手动触发时构建三个无签名桌面包：
+
+- macOS arm64：DMG。
+- Windows x86_64：NSIS。
+- Linux x86_64：AppImage。
+
+Release 默认创建为 draft，上传文件名包含产品名、版本、平台、架构和安装包扩展名。三个平台共用 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的 `1.0.0` 版本；`scripts/check-release-version.mjs` 会拒绝版本或标签不一致。当前发布不启用自动更新、代码签名、公证、商店分发或安装器内联网下载。首次公开标签为 `v1.0`，发布标题为 `TRPG Helper v1.0`。
+
+发布构建前应执行：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run check:release
+pnpm exec vitest run
+pnpm run typecheck
+pnpm run build
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+正式 tag 必须指向已经通过以上检查的提交；不要在未提交工作区上创建或移动公开 tag。
 
 ---
 

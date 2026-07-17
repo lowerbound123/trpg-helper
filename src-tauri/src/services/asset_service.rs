@@ -59,12 +59,14 @@ pub(crate) fn ensure_library(app: &AppHandle) -> Result<(), AppError> {
 
     let path = index_path(app)?;
     if !path.exists() {
-        let mut index = LibraryIndex::default();
-        index.asset_folders = vec![
-            "rings".to_string(),
-            "token-backgrounds".to_string(),
-            "token-tmp".to_string(),
-        ];
+        let index = LibraryIndex {
+            asset_folders: vec![
+                "rings".to_string(),
+                "token-backgrounds".to_string(),
+                "token-tmp".to_string(),
+            ],
+            ..LibraryIndex::default()
+        };
         fs::write(path, serde_json::to_vec_pretty(&index)?)?;
     } else {
         let mut index: LibraryIndex = serde_json::from_slice(&fs::read(&path)?)?;

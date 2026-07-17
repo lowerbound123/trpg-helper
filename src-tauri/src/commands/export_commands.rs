@@ -217,8 +217,7 @@ pub fn export_image(file_path: String, data_url: String) -> CommandResult<String
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(AppError::from)?;
     }
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
-        .map_err(AppError::from)?;
+    fs::write(&path, decode_data_url(&data_url)?).map_err(AppError::from)?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -247,8 +246,7 @@ pub fn export_image_to_downloads(
         .map_err(AppError::from)
         .map_err(String::from)?;
     let path = downloads.join(file_name);
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
-        .map_err(AppError::from)?;
+    fs::write(&path, decode_data_url(&data_url)?).map_err(AppError::from)?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -442,10 +440,8 @@ mod tests {
 
     #[test]
     fn handout_output_path_avoids_existing_names() {
-        let dir = std::env::temp_dir().join(format!(
-            "handout-generator-envelope-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("trpg-helper-envelope-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("中文讲义.png"), []).unwrap();
@@ -458,10 +454,8 @@ mod tests {
 
     #[test]
     fn writes_encoded_bytes_without_reencoding() {
-        let dir = std::env::temp_dir().join(format!(
-            "handout-generator-export-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("trpg-helper-export-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let bytes = [1_u8, 2, 3, 4, 5];
 

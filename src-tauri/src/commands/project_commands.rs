@@ -124,7 +124,7 @@ pub fn list_projects(app: AppHandle) -> CommandResult<Vec<ProjectSummary>> {
         projects.push(project_summary(&path, &payload));
     }
 
-    projects.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    projects.sort_by_key(|project| std::cmp::Reverse(project.updated_at));
     Ok(projects)
 }
 
@@ -142,7 +142,7 @@ pub fn create_project(
       "id": id,
       "folder": folder,
       "savedAt": Utc::now().to_rfc3339(),
-      "app": "handout-generator"
+      "app": "trpg-helper"
     });
     ensure_project_folder(
         &app,
@@ -228,10 +228,7 @@ pub fn move_managed_project(
             "savedAt".to_string(),
             Value::String(Utc::now().to_rfc3339()),
         );
-        object.insert(
-            "app".to_string(),
-            Value::String("handout-generator".to_string()),
-        );
+        object.insert("app".to_string(), Value::String("trpg-helper".to_string()));
     }
     write_project_files(&root, &payload.document, &metadata).map_err(String::from)?;
     Ok(ProjectPayload {
@@ -317,7 +314,7 @@ pub fn save_managed_project(
       "id": project_id,
       "folder": folder,
       "savedAt": Utc::now().to_rfc3339(),
-      "app": "handout-generator"
+      "app": "trpg-helper"
     });
     write_project_files(&root, &document, &metadata).map_err(String::from)?;
     Ok(ProjectPayload { document, metadata })

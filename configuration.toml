@@ -1,4 +1,4 @@
-# Handout Generator local configuration.
+# TRPG Helper local configuration.
 # Values here are read by the Vue/Tauri app at build time unless noted otherwise.
 
 # 配置项：root / 结构 版本；用途：设置 root 的结构 版本；范围：按该字段的业务约束；生效：保存并重启应用后。
@@ -6,7 +6,7 @@ schema_version = 1
 
 [application]
 # 配置项：应用 / 标题；用途：设置 应用 的标题；格式：字符串或枚举值；生效：保存并重启应用后。
-title = "Handout Generator"
+title = "TRPG Helper"
 # 配置项：应用 / 界面语言；用途：设置 应用 的界面语言；格式：字符串或枚举值；生效：保存并重启应用后。
 locale = "auto"
 

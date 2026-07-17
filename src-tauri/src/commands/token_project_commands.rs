@@ -53,7 +53,7 @@ pub fn create_token_project(
         "id": id,
         "folder": folder,
         "savedAt": Utc::now().to_rfc3339(),
-        "app": "handout-generator"
+        "app": "trpg-helper"
     });
     ensure_token_folder(
         &app,
@@ -85,7 +85,7 @@ pub fn list_token_projects(app: AppHandle) -> CommandResult<Vec<TokenProjectSumm
         let payload = read_token_project(&app, &path).map_err(String::from)?;
         projects.push(token_summary(&path, &payload));
     }
-    projects.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    projects.sort_by_key(|project| std::cmp::Reverse(project.updated_at));
     Ok(projects)
 }
 
@@ -122,7 +122,7 @@ pub fn save_token_project(
         "id": project_id,
         "folder": folder,
         "savedAt": Utc::now().to_rfc3339(),
-        "app": "handout-generator"
+        "app": "trpg-helper"
     });
     copy_token_sources(&root, &mut document).map_err(String::from)?;
     write_token_project(&root, &document, &metadata).map_err(String::from)?;

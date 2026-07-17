@@ -1005,8 +1005,10 @@ mod tests {
 
     #[test]
     fn scales_the_one_design_pixel_background_inset_for_export() {
-        let mut params = TokenParams::default();
-        params.export_size = 1024;
+        let params = TokenParams {
+            export_size: 1024,
+            ..TokenParams::default()
+        };
 
         let render = render_params_for_export(&params).expect("valid export params");
 

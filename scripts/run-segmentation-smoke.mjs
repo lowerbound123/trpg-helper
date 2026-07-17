@@ -13,7 +13,7 @@ if (!supportedDevices.has(device)) {
 }
 
 console.log(`Segmentation smoke host: platform=${process.platform}, arch=${process.arch}, device=${device}`)
-const successMarker = join(tmpdir(), 'handout-generator-segmentation-smoke', 'success.txt')
+const successMarker = join(tmpdir(), 'trpg-helper-segmentation-smoke', 'success.txt')
 rmSync(successMarker, { force: true })
 const result = spawnSync(
   'cargo',

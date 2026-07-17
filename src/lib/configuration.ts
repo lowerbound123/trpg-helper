@@ -8,7 +8,8 @@ import {
   type TokenFeatureConfiguration,
 } from './token/configuration'
 
-const CONFIGURATION_OVERRIDE_STORAGE_KEY = 'handout-generator.configuration.toml'
+const CONFIGURATION_OVERRIDE_STORAGE_KEY = 'trpg-helper.configuration.toml'
+const LEGACY_CONFIGURATION_OVERRIDE_STORAGE_KEY = 'handout-generator.configuration.toml'
 
 type TomlObject = Record<string, unknown>
 
@@ -39,7 +40,14 @@ export function parseConfigurationToml(source: string): TomlObject {
 export function runtimeConfigurationToml() {
   if (typeof window === 'undefined') return configurationToml
   try {
-    return window.localStorage.getItem(CONFIGURATION_OVERRIDE_STORAGE_KEY) || configurationToml
+    const current = window.localStorage.getItem(CONFIGURATION_OVERRIDE_STORAGE_KEY)
+    if (current) return current
+    const legacy = window.localStorage.getItem(LEGACY_CONFIGURATION_OVERRIDE_STORAGE_KEY)
+    if (legacy) {
+      window.localStorage.setItem(CONFIGURATION_OVERRIDE_STORAGE_KEY, legacy)
+      return legacy
+    }
+    return configurationToml
   } catch {
     return configurationToml
   }
@@ -264,7 +272,7 @@ export type AppConfiguration = {
 export const appConfiguration = {
   schemaVersion: typeof parsed.schema_version === 'number' ? parsed.schema_version : 1,
   application: {
-    title: stringValue('application', 'title', 'Handout Generator'),
+    title: stringValue('application', 'title', 'TRPG Helper'),
     locale: localePreference(stringValue('application', 'locale', 'auto')),
   },
   window: {
@@ -328,7 +336,7 @@ export const appConfiguration = {
 } satisfies AppConfiguration
 
 export function serializeConfigurationToml(config: AppConfiguration) {
-  return `# Handout Generator local configuration.\n${dump({
+  return `# TRPG Helper local configuration.\n${dump({
     schema_version: config.schemaVersion,
     application: { title: config.application.title, locale: config.application.locale },
     window: { width: config.window.width, height: config.window.height, min_width: config.window.minWidth, min_height: config.window.minHeight, resizable: config.window.resizable },

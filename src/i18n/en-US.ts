@@ -1,5 +1,5 @@
 export const enUSMessages = {
-  APP_NAME: 'Handout Generator',
+  APP_NAME: 'TRPG Helper',
   ADD_MASKS_TO_SELECTED_LAYERS: 'Add masks to selected layers without one',
   ADD_TO_CURRENT_TOKEN_PROJECT: 'Add to current Token project',
   ASSETS: 'Assets',

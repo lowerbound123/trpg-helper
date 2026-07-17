@@ -1,34 +1,70 @@
-# Logs
-logs
+# Runtime data and diagnostics
+data/
+logs/
 *.log
 log.txt
+configuration.local.toml
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# JavaScript
+node_modules/
+.pnpm-store/
+dist/
+dist-ssr/
+coverage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-.pnpm-store
-dist
-dist-ssr
-data
-src-tauri/target
-src-tauri/resources/models/*.onnx
-src-tauri/resources/onnxruntime/
-!src-tauri/resources/onnxruntime/
-src-tauri/resources/onnxruntime/*
-!src-tauri/resources/onnxruntime/.gitkeep
-src-tauri/~
-.superpowers
-*.local
-output.zip
+# Rust and Tauri build products
+src-tauri/target/
+src-tauri/.tauri/
+target/
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.msi
+*.msi.zip
+*.exe
 
-# Editor directories and files
+# Downloaded model and runtime resources
+src-tauri/resources/models/**
+!src-tauri/resources/models/.gitkeep
+src-tauri/resources/onnxruntime/**
+!src-tauri/resources/onnxruntime/.gitkeep
+*.onnx
+*.mlmodelc/
+native-coreml/
+
+# Tool caches and temporary output
+.cache/
+.superpowers/
+docs/superpowers/
+.codex/
+.agents/
+src-tauri/~/
+output.zip
+output/
+.playwright-cli/
+*.partial
+
+# Editors and operating systems
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj

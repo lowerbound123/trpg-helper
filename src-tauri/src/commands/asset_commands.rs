@@ -687,20 +687,16 @@ pub fn save_font_preview(
     font_id: String,
     data_url: String,
 ) -> CommandResult<LibraryIndex> {
-    let bytes =
-        crate::services::path_service::decode_data_url(&data_url).map_err(AppError::from)?;
+    let bytes = crate::services::path_service::decode_data_url(&data_url)?;
     let path = thumbnail_path(&app, &font_id).map_err(String::from)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(AppError::from)
             .map_err(String::from)?;
     }
-    fs::write(
-        &path,
-        encode_webp_thumbnail_bytes(&bytes).map_err(AppError::from)?,
-    )
-    .map_err(AppError::from)
-    .map_err(String::from)?;
+    fs::write(&path, encode_webp_thumbnail_bytes(&bytes)?)
+        .map_err(AppError::from)
+        .map_err(String::from)?;
 
     let mut index = read_index(&app).map_err(String::from)?;
     let record = index

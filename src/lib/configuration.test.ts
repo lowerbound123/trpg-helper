@@ -20,7 +20,7 @@ describe('configuration', () => {
 
   it('loads app configuration defaults from configuration.toml', () => {
     expect(appConfiguration.schemaVersion).toBe(1)
-    expect(appConfiguration.application.title).toBe('Handout Generator')
+    expect(appConfiguration.application.title).toBe('TRPG Helper')
     expect(appConfiguration.application.locale).toBe('auto')
     expect(appConfiguration.window.width).toBe(1440)
     expect(appConfiguration.finder.managerHeightPx).toBe(1080)

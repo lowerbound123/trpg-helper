@@ -298,7 +298,7 @@ impl ForegroundSegmentationEngine {
         let started = Instant::now();
         let backend = self
             .get_backend(&model_path, options, spec, selected_device)
-            .map_err(|error| {
+            .inspect_err(|error| {
                 emit(SegmentationCoreProgress {
                     stage: "device-session-failed",
                     model: model.as_str().into(),
@@ -308,7 +308,6 @@ impl ForegroundSegmentationEngine {
                     elapsed_ms: None,
                     error: Some(error.clone()),
                 });
-                error
             })?;
         let selected_device = backend.device;
         let session_load_ms = elapsed_ms(started);
@@ -537,7 +536,7 @@ fn ensure_ort_initialized(runtime_path: &Path) -> Result<(), String> {
     ORT_INITIALIZED
         .get_or_init(|| {
             ort::init_from(runtime_path.to_string_lossy())
-                .with_name("handout-generator-foreground-segmentation")
+                .with_name("trpg-helper-foreground-segmentation")
                 .commit()
                 .map(|_| ())
                 .map_err(|error| format!("ONNX Runtime 初始化失败: {error}"))
@@ -747,7 +746,7 @@ mod tests {
             ),
         );
 
-        let output_root = std::env::temp_dir().join("handout-generator-segmentation-smoke");
+        let output_root = std::env::temp_dir().join("trpg-helper-segmentation-smoke");
         fs::create_dir_all(&output_root).unwrap();
         let input_path = output_root.join("generated-input.png");
         let output_path = output_root.join("segmented-output.png");

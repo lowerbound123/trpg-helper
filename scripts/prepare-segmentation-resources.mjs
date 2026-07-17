@@ -82,9 +82,11 @@ export async function prepareSegmentationResources(args = process.argv.slice(2),
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   const target = selectTargetTriple(args, environment)
   const runtime = resourceForTarget(manifest, target)
-  const cacheRoot = environment.HANDOUT_SEGMENTATION_CACHE_DIR
-    ? resolve(environment.HANDOUT_SEGMENTATION_CACHE_DIR)
-    : join(homedir(), '.cache', 'handout-generator', 'segmentation-resources')
+  const cacheDirectory = environment.TRPG_HELPER_SEGMENTATION_CACHE_DIR
+    || environment.HANDOUT_SEGMENTATION_CACHE_DIR
+  const cacheRoot = cacheDirectory
+    ? resolve(cacheDirectory)
+    : join(homedir(), '.cache', 'trpg-helper', 'segmentation-resources')
   const archiveCache = join(cacheRoot, runtime.archive)
   const runtimeOutput = join(projectRoot, 'src-tauri', 'resources', 'onnxruntime', target, basename(runtime.libraryFile))
 

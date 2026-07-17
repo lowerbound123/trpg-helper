@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible problem in a supported build.
+title: '[Bug]: '
+labels: ['bug']
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS Apple Silicon
+        - Windows x86_64
+        - Linux x86_64
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TRPG Helper version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest reliable sequence. Remove private paths and user content.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and logs
+      description: Attach relevant logs after checking that they contain no private information.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I can reproduce this on a supported platform and architecture.
+          required: true

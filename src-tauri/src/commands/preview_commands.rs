@@ -24,17 +24,11 @@ pub fn save_project_preview(
         .map_err(String::from)?;
     for file_name in ["preview.webp", "preview.jpg", "preview.png"] {
         let stale = root.join(file_name);
-        remove_file_if_exists(stale)
-            .map_err(AppError::from)
-            .map_err(String::from)?;
+        remove_file_if_exists(stale).map_err(String::from)?;
     }
     let path = root.join("preview.webp");
-    let bytes = decode_data_url(&data_url).map_err(AppError::from)?;
-    fs::write(
-        &path,
-        encode_webp_thumbnail_bytes(&bytes).map_err(AppError::from)?,
-    )
-    .map_err(AppError::from)?;
+    let bytes = decode_data_url(&data_url)?;
+    fs::write(&path, encode_webp_thumbnail_bytes(&bytes)?).map_err(AppError::from)?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -61,7 +55,7 @@ pub fn save_project_asset(
             .map_err(AppError::from)
             .map_err(String::from)?;
     }
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+    fs::write(&path, decode_data_url(&data_url)?)
         .map_err(AppError::from)
         .map_err(String::from)?;
     Ok(path.to_string_lossy().to_string())

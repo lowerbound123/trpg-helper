@@ -94,51 +94,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
-name = "app"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "hex",
- "image",
- "jpegxl-rs",
- "jpegxl-sys",
- "log",
- "mozjpeg-rs",
- "ndarray",
- "objc2",
- "objc2-core-graphics",
- "objc2-core-image",
- "objc2-core-ml",
- "objc2-core-video",
- "objc2-foundation",
- "objc2-vision",
- "ort",
- "oxipng",
- "rand 0.9.4",
- "rayon",
- "reqwest 0.12.28",
- "resvg",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-log",
- "thiserror 2.0.18",
- "tiny-skia",
- "toml 0.9.12+spec-1.1.0",
- "usvg",
- "uuid",
- "walkdir",
- "webp",
-]
-
-[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5491,6 +5446,51 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "trpg-helper"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "image",
+ "jpegxl-rs",
+ "jpegxl-sys",
+ "log",
+ "mozjpeg-rs",
+ "ndarray",
+ "objc2",
+ "objc2-core-graphics",
+ "objc2-core-image",
+ "objc2-core-ml",
+ "objc2-core-video",
+ "objc2-foundation",
+ "objc2-vision",
+ "ort",
+ "oxipng",
+ "rand 0.9.4",
+ "rayon",
+ "reqwest 0.12.28",
+ "resvg",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-log",
+ "thiserror 2.0.18",
+ "tiny-skia",
+ "toml 0.9.12+spec-1.1.0",
+ "usvg",
+ "uuid",
+ "walkdir",
+ "webp",
 ]
 
 [[package]]

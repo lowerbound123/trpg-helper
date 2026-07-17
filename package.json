@@ -1,13 +1,22 @@
 {
-  "name": "handout-generator",
+  "name": "trpg-helper",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "A local-first desktop editor for TRPG handouts and tokens.",
+  "license": "GPL-3.0-only",
+  "repository": "https://github.com/tonychow/trpg-helper",
+  "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "prepare:segmentation-resources": "node scripts/prepare-segmentation-resources.mjs",
     "compile:segmentation-coreml": "node scripts/compile-native-coreml.mjs",
     "test:segmentation-smoke": "node scripts/run-segmentation-smoke.mjs",
+    "check:release": "node scripts/check-release-version.mjs",
     "dev": "vite",
+    "test": "vitest run",
     "typecheck": "vue-tsc -b",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
@@ -49,12 +58,5 @@
     "vite": "^8.0.12",
     "vitest": "^4.1.9",
     "vue-tsc": "^3.2.8"
-  },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "11.8.0",
-      "onFail": "download"
-    }
   }
 }

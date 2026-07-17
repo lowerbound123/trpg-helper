@@ -454,7 +454,7 @@ export async function saveProject(
     document,
     metadata: {
       savedAt: new Date().toISOString(),
-      app: 'handout-generator',
+      app: 'trpg-helper',
     },
   })
 }

@@ -1,7 +1,7 @@
 import type { MessageKey } from './en-US'
 
 export const zhCNMessages: Record<MessageKey, string> = {
-  APP_NAME: 'Handout Generator',
+  APP_NAME: 'TRPG Helper',
   ADD_MASKS_TO_SELECTED_LAYERS: '为尚无蒙版的选中图层添加蒙版',
   ADD_TO_CURRENT_TOKEN_PROJECT: '添加到当前 Token 项目',
   ASSETS: '素材',

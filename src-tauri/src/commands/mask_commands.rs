@@ -25,7 +25,7 @@ pub fn save_project_mask(
             .map_err(AppError::from)
             .map_err(String::from)?;
     }
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+    fs::write(&path, decode_data_url(&data_url)?)
         .map_err(AppError::from)
         .map_err(String::from)?;
     Ok(relative.to_string_lossy().to_string())
@@ -53,7 +53,7 @@ pub fn save_project_mask_cache(
             .map_err(AppError::from)
             .map_err(String::from)?;
     }
-    fs::write(&path, decode_data_url(&data_url).map_err(AppError::from)?)
+    fs::write(&path, decode_data_url(&data_url)?)
         .map_err(AppError::from)
         .map_err(String::from)?;
     Ok(relative.to_string_lossy().to_string())
@@ -81,7 +81,5 @@ pub fn delete_project_mask(
 ) -> CommandResult<()> {
     let root = resolve_project_root(&app, project_id, project_dir).map_err(String::from)?;
     let relative = safe_project_relative_path(&relative_path).map_err(String::from)?;
-    remove_file_if_exists(root.join(relative))
-        .map_err(AppError::from)
-        .map_err(String::from)
+    remove_file_if_exists(root.join(relative)).map_err(String::from)
 }

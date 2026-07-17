@@ -22,5 +22,5 @@
 
 ## 项目概述
 
-Handout Generator — Tauri 2 + Vue 3 + Konva.js 桌面讲义编辑器。
+TRPG Helper — Tauri 2 + Vue 3 + Konva.js 桌面讲义与 Token 编辑器。
 详见 DOC.md。

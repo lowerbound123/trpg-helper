@@ -38,19 +38,6 @@ pub fn clean_file_name(file_name: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::clean_file_name;
-
-    #[test]
-    fn clean_file_name_preserves_unicode_and_removes_path_characters() {
-        assert_eq!(clean_file_name("中文讲义.png"), "中文讲义.png");
-        assert_eq!(clean_file_name("bad:name?.png"), "bad_name_.png");
-        assert_eq!(clean_file_name("../safe.png"), "safe.png");
-        assert_eq!(clean_file_name("..."), "resource.bin");
-    }
-}
-
 pub(crate) fn initialize_runtime_project_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let documents_dir = app.path().document_dir().map_err(|_| AppError::DataDir)?;
     let root = documents_dir.join("trpg-helper");
@@ -261,5 +248,18 @@ pub(crate) fn reset_debug_log() {
         ] {
             let _ = fs::write(path.join(file_name), "");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_file_name;
+
+    #[test]
+    fn clean_file_name_preserves_unicode_and_removes_path_characters() {
+        assert_eq!(clean_file_name("中文讲义.png"), "中文讲义.png");
+        assert_eq!(clean_file_name("bad:name?.png"), "bad_name_.png");
+        assert_eq!(clean_file_name("../safe.png"), "safe.png");
+        assert_eq!(clean_file_name("..."), "resource.bin");
     }
 }

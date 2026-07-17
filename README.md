@@ -25,7 +25,7 @@ Version 1.0 supports only:
 | Windows | x86_64 | NSIS installer |
 | Linux | x86_64 | AppImage |
 
-Intel Mac, Windows ARM64, and Linux ARM64 are not currently supported. Releases are distributed only through [GitHub Releases](https://github.com/tonychow/trpg-helper/releases).
+Intel Mac, Windows ARM64, and Linux ARM64 are not currently supported. Releases are distributed only through [GitHub Releases](https://github.com/lowerbound123/trpg-helper/releases).
 
 ## Installation
 
@@ -149,7 +149,7 @@ GitHub Actions performs these builds for tags matching `v*` and creates a draft 
 
 ## Contributing and Security
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use [GitHub Issues](https://github.com/tonychow/trpg-helper/issues) for reproducible bugs and feature proposals. Report security issues according to [SECURITY.md](SECURITY.md), not in a public issue.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use [GitHub Issues](https://github.com/lowerbound123/trpg-helper/issues) for reproducible bugs and feature proposals. Report security issues according to [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## License
 

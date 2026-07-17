@@ -20,4 +20,4 @@ All notable changes to TRPG Helper are documented here. The project follows Sema
 - Automatic updates and commercial app-store distribution are not included.
 - Foreground segmentation model weights are downloaded and SHA-256 verified at runtime.
 
-[1.0.0]: https://github.com/tonychow/trpg-helper/releases/tag/v1.0
+[1.0.0]: https://github.com/lowerbound123/trpg-helper/releases/tag/v1.0

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "A local-first desktop editor for TRPG handouts and tokens.",
   "license": "GPL-3.0-only",
-  "repository": "https://github.com/tonychow/trpg-helper",
+  "repository": "https://github.com/lowerbound123/trpg-helper",
   "packageManager": "pnpm@11.8.0",
   "engines": {
     "node": ">=22"

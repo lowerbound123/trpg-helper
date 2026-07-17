@@ -28,7 +28,7 @@ describe('public release configuration', () => {
       name: 'trpg-helper',
       version: '1.0.0',
       license: 'GPL-3.0-only',
-      repository: 'https://github.com/tonychow/trpg-helper',
+      repository: 'https://github.com/lowerbound123/trpg-helper',
     })
     expect(tauri).toMatchObject({
       productName: 'TRPG Helper',

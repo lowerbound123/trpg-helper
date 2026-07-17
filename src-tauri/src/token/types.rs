@@ -7,7 +7,20 @@ pub struct TokenParams {
     pub scale: f32,
     pub offset_x: f32,
     pub offset_y: f32,
+    #[serde(default = "default_avatar_radius")]
+    pub avatar_radius: i32,
     pub background: String,
+    #[serde(default = "default_background_style")]
+    pub background_style: String,
+    #[serde(default)]
+    pub background_image_offset_x: f32,
+    #[serde(default)]
+    pub background_image_offset_y: f32,
+    #[serde(default)]
+    pub background_asset_path: Option<String>,
+    /// Runtime-only radius after converting the one-design-pixel inset to export pixels.
+    #[serde(skip)]
+    pub render_background_radius: Option<f32>,
     pub ring_inner_radius: i32,
     pub ring_outer_radius: i32,
     pub ring_color: String,
@@ -47,6 +60,13 @@ pub struct TokenParams {
     pub random_ring_color: bool,
 }
 
+fn default_avatar_radius() -> i32 {
+    225
+}
+fn default_background_style() -> String {
+    "solid".into()
+}
+
 impl Default for TokenParams {
     fn default() -> Self {
         Self {
@@ -54,7 +74,13 @@ impl Default for TokenParams {
             scale: 100.0,
             offset_x: 0.0,
             offset_y: 0.0,
+            avatar_radius: 225,
             background: "#000000FF".into(),
+            background_style: "solid".into(),
+            background_image_offset_x: 0.0,
+            background_image_offset_y: 0.0,
+            background_asset_path: None,
+            render_background_radius: None,
             ring_inner_radius: 225,
             ring_outer_radius: 250,
             ring_color: "#F6C75BFF".into(),

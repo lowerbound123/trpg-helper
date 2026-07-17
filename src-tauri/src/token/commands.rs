@@ -86,6 +86,12 @@ fn validate_params(params: &TokenParams) -> Result<(), String> {
     {
         return Err("圆环半径必须满足 0 <= 内径 < 外径 <= size/2".into());
     }
+    if params.avatar_radius < 0 || params.avatar_radius > (params.size / 2) as i32 {
+        return Err("图片半径必须满足 0 <= 图片半径 <= size/2".into());
+    }
+    if params.background_style != "solid" && !params.background_style.starts_with("asset:") {
+        return Err("背景样式无效".into());
+    }
     if !is_valid_hex_color(&params.background) || !is_valid_hex_color(&params.ring_color) {
         return Err("颜色必须是 #RRGGBB 或 #RRGGBBAA".into());
     }
@@ -103,6 +109,8 @@ fn validate_params(params: &TokenParams) -> Result<(), String> {
         ("ringImageScaleY", params.ring_image_scale_y),
         ("ringImageOffsetX", params.ring_image_offset_x),
         ("ringImageOffsetY", params.ring_image_offset_y),
+        ("backgroundImageOffsetX", params.background_image_offset_x),
+        ("backgroundImageOffsetY", params.background_image_offset_y),
         ("splitAngle", params.split_angle),
         ("splitHeight", params.split_height),
     ];
@@ -136,6 +144,13 @@ fn validate_params(params: &TokenParams) -> Result<(), String> {
     {
         return Err("自定义圆环图片变换无效".into());
     }
+    if !(config.backgrounds.offset_min..=config.backgrounds.offset_max)
+        .contains(&params.background_image_offset_x)
+        || !(config.backgrounds.offset_min..=config.backgrounds.offset_max)
+            .contains(&params.background_image_offset_y)
+    {
+        return Err("自定义背景位移无效".into());
+    }
     let half_size = params.size as f32 / 2.0;
     if params.ring_outer_radius as f32 * params.ring_stretch_x > half_size
         || params.ring_outer_radius as f32 * params.ring_stretch_y > half_size
@@ -160,8 +175,13 @@ fn render_params_for_export(params: &TokenParams) -> Result<TokenParams, String>
     render.size = params.export_size;
     render.ring_inner_radius = scale_radius(params.ring_inner_radius)?;
     render.ring_outer_radius = scale_radius(params.ring_outer_radius)?;
+    render.avatar_radius = scale_radius(params.avatar_radius)?;
+    render.render_background_radius =
+        Some(((params.ring_outer_radius - 1).max(0) as f64 * factor) as f32);
     render.ring_image_offset_x = params.ring_image_offset_x * factor as f32;
     render.ring_image_offset_y = params.ring_image_offset_y * factor as f32;
+    render.background_image_offset_x = params.background_image_offset_x * factor as f32;
+    render.background_image_offset_y = params.background_image_offset_y * factor as f32;
 
     if render.ring_outer_radius <= render.ring_inner_radius
         || render.ring_outer_radius > (render.size / 2) as i32
@@ -643,22 +663,36 @@ where
     // save_layer(&full_ring, "5_ring_full.png");  // debug
     log_msg(&format!("5_ring: {}", bounds_str(&full_ring, "")));
 
-    let bg = engine::generate_background_circle(&render_params);
+    let bg = if render_params.background_style.starts_with("asset:") {
+        match render_params
+            .background_asset_path
+            .as_deref()
+            .and_then(|path| image::open(path).ok())
+        {
+            Some(source) => engine::generate_custom_background(&source.to_rgba8(), &render_params)?,
+            None => {
+                log_msg("custom background unavailable; using solid background");
+                engine::generate_background_circle(&render_params)
+            }
+        }
+    } else {
+        engine::generate_background_circle(&render_params)
+    };
     progress(ExportProgressPhase::Rendering, 0.5);
     // save_layer(&bg, "6_bg.png");  // debug
     log_msg(&format!("6_bg: {}", bounds_str(&bg, "")));
 
     // === 通用：计算头像缩放和画布尺寸 ===
-    let inner_dia = u64::try_from(render_params.ring_inner_radius)
-        .map_err(|_| "圆环内径不能为负数".to_string())?
+    let image_dia = u64::try_from(render_params.ring_outer_radius)
+        .map_err(|_| "圆环外径不能为负数".to_string())?
         .checked_mul(2)
-        .ok_or_else(|| "圆环内径过大".to_string())?
+        .ok_or_else(|| "圆环外径过大".to_string())?
         .max(1);
     let img_w = img.width();
     let img_h = img.height();
-    let (dw, dh) = scaled_avatar_dimensions(img_w, img_h, inner_dia, render_params.scale)?;
-    let offset_x_px = offset_pixels(render_params.offset_x, inner_dia)?;
-    let offset_y_px = offset_pixels(render_params.offset_y, inner_dia)?;
+    let (dw, dh) = scaled_avatar_dimensions(img_w, img_h, image_dia, render_params.scale)?;
+    let offset_x_px = offset_pixels(render_params.offset_x, image_dia)?;
+    let offset_y_px = offset_pixels(render_params.offset_y, image_dia)?;
     let output_size = calculate_canvas_size(
         dw,
         dh,
@@ -670,13 +704,13 @@ where
     let dw = u32::try_from(dw).map_err(|_| "缩放后的宽度无效".to_string())?;
     let dh = u32::try_from(dh).map_err(|_| "缩放后的高度无效".to_string())?;
     log_msg(&format!(
-        "canvas: output_size={} dw={} dh={} offset=({},{}) innerDia={} outerDia={} scale={}",
+        "canvas: output_size={} dw={} dh={} offset=({},{}) imageDia={} outerDia={} scale={}",
         output_size,
         dw,
         dh,
         offset_x_px,
         offset_y_px,
-        inner_dia,
+        image_dia,
         render_params.ring_outer_radius,
         render_params.scale
     ));
@@ -725,7 +759,7 @@ where
     } else {
         // 非出框: 内径圆形蒙版头像 + 完整环在上
         let center = output_size as f32 / 2.0;
-        let inner_r = render_params.ring_inner_radius.max(0) as f32;
+        let inner_r = render_params.avatar_radius.max(0) as f32;
         let mut avatar_masked =
             image::RgbaImage::from_pixel(output_size, output_size, Rgba([0, 0, 0, 0]));
         for y in 0..output_size {
@@ -967,6 +1001,17 @@ mod tests {
         assert_eq!(render.ring_outer_radius, 250);
         assert_eq!(render.offset_x, 0.0);
         assert_eq!(render.split_height, 0.0);
+    }
+
+    #[test]
+    fn scales_the_one_design_pixel_background_inset_for_export() {
+        let mut params = TokenParams::default();
+        params.export_size = 1024;
+
+        let render = render_params_for_export(&params).expect("valid export params");
+
+        assert_eq!(render.ring_outer_radius, 500);
+        assert_eq!(render.render_background_radius, Some(498.0));
     }
 
     #[test]

@@ -24,6 +24,17 @@ pub(crate) struct LibraryRecord {
     pub(crate) updated_at: DateTime<Utc>,
     #[serde(default)]
     pub(crate) token_ring: Option<TokenRingConfig>,
+    #[serde(default)]
+    pub(crate) token_background: Option<TokenBackgroundConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TokenBackgroundConfig {
+    pub(crate) revision: u64,
+    pub(crate) design_size: f64,
+    pub(crate) image_offset_x: f64,
+    pub(crate) image_offset_y: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]

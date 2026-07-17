@@ -3,11 +3,15 @@ export const TOKEN_SCALE_MIN = 10
 export const TOKEN_SCALE_MAX = 500
 export const TOKEN_SCALE_WHEEL_STEP = 5
 
+export type TokenBackgroundStyle = 'solid' | `asset:${string}`
+
 export interface TokenVisualStyle {
   scale: number
   offsetX: number
   offsetY: number
+  avatarRadius: number
   background: string
+  backgroundStyle: TokenBackgroundStyle
   ringInnerRadius: number
   ringOuterRadius: number
   ringColor: string
@@ -49,6 +53,31 @@ export interface TokenParams extends TokenVisualStyle, TokenExportSettings {
   ringImageOffsetX: number
   ringImageOffsetY: number
   ringAssetPath?: string
+  backgroundImageOffsetX: number
+  backgroundImageOffsetY: number
+  backgroundAssetPath?: string
+}
+
+export interface TokenBackgroundConfig {
+  revision: number
+  designSize: number
+  imageOffsetX: number
+  imageOffsetY: number
+}
+
+export interface CustomBackgroundConfig {
+  designSize: number
+  imageOffsetX: number
+  imageOffsetY: number
+}
+
+export interface BackgroundDescriptor {
+  id: TokenBackgroundStyle
+  label: string
+  kind: 'solid' | 'custom'
+  revision: number
+  customConfig?: CustomBackgroundConfig
+  assetPath?: string
 }
 
 export interface TokenRingConfig {
@@ -138,7 +167,7 @@ export type TokenExportProgressEvent =
   | { event: 'finished'; data: { completed: number; total: number; successCount: number; failureCount: number } }
 
 export const TOKEN_VISUAL_STYLE_KEYS = [
-  'scale', 'offsetX', 'offsetY', 'background', 'ringInnerRadius', 'ringOuterRadius',
+  'scale', 'offsetX', 'offsetY', 'avatarRadius', 'background', 'backgroundStyle', 'ringInnerRadius', 'ringOuterRadius',
   'ringColor', 'ringStyle', 'ringStretchX', 'ringStretchY', 'splitRing', 'splitAngle',
   'splitHeight',
 ] as const satisfies readonly (keyof TokenVisualStyle)[]

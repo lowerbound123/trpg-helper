@@ -132,6 +132,7 @@ function normalizeDraft() {
   draft.token.defaults.scale = normalizeNumber(draft.token.defaults.scale, appConfiguration.token.defaults.scale, draft.token.limits.scaleMin)
   draft.token.defaults.ringInnerRadius = normalizeNumber(draft.token.defaults.ringInnerRadius, appConfiguration.token.defaults.ringInnerRadius, 0)
   draft.token.defaults.ringOuterRadius = normalizeNumber(draft.token.defaults.ringOuterRadius, appConfiguration.token.defaults.ringOuterRadius, 1)
+  draft.token.defaults.avatarRadius = normalizeNumber(draft.token.defaults.avatarRadius, appConfiguration.token.defaults.avatarRadius, 0)
   draft.token.export.defaults.size = normalizeNumber(draft.token.export.defaults.size, appConfiguration.token.export.defaults.size, draft.token.export.limits.sizeMin)
   draft.token.preview.displayTokenSize = normalizeNumber(draft.token.preview.displayTokenSize, appConfiguration.token.preview.displayTokenSize, 1)
   draft.token.preview.minimumWorldSize = normalizeNumber(draft.token.preview.minimumWorldSize, appConfiguration.token.preview.minimumWorldSize, 1)
@@ -143,6 +144,10 @@ function normalizeDraft() {
   draft.token.rings.thumbnailSize = normalizeNumber(draft.token.rings.thumbnailSize, appConfiguration.token.rings.thumbnailSize, 1)
   draft.token.rings.frontendCacheEntries = normalizeNumber(draft.token.rings.frontendCacheEntries, appConfiguration.token.rings.frontendCacheEntries, 1)
   draft.token.rings.backendCacheEntries = normalizeNumber(draft.token.rings.backendCacheEntries, appConfiguration.token.rings.backendCacheEntries, 1)
+  draft.token.backgrounds.thumbnailSize = normalizeNumber(draft.token.backgrounds.thumbnailSize, appConfiguration.token.backgrounds.thumbnailSize, 1)
+  draft.token.backgrounds.frontendCacheEntries = normalizeNumber(draft.token.backgrounds.frontendCacheEntries, appConfiguration.token.backgrounds.frontendCacheEntries, 1)
+  draft.token.backgrounds.maxUploadBytes = normalizeNumber(draft.token.backgrounds.maxUploadBytes, appConfiguration.token.backgrounds.maxUploadBytes, 1)
+  draft.token.backgrounds.maxSourceDimension = normalizeNumber(draft.token.backgrounds.maxSourceDimension, appConfiguration.token.backgrounds.maxSourceDimension, 1)
   draft.token.notifications.toastDurationMs = normalizeNumber(draft.token.notifications.toastDurationMs, appConfiguration.token.notifications.toastDurationMs, 1)
 }
 
@@ -376,9 +381,20 @@ watch(open, (value) => {
           <label><span>{{ t('CONFIG_OFFSET_Y') }}</span><Input v-model.number="draft.token.defaults.offsetY" type="number" /></label>
           <label><span>{{ t('TOKEN_RING_INNER_RADIUS') }}</span><Input v-model.number="draft.token.defaults.ringInnerRadius" type="number" min="0" /></label>
           <label><span>{{ t('TOKEN_RING_OUTER_RADIUS') }}</span><Input v-model.number="draft.token.defaults.ringOuterRadius" type="number" min="1" /></label>
+          <label><span>{{ t('TOKEN_AVATAR_RADIUS') }}</span><Input v-model.number="draft.token.defaults.avatarRadius" type="number" min="0" :max="draft.token.defaults.designSize / 2" /></label>
           <label><span>{{ t('CONFIG_RING_STYLE') }}</span><Input v-model="draft.token.defaults.ringStyle" /></label>
           <label><span>{{ t('CONFIG_BACKGROUND_COLOR') }}</span><Input v-model="draft.token.defaults.backgroundColor" /></label>
           <label><span>{{ t('CONFIG_RING_COLOR') }}</span><Input v-model="draft.token.defaults.ringColor" /></label>
+        </section>
+
+        <section class="configuration-section">
+          <h3>{{ t('CONFIG_TOKEN_BACKGROUNDS') }}</h3>
+          <label><span>{{ t('CONFIG_BACKGROUND_THUMBNAIL_SIZE') }}</span><Input v-model.number="draft.token.backgrounds.thumbnailSize" type="number" min="1" /></label>
+          <label><span>{{ t('CONFIG_BACKGROUND_CACHE') }}</span><Input v-model.number="draft.token.backgrounds.frontendCacheEntries" type="number" min="1" /></label>
+          <label><span>{{ t('CONFIG_MAX_UPLOAD_BYTES') }}</span><Input v-model.number="draft.token.backgrounds.maxUploadBytes" type="number" min="1" /></label>
+          <label><span>{{ t('CONFIG_MAX_SOURCE_DIMENSION') }}</span><Input v-model.number="draft.token.backgrounds.maxSourceDimension" type="number" min="1" /></label>
+          <label><span>{{ t('CONFIG_OFFSET_MIN') }}</span><Input v-model.number="draft.token.backgrounds.offsetMin" type="number" /></label>
+          <label><span>{{ t('CONFIG_OFFSET_MAX') }}</span><Input v-model.number="draft.token.backgrounds.offsetMax" type="number" /></label>
         </section>
 
         <section class="configuration-section">

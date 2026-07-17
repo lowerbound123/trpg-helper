@@ -154,6 +154,7 @@ pub fn run() {
             copy_token_project,
             write_encoded_image_bytes_to_downloads,
             update_token_ring_config,
+            update_token_background_config,
             write_configuration
         ])
         .run(tauri::generate_context!())

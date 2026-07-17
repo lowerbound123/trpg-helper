@@ -53,9 +53,9 @@ pub fn calculate_crop_rect(
 ) -> (u32, u32, u32, u32) {
     let min_dim = img_width.min(img_height) as f32;
     let inner_dia = (ring_inner_radius * 2) as f32;
-    // scale=100: minDim → innerDia (输出像素)
+    // scale=100: minDim → reference diameter (输出像素)
     // crop → outputSize (输出像素)
-    // crop = minDim * outputSize / innerDia (at scale=100)
+    // crop = minDim * outputSize / reference diameter (at scale=100)
     let crop_at_100 = min_dim * output_size as f32 / inner_dia.max(1.0);
     let mut crop_size = (crop_at_100 * 100.0 / scale.max(1.0)) as u32;
     // 钳制：crop 不能超出图片
@@ -143,7 +143,7 @@ fn split_normal(angle_deg: f32) -> (f32, f32) {
 pub fn apply_split_ring(img: &RgbaImage, params: &TokenParams, canvas_size: u32) -> RgbaImage {
     let size = canvas_size;
     let center = size as f32 / 2.0;
-    let radius = params.ring_inner_radius.max(0) as f32;
+    let radius = params.avatar_radius.max(0) as f32;
     let height_offset = (params.split_height / 100.0) * params.size as f32;
 
     let (normal_x, normal_y) = split_normal(params.split_angle);
@@ -172,7 +172,9 @@ pub fn generate_background_circle(params: &TokenParams) -> RgbaImage {
     let size = params.size;
     let bg = parse_color(&params.background);
     let center = size as f32 / 2.0;
-    let radius = params.ring_inner_radius.max(0) as f32;
+    let radius = params
+        .render_background_radius
+        .unwrap_or_else(|| (params.ring_outer_radius - 1).max(0) as f32);
 
     let mut output = RgbaImage::from_pixel(size, size, Rgba([0, 0, 0, 0]));
     for y in 0..size {
@@ -185,6 +187,41 @@ pub fn generate_background_circle(params: &TokenParams) -> RgbaImage {
         }
     }
     output
+}
+
+/// Cover-fit a custom background into the outer-radius-minus-one circle.
+pub fn generate_custom_background(
+    source: &RgbaImage,
+    params: &TokenParams,
+) -> Result<RgbaImage, String> {
+    if source.width() == 0 || source.height() == 0 {
+        return Err("自定义背景图片为空".into());
+    }
+    let radius = params
+        .render_background_radius
+        .unwrap_or_else(|| (params.ring_outer_radius - 1).max(0) as f32);
+    let diameter = radius * 2.0;
+    let cover = (diameter / source.width() as f32).max(diameter / source.height() as f32);
+    let width = (source.width() as f32 * cover).round().max(1.0) as u32;
+    let height = (source.height() as f32 * cover).round().max(1.0) as u32;
+    let resized = image::imageops::resize(source, width, height, FilterType::Lanczos3);
+    let center = i64::from(params.size) / 2;
+    let x = center - i64::from(width) / 2 + params.background_image_offset_x.round() as i64;
+    let y = center - i64::from(height) / 2 + params.background_image_offset_y.round() as i64;
+    let mut output = RgbaImage::from_pixel(params.size, params.size, Rgba([0, 0, 0, 0]));
+    image::imageops::overlay(&mut output, &resized, x, y);
+
+    let center = params.size as f32 / 2.0;
+    for y in 0..params.size {
+        for x in 0..params.size {
+            let dx = x as f32 + 0.5 - center;
+            let dy = y as f32 + 0.5 - center;
+            if dx * dx + dy * dy > radius * radius {
+                output.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+            }
+        }
+    }
+    Ok(output)
 }
 
 /// 合成最终图像: 背景 → 圆环上层 → 头像 → 圆环下层
@@ -298,6 +335,7 @@ mod tests {
             size: 100,
             ring_inner_radius: 40,          // 内径
             ring_outer_radius: 50,          // 外径
+            avatar_radius: 40,              // 图片裁切半径
             background: "#FFFFFFFF".into(), // 白色背景
             ring_color: "#FF0000FF".into(), // 红色圆环
             split_ring: true,
@@ -350,6 +388,64 @@ mod tests {
         assert_eq!(ring.get_pixel(60, 30).0[3], 0, "inside the inner radius");
         assert!(ring.get_pixel(60, 25).0[3] > 0, "inside the requested band");
         assert_eq!(ring.get_pixel(60, 15).0[3], 0, "outside the outer radius");
+    }
+
+    #[test]
+    fn background_uses_outer_radius_minus_one() {
+        let mut params = make_test_params();
+        params.size = 120;
+        params.ring_inner_radius = 10;
+        params.ring_outer_radius = 40;
+
+        let background = generate_background_circle(&params);
+
+        assert!(background.get_pixel(60, 21).0[3] > 0, "inside radius 39");
+        assert_eq!(background.get_pixel(60, 20).0[3], 0, "outside radius 39");
+    }
+
+    #[test]
+    fn custom_background_cover_preserves_alpha_and_circle_boundary() {
+        let mut params = make_test_params();
+        params.size = 120;
+        params.ring_outer_radius = 40;
+        let mut source = RgbaImage::from_pixel(2, 1, Rgba([0, 0, 0, 0]));
+        source.put_pixel(1, 0, Rgba([255, 0, 0, 255]));
+
+        let background = generate_custom_background(&source, &params).unwrap();
+
+        assert!(
+            background.get_pixel(60, 60).0[3] > 0,
+            "cover keeps source alpha"
+        );
+        assert_eq!(
+            background.get_pixel(60, 20).0[3],
+            0,
+            "outer-radius-minus-one clips the image"
+        );
+    }
+
+    #[test]
+    fn split_restricted_side_uses_avatar_radius_not_ring_inner_radius() {
+        let mut params = make_test_params();
+        params.ring_inner_radius = 10;
+        params.avatar_radius = 30;
+        let avatar = solid_square(params.size, Rgba([0, 0, 255, 255]));
+
+        let masked = apply_split_ring(&avatar, &params, params.size);
+
+        assert!(
+            masked.get_pixel(50, 75).0[3] > 0,
+            "restricted side keeps pixels inside avatar radius"
+        );
+        assert_eq!(
+            masked.get_pixel(50, 85).0[3],
+            0,
+            "restricted side clips beyond avatar radius"
+        );
+        assert!(
+            masked.get_pixel(50, 0).0[3] > 0,
+            "allowed side ignores avatar radius"
+        );
     }
 
     #[test]

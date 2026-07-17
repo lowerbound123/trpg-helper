@@ -61,8 +61,8 @@ describe('token project store', () => {
       id: 'project',
       title: 'Token',
       items: [
-        { id: 'one', assetId: first.id, name: first.name, mediaType: first.mediaType, sourcePath: first.path, style: { scale: 100, offsetX: 0, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'solid', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
-        { id: 'two', assetId: 'b', name: 'b.png', mediaType: 'image/png', sourcePath: '/assets/b.png', style: { scale: 100, offsetX: 0, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'solid', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
+        { id: 'one', assetId: first.id, name: first.name, mediaType: first.mediaType, sourcePath: first.path, style: { ...createDefaultTokenVisualStyle(), ringColor: '#FFFFFFFF' } },
+        { id: 'two', assetId: 'b', name: 'b.png', mediaType: 'image/png', sourcePath: '/assets/b.png', style: { ...createDefaultTokenVisualStyle(), ringColor: '#FFFFFFFF' } },
       ],
       exportSettings: createDefaultTokenExportSettings(),
       createdAt: now,
@@ -88,8 +88,8 @@ describe('token project store', () => {
       id: 'project',
       title: 'Token',
       items: [
-        { id: 'one', assetId: 'a', name: 'a.png', mediaType: 'image/png', sourcePath: '/assets/a.png', style: { scale: 100, offsetX: 0, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'solid', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
-        { id: 'two', assetId: 'b', name: 'b.png', mediaType: 'image/png', sourcePath: '/assets/b.png', style: { scale: 100, offsetX: 0, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'solid', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
+        { id: 'one', assetId: 'a', name: 'a.png', mediaType: 'image/png', sourcePath: '/assets/a.png', style: { ...createDefaultTokenVisualStyle(), ringColor: '#FFFFFFFF' } },
+        { id: 'two', assetId: 'b', name: 'b.png', mediaType: 'image/png', sourcePath: '/assets/b.png', style: { ...createDefaultTokenVisualStyle(), ringColor: '#FFFFFFFF' } },
       ],
       exportSettings: createDefaultTokenExportSettings(),
       createdAt: now,
@@ -108,6 +108,41 @@ describe('token project store', () => {
 
     expect(store.selectedItemId).toBe('two')
     expect(store.checkedItemIds).toEqual(['two'])
+  })
+
+  it('migrates legacy styles to an independent avatar radius and solid background', async () => {
+    const now = new Date().toISOString()
+    const { avatarRadius: _avatarRadius, backgroundStyle: _backgroundStyle, ...legacyStyle } = {
+      ...createDefaultTokenVisualStyle(),
+      ringInnerRadius: 187,
+      ringOuterRadius: 246,
+      scale: 135,
+      offsetX: 12,
+      offsetY: -8,
+    }
+    backend.openTokenProject.mockResolvedValue({
+      document: {
+        schemaVersion: 1,
+        id: 'legacy-project',
+        title: 'Legacy',
+        items: [{
+          id: 'legacy-item', name: 'legacy.png', mediaType: 'image/png', sourcePath: '/legacy.png',
+          style: legacyStyle,
+        }],
+        exportSettings: createDefaultTokenExportSettings(),
+        createdAt: now,
+        updatedAt: now,
+      },
+      metadata: {},
+      resolvedSources: { 'legacy-item': '/legacy.png' },
+    })
+    const store = useTokenStore()
+
+    await store.open('legacy-project')
+
+    expect(store.selectedItem?.style.avatarRadius).toBe(187)
+    expect(store.selectedItem?.style.backgroundStyle).toBe('solid')
+    expect(store.selectedItem?.style).toMatchObject({ scale: 135, offsetX: 12, offsetY: -8 })
   })
 
   it('preserves undo history after saving', async () => {
@@ -167,7 +202,7 @@ describe('token project store', () => {
     expect(store.document.items[0].style.scale).toBe(177)
   })
 
-  it('groups select-all, clear, reset style and missing-ring repair as store operations', () => {
+  it('groups select-all, clear, reset style and missing-resource repair as store operations', () => {
     const store = useTokenStore()
     const now = new Date().toISOString()
     store.document = {
@@ -175,8 +210,8 @@ describe('token project store', () => {
       id: 'project',
       title: 'Token',
       items: [
-        { id: 'one', assetId: 'a', name: 'a.png', mediaType: 'image/png', sourcePath: '/assets/a.png', style: { scale: 180, offsetX: 10, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'asset:missing', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
-        { id: 'two', assetId: 'b', name: 'b.png', mediaType: 'image/png', sourcePath: '/assets/b.png', style: { scale: 100, offsetX: 0, offsetY: 0, background: '#000000FF', ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#FFFFFFFF', ringStyle: 'solid', ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0 } },
+        { id: 'one', assetId: 'a', name: 'a.png', mediaType: 'image/png', sourcePath: '/assets/a.png', style: { ...createDefaultTokenVisualStyle(), scale: 180, offsetX: 10, ringColor: '#FFFFFFFF', ringStyle: 'asset:missing', backgroundStyle: 'asset:missing' } },
+        { id: 'two', assetId: 'b', name: 'b.png', mediaType: 'image/png', sourcePath: '/assets/b.png', style: { ...createDefaultTokenVisualStyle(), ringColor: '#FFFFFFFF' } },
       ],
       exportSettings: createDefaultTokenExportSettings(),
       createdAt: now,
@@ -191,6 +226,8 @@ describe('token project store', () => {
 
     expect(store.replaceMissingRingReferences(new Set(['solid']))).toBe(1)
     expect(store.items[0]?.style.ringStyle).toBe('solid')
+    expect(store.replaceMissingBackgroundReferences(new Set(['solid']))).toBe(1)
+    expect(store.items[0]?.style.backgroundStyle).toBe('solid')
 
     store.resetSelectedStyle()
     expect(store.items[0]?.style.scale).toBe(100)

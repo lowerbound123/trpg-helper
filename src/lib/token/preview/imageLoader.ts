@@ -90,13 +90,17 @@ export function previewImageUrl(path: string, resolve: (value: string) => string
   return resolve(path)
 }
 
-export async function loadPreviewImage(path: string): Promise<PreviewImageSource> {
+export async function loadPreviewImage(path: string, trimTransparentBounds = true): Promise<PreviewImageSource> {
   const image = await decodeImage(previewImageUrl(path))
   const source = document.createElement('canvas')
   source.width = image.naturalWidth
   source.height = image.naturalHeight
   const sourceContext = context2d(source)
   sourceContext.drawImage(image, 0, 0)
+
+  if (!trimTransparentBounds) {
+    return { source, width: source.width, height: source.height }
+  }
 
   const imageData = sourceContext.getImageData(0, 0, source.width, source.height)
   const bounds = findAlphaBounds(imageData.data, source.width, source.height)

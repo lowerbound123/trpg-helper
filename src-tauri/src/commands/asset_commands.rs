@@ -25,7 +25,9 @@ use crate::services::path_service::{
     rename_folder_value, write_debug_log,
 };
 use crate::services::preview_service::{encode_webp_thumbnail_bytes, thumbnail_path};
-use crate::types::{DeleteEntries, ImportResult, LibraryIndex, TokenRingConfig};
+use crate::types::{
+    DeleteEntries, ImportResult, LibraryIndex, TokenBackgroundConfig, TokenRingConfig,
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -507,6 +509,44 @@ pub fn update_token_ring_config(
     config.revision = revision + 1;
     config.legacy = false;
     record.token_ring = Some(config);
+    record.updated_at = Utc::now();
+    write_index(&app, &index).map_err(String::from)?;
+    Ok(index)
+}
+
+#[tauri::command]
+pub fn update_token_background_config(
+    app: AppHandle,
+    id: String,
+    expected_revision: u64,
+    mut config: TokenBackgroundConfig,
+) -> CommandResult<LibraryIndex> {
+    let limit = config.design_size;
+    if limit <= 0.0
+        || !config.image_offset_x.is_finite()
+        || !config.image_offset_y.is_finite()
+        || config.image_offset_x.abs() > limit
+        || config.image_offset_y.abs() > limit
+    {
+        return Err("invalid token background geometry".to_string());
+    }
+    let mut index = read_index(&app).map_err(String::from)?;
+    let record = index
+        .assets
+        .iter_mut()
+        .find(|record| record.id == id)
+        .ok_or_else(|| "token background asset not found".to_string())?;
+    let revision = record
+        .token_background
+        .as_ref()
+        .map_or(0, |value| value.revision);
+    if revision != expected_revision {
+        return Err(format!(
+            "token background revision conflict: expected {expected_revision}, current {revision}"
+        ));
+    }
+    config.revision = revision + 1;
+    record.token_background = Some(config);
     record.updated_at = Utc::now();
     write_index(&app, &index).map_err(String::from)?;
     Ok(index)

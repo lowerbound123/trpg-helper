@@ -33,6 +33,8 @@ describe('configuration', () => {
     expect(appConfiguration.mask.interactiveRefreshDelayMs).toBe(1000)
     expect(appConfiguration.mask.pointerIdleGraceMs).toBe(120)
     expect(appConfiguration.token.defaults.designSize).toBe(512)
+    expect(appConfiguration.token.defaults.avatarRadius).toBe(225)
+    expect(appConfiguration.token.backgrounds.offsetMin).toBe(-512)
     expect(appConfiguration.token.export.webpStrengthProfiles).toHaveLength(4)
     expect(appConfiguration.token.preview.renderer).toBe('webgl')
     expect(appConfiguration.token.layout.resizeHandleWidth).toBe(4)

@@ -4,6 +4,7 @@ import { createDefaultTokenExportSettings, createDefaultTokenVisualStyle } from 
 import type { TokenParams } from '../types'
 import {
   calculateAvatarLayout,
+  calculateBackgroundLayout,
   calculateCustomRingLayout,
   calculateGuideSegment,
   calculateHalfPlanePolygon,
@@ -21,6 +22,8 @@ const defaultTokenParams: TokenParams = {
   ringImageScaleY: 100,
   ringImageOffsetX: 0,
   ringImageOffsetY: 0,
+  backgroundImageOffsetX: 0,
+  backgroundImageOffsetY: 0,
 }
 const params = () => ({ ...defaultTokenParams })
 
@@ -33,17 +36,17 @@ describe('preview geometry', () => {
     expect(
       calculateAvatarLayout(params(), image, PREVIEW_MIN_WORLD_SIZE, PREVIEW_DISPLAY_TOKEN_SIZE),
     ).toEqual({
-      width: 220,
-      height: 220,
-      x: 146,
-      y: 146,
+      width: 244,
+      height: 244,
+      x: 134,
+      y: 134,
     })
   })
 
   it.each([
-    [10, 22],
-    [100, 220],
-    [500, 1099],
+    [10, 24],
+    [100, 244],
+    [500, 1221],
   ])('maps %i%% scale to a %ipx square avatar', (scale, expectedSize) => {
     const p = params()
     p.scale = scale
@@ -67,7 +70,7 @@ describe('preview geometry', () => {
         PREVIEW_MIN_WORLD_SIZE,
         PREVIEW_DISPLAY_TOKEN_SIZE,
       ),
-    ).toMatchObject({ width: 220, height: 110 })
+    ).toMatchObject({ width: 244, height: 122 })
     expect(
       calculateAvatarLayout(
         params(),
@@ -75,13 +78,45 @@ describe('preview geometry', () => {
         PREVIEW_MIN_WORLD_SIZE,
         PREVIEW_DISPLAY_TOKEN_SIZE,
       ),
-    ).toMatchObject({ width: 110, height: 220 })
+    ).toMatchObject({ width: 122, height: 244 })
+  })
+
+  it('uses the ring outer diameter for avatar scale and offsets', () => {
+    const first = calculateAvatarLayout(
+      { ...params(), ringInnerRadius: 100, ringOuterRadius: 200, avatarRadius: 50, scale: 100, offsetX: 10, offsetY: -10 },
+      { width: 100, height: 200 },
+      512,
+      512,
+    )
+    const second = calculateAvatarLayout(
+      { ...params(), ringInnerRadius: 20, ringOuterRadius: 200, avatarRadius: 240, scale: 100, offsetX: 10, offsetY: -10 },
+      { width: 100, height: 200 },
+      512,
+      512,
+    )
+
+    expect(second).toEqual(first)
+    expect(first).toMatchObject({ width: 200, height: 400, x: 196, y: 16 })
+  })
+
+  it('covers the outer-radius-minus-one background circle and applies offsets', () => {
+    const layout = calculateBackgroundLayout(
+      { size: 512, ringOuterRadius: 250, backgroundImageOffsetX: 12, backgroundImageOffsetY: -8 },
+      { width: 800, height: 400 },
+      512,
+      512,
+    )
+    expect(layout.x).toBeCloseTo(-230)
+    expect(layout.y).toBeCloseTo(-1)
+    expect(layout.width).toBeCloseTo(996)
+    expect(layout.height).toBeCloseTo(498)
+    expect(layout.radius).toBe(249)
   })
 
   it('converts drag deltas to clamped percentage offsets', () => {
     const p = params()
 
-    expect(offsetFromDragDelta(p, 220, -220, PREVIEW_DISPLAY_TOKEN_SIZE)).toEqual({
+    expect(offsetFromDragDelta(p, 250, -250, PREVIEW_DISPLAY_TOKEN_SIZE)).toEqual({
       offsetX: 100,
       offsetY: -100,
     })

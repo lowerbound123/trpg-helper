@@ -12,6 +12,7 @@ import {
 import { TOKEN_SCALE_MAX, TOKEN_SCALE_MIN, TOKEN_SCALE_WHEEL_STEP, type TokenParams } from '../types'
 import {
   calculateAvatarLayout,
+  calculateBackgroundLayout,
   calculateCustomRingLayout,
   calculateGuideSegment,
   calculateHalfPlanePolygon,
@@ -107,6 +108,8 @@ function drawDashedGuide(
 export interface PreviewScene {
   root: Container
   background: Graphics
+  backgroundSprite: Sprite
+  backgroundMask: Graphics
   ringBackContainer: Container
   ringBackBandContainer: Container
   ringBack: Graphics
@@ -137,6 +140,8 @@ export function createPreviewScene(): PreviewScene {
   const scene: PreviewScene = {
     root: new Container(),
     background: new Graphics(),
+    backgroundSprite: new Sprite({ texture: Texture.EMPTY }),
+    backgroundMask: new Graphics(),
     ringBackContainer: new Container(),
     ringBackBandContainer: new Container(),
     ringBack: new Graphics(),
@@ -173,6 +178,7 @@ export function createPreviewScene(): PreviewScene {
   scene.ringFrontContainer.addChild(scene.ringFrontBandContainer, scene.ringFrontBandMask)
   scene.root.addChild(
     scene.background,
+    scene.backgroundSprite,
     scene.ringBackContainer,
     scene.avatarNonSplitContainer,
     scene.avatarAllowedContainer,
@@ -180,6 +186,7 @@ export function createPreviewScene(): PreviewScene {
     scene.ringFrontContainer,
     scene.guide,
     scene.ringBackMask,
+    scene.backgroundMask,
     scene.avatarNonSplitMask,
     scene.avatarAllowedMask,
     scene.avatarRestrictedCircleMask,
@@ -187,6 +194,7 @@ export function createPreviewScene(): PreviewScene {
   )
 
   scene.ringBackContainer.mask = scene.ringBackMask
+  scene.backgroundSprite.mask = scene.backgroundMask
   scene.avatarNonSplitContainer.mask = scene.avatarNonSplitMask
   scene.avatarAllowedContainer.mask = scene.avatarAllowedMask
   scene.avatarRestrictedOuter.mask = scene.avatarRestrictedCircleMask
@@ -208,6 +216,8 @@ export class PixiTokenRenderer {
   private ringTexture: Texture | null = null
   private ringImage: PreviewImageSource | null = null
   private ringImageKind: 'builtin' | 'custom' | null = null
+  private backgroundTexture: Texture | null = null
+  private backgroundImage: PreviewImageSource | null = null
   private params: TokenParams | null = null
   private worldSize = PREVIEW_MIN_WORLD_SIZE
   private viewport = { width: PREVIEW_MIN_WORLD_SIZE, height: PREVIEW_MIN_WORLD_SIZE }
@@ -222,6 +232,7 @@ export class PixiTokenRenderer {
 
   private readonly scene = createPreviewScene()
   private readonly background = this.scene.background
+  private readonly backgroundMask = this.scene.backgroundMask
   private readonly ringBackContainer = this.scene.ringBackContainer
   private readonly ringBack = this.scene.ringBack
   private readonly ringBackMask = this.scene.ringBackMask
@@ -344,6 +355,15 @@ export class PixiTokenRenderer {
     this.setRingImage(null, null)
   }
 
+  setBackgroundImage(image: PreviewImageSource | null): void {
+    this.scene.backgroundSprite.texture = Texture.EMPTY
+    this.backgroundTexture?.destroy(true)
+    this.backgroundImage = image
+    this.backgroundTexture = image ? Texture.from(image.source) : null
+    if (this.backgroundTexture) this.scene.backgroundSprite.texture = this.backgroundTexture
+    this.renderScene()
+  }
+
   private setRingImage(image: PreviewImageSource | null, kind: 'builtin' | 'custom' | null): void {
     this.scene.ringBackSprite.texture = Texture.EMPTY
     this.scene.ringFrontSprite.texture = Texture.EMPTY
@@ -391,6 +411,7 @@ export class PixiTokenRenderer {
     if (!app) {
       this.releaseTexture()
       this.clearRingImage()
+      this.setBackgroundImage(null)
       this.destroyScene()
       this.image = null
       this.params = null
@@ -405,6 +426,7 @@ export class PixiTokenRenderer {
     this.canvas?.removeEventListener('wheel', this.onWheel)
     this.releaseTexture()
     this.clearRingImage()
+    this.setBackgroundImage(null)
     app.destroy({ removeView: true }, { children: true })
     this.sceneDestroyed = true
 
@@ -500,13 +522,30 @@ export class PixiTokenRenderer {
     const elementScale = PREVIEW_DISPLAY_TOKEN_SIZE / Math.max(params.size, 1)
     const innerRadius = Math.max(params.ringInnerRadius * elementScale, 0)
     const outerRadius = Math.max(params.ringOuterRadius * elementScale, 0)
+    const avatarRadius = Math.max(params.avatarRadius * elementScale, 0)
+    const backgroundRadius = Math.max((params.ringOuterRadius - 1) * elementScale, 0)
     const hasRing = outerRadius > 0 && innerRadius < outerRadius
     const backgroundColor = parseRgbaHex(params.background)
     const ringColor = parseRgbaHex(params.ringColor)
 
     this.background.clear()
-    if (innerRadius > 0) {
-      this.background.circle(center, center, innerRadius).fill(backgroundColor)
+    const hasCustomBackground = params.backgroundStyle.startsWith('asset:') && this.backgroundImage !== null
+    if (!hasCustomBackground && backgroundRadius > 0) {
+      this.background.circle(center, center, backgroundRadius).fill(backgroundColor)
+    }
+    this.scene.backgroundSprite.visible = hasCustomBackground
+    this.backgroundMask.clear()
+    if (hasCustomBackground && this.backgroundImage) {
+      const layout = calculateBackgroundLayout(
+        params,
+        this.backgroundImage,
+        this.worldSize,
+        PREVIEW_DISPLAY_TOKEN_SIZE,
+      )
+      this.scene.backgroundSprite.position.set(layout.x, layout.y)
+      this.scene.backgroundSprite.width = layout.width
+      this.scene.backgroundSprite.height = layout.height
+      this.backgroundMask.circle(center, center, layout.radius).fill(0xffffff)
     }
 
     const hasRingTexture = this.ringTexture !== null
@@ -574,8 +613,8 @@ export class PixiTokenRenderer {
     } else {
       drawFullMask(this.ringFrontMask, this.worldSize)
     }
-    drawCircleMask(this.avatarNonSplitMask, center, innerRadius)
-    drawCircleMask(this.avatarRestrictedCircleMask, center, innerRadius)
+    drawCircleMask(this.avatarNonSplitMask, center, avatarRadius)
+    drawCircleMask(this.avatarRestrictedCircleMask, center, avatarRadius)
 
     const hasImage = this.image !== null
     this.avatarNonSplitContainer.visible = hasImage && !params.splitRing

@@ -17,6 +17,7 @@ import type {
   TokenProjectDocument,
   TokenProjectPayload,
   TokenProjectSummary,
+  TokenBackgroundConfig,
   TokenRingConfig,
 } from './token'
 
@@ -33,6 +34,7 @@ export interface LibraryRecord {
   createdAt: string
   updatedAt: string
   tokenRing?: TokenRingConfig | null
+  tokenBackground?: TokenBackgroundConfig | null
 }
 
 export interface LibraryIndex {
@@ -364,6 +366,14 @@ export async function updateTokenRingConfig(
   config: TokenRingConfig,
 ): Promise<LibraryIndex> {
   return invoke<LibraryIndex>('update_token_ring_config', { id, expectedRevision, config })
+}
+
+export async function updateTokenBackgroundConfig(
+  id: string,
+  expectedRevision: number,
+  config: TokenBackgroundConfig,
+): Promise<LibraryIndex> {
+  return invoke<LibraryIndex>('update_token_background_config', { id, expectedRevision, config })
 }
 
 export async function importBackground(file: File, tags: string[], folder = ''): Promise<ImportResult> {

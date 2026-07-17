@@ -44,6 +44,12 @@ export function useTokenExport() {
     const customAsset = customAssetId ? editor.resolveAsset(customAssetId) : undefined
     const ring = customAsset?.tokenRing
     const missingCustomRing = Boolean(customAssetId && (!customAsset || !ring))
+    const backgroundAssetId = item.style.backgroundStyle.startsWith('asset:')
+      ? item.style.backgroundStyle.slice('asset:'.length)
+      : undefined
+    const backgroundAsset = backgroundAssetId ? editor.resolveAsset(backgroundAssetId) : undefined
+    const customBackground = backgroundAsset?.tokenBackground
+    const missingCustomBackground = Boolean(backgroundAssetId && (!backgroundAsset || !customBackground))
     if (missingCustomRing) {
       void appendDebugLog('token', 'token-export-custom-ring-missing', {
         itemId: item.id,
@@ -63,6 +69,10 @@ export function useTokenExport() {
       ringImageOffsetX: ring?.imageOffsetX ?? 0,
       ringImageOffsetY: ring?.imageOffsetY ?? 0,
       ringAssetPath: customAsset?.path,
+      backgroundStyle: missingCustomBackground ? 'solid' : item.style.backgroundStyle,
+      backgroundImageOffsetX: customBackground?.imageOffsetX ?? 0,
+      backgroundImageOffsetY: customBackground?.imageOffsetY ?? 0,
+      backgroundAssetPath: backgroundAsset?.path,
     }
   }
 

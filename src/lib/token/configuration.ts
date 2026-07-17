@@ -1,4 +1,4 @@
-import type { TokenExportSettings, TokenVisualStyle } from './types'
+import type { TokenBackgroundStyle, TokenExportSettings, TokenVisualStyle } from './types'
 
 export interface TokenFeatureConfiguration {
   defaults: {
@@ -6,7 +6,9 @@ export interface TokenFeatureConfiguration {
     scale: number
     offsetX: number
     offsetY: number
+    avatarRadius: number
     backgroundColor: string
+    backgroundStyle: TokenBackgroundStyle
     ringInnerRadius: number
     ringOuterRadius: number
     ringColor: string
@@ -88,12 +90,14 @@ export interface TokenFeatureConfiguration {
   files: { thumbnailSize: number; importFormats: string[]; exportFormats: TokenExportSettings['exportFormat'][] }
   history: { maximumEntries: number }
   rings: { thumbnailSize: number; requestDebounceMs: number; frontendCacheEntries: number; backendCacheEntries: number; maxUploadBytes: number; maxSourceDimension: number; customScaleMin: number; customScaleMax: number }
+  backgrounds: { thumbnailSize: number; frontendCacheEntries: number; maxUploadBytes: number; maxSourceDimension: number; offsetMin: number; offsetMax: number }
   notifications: { toastDurationMs: number }
 }
 
 export const defaultTokenConfiguration: TokenFeatureConfiguration = {
   defaults: {
-    designSize: 512, scale: 100, offsetX: 0, offsetY: 0, backgroundColor: '#000000FF',
+    designSize: 512, scale: 100, offsetX: 0, offsetY: 0, avatarRadius: 225,
+    backgroundColor: '#000000FF', backgroundStyle: 'solid',
     ringInnerRadius: 225, ringOuterRadius: 250, ringColor: '#F6C75BFF', ringStyle: 'solid',
     ringStretchX: 1, ringStretchY: 1, splitRing: false, splitAngle: 0, splitHeight: 0,
   },
@@ -140,6 +144,7 @@ export const defaultTokenConfiguration: TokenFeatureConfiguration = {
   files: { thumbnailSize: 56, importFormats: ['png', 'jpg', 'jpeg', 'webp', 'bmp'], exportFormats: ['png', 'jpg', 'webp', 'jxl'] },
   history: { maximumEntries: 50 },
   rings: { thumbnailSize: 64, requestDebounceMs: 50, frontendCacheEntries: 32, backendCacheEntries: 64, maxUploadBytes: 33554432, maxSourceDimension: 16384, customScaleMin: 10, customScaleMax: 500 },
+  backgrounds: { thumbnailSize: 64, frontendCacheEntries: 32, maxUploadBytes: 33554432, maxSourceDimension: 16384, offsetMin: -512, offsetMax: 512 },
   notifications: { toastDurationMs: 3000 },
 }
 
@@ -191,11 +196,30 @@ export function createDefaultTokenVisualStyle(config = defaultTokenConfiguration
   const value = config.defaults
   return {
     scale: value.scale, offsetX: value.offsetX, offsetY: value.offsetY,
-    background: value.backgroundColor, ringInnerRadius: value.ringInnerRadius,
+    avatarRadius: value.avatarRadius, background: value.backgroundColor,
+    backgroundStyle: value.backgroundStyle, ringInnerRadius: value.ringInnerRadius,
     ringOuterRadius: value.ringOuterRadius, ringColor: value.ringColor,
     ringStyle: value.ringStyle, ringStretchX: value.ringStretchX,
     ringStretchY: value.ringStretchY, splitRing: value.splitRing,
     splitAngle: value.splitAngle, splitHeight: value.splitHeight,
+  }
+}
+
+export function normalizeTokenVisualStyle(
+  source: Partial<TokenVisualStyle> | undefined,
+  fallbackAvatarRadius?: number,
+  config = defaultTokenConfiguration,
+): TokenVisualStyle {
+  const defaults = createDefaultTokenVisualStyle(config)
+  const merged = { ...defaults, ...source }
+  return {
+    ...merged,
+    avatarRadius: Number.isFinite(source?.avatarRadius)
+      ? Number(source?.avatarRadius)
+      : (fallbackAvatarRadius ?? source?.ringInnerRadius ?? defaults.avatarRadius),
+    backgroundStyle: source?.backgroundStyle === 'solid' || source?.backgroundStyle?.startsWith('asset:')
+      ? source.backgroundStyle
+      : 'solid',
   }
 }
 

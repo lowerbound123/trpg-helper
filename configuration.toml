@@ -254,8 +254,12 @@ scale = 100
 offset_x = 0
 # 配置项：Token / 默认值 / 偏移 纵向；用途：设置 Token / 默认值 的偏移 纵向；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 offset_y = 0
+# 配置项：Token / 默认值 / 图片半径；用途：控制角色图在普通模式和出框受限侧的圆形裁切范围；单位：设计像素；范围：0 到 design_size/2；生效：保存并重启应用后。
+avatar_radius = 225
 # 配置项：Token / 默认值 / 背景 颜色；用途：设置 Token / 默认值 的背景 颜色；格式：十六进制颜色或颜色数组；生效：保存并重启应用后。
 background_color = "#000000FF"
+# 配置项：Token / 默认值 / 背景样式；用途：新建 Token 默认使用纯色背景；格式：固定为 solid；生效：保存并重启应用后。
+background_style = "solid"
 # 配置项：Token / 默认值 / 圆环 内侧 半径；用途：设置 Token / 默认值 的圆环 内侧 半径；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 ring_inner_radius = 225
 # 配置项：Token / 默认值 / 圆环 外侧 半径；用途：设置 Token / 默认值 的圆环 外侧 半径；单位：像素；范围：按对应 limits 字段约束；生效：保存并重启应用后。
@@ -508,6 +512,20 @@ max_source_dimension = 16384
 custom_scale_min = 10
 # 配置项：Token / rings / 自定义 缩放 最大；用途：设置 Token / rings 的自定义 缩放 最大；范围：按对应 limits 字段约束；生效：保存并重启应用后。
 custom_scale_max = 500
+
+[token.backgrounds]
+# 配置项：Token / 自定义背景 / 缩略图尺寸；用途：设置背景选择器缩略图边长；单位：像素；范围：正整数；生效：保存并重启应用后。
+thumbnail_size = 64
+# 配置项：Token / 自定义背景 / 前端缓存数量；用途：限制背景纹理缓存条目；范围：正整数；生效：保存并重启应用后。
+frontend_cache_entries = 32
+# 配置项：Token / 自定义背景 / 最大上传字节；用途：限制单个背景素材大小；单位：字节；范围：正整数；生效：保存并重启应用后。
+max_upload_bytes = 33554432
+# 配置项：Token / 自定义背景 / 最大源图片尺寸；用途：限制背景素材任一边长度；单位：像素；范围：正整数；生效：保存并重启应用后。
+max_source_dimension = 16384
+# 配置项：Token / 自定义背景 / 位移最小值；用途：限制背景素材横纵位移；单位：设计像素；生效：保存并重启应用后。
+offset_min = -512
+# 配置项：Token / 自定义背景 / 位移最大值；用途：限制背景素材横纵位移；单位：设计像素；生效：保存并重启应用后。
+offset_max = 512
 
 [token.notifications]
 # 配置项：Token / 通知 / 提示消息 DURATION MS；用途：设置 Token / 通知 的提示消息 DURATION MS；单位：毫秒；范围：非负数；生效：保存并重启应用后。

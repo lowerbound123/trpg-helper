@@ -201,10 +201,15 @@ pub(crate) fn apply_random_colors<R, F>(
 
     for item in items {
         let custom = item.params.ring_asset_path.is_some();
+        let custom_background = item.params.background_asset_path.is_some();
         let current_background = parse_rgb(&item.params.background).unwrap_or([0, 0, 0]);
         let current_ring = parse_rgb(&item.params.ring_color).unwrap_or([255, 255, 255]);
 
-        if item.params.random_background && item.params.random_ring_color && !custom {
+        if item.params.random_background
+            && item.params.random_ring_color
+            && !custom
+            && !custom_background
+        {
             let (background, ring) = choose_pair(&palette, &used_backgrounds, &used_rings, config);
             item.params.background = replace_rgb(&item.params.background, background);
             item.params.ring_color = replace_rgb(&item.params.ring_color, ring);
@@ -213,7 +218,7 @@ pub(crate) fn apply_random_colors<R, F>(
             continue;
         }
 
-        if item.params.random_background {
+        if item.params.random_background && !custom_background {
             let reference = if custom {
                 item.params
                     .ring_asset_path
@@ -336,5 +341,20 @@ mod tests {
 
         assert_eq!(items[0].params.background, "#010203FF");
         assert_eq!(items[0].params.ring_color, "#AABBCC66");
+    }
+
+    #[test]
+    fn random_background_does_not_modify_custom_background_items() {
+        let config = &active_configuration().export.random_colors;
+        let mut custom = item("custom.png", "#01020388", "#AABBCCFF", "solid");
+        custom.params.background_style = "asset:background".into();
+        custom.params.background_asset_path = Some("/backgrounds/shared.png".into());
+        custom.params.random_ring_color = false;
+        let mut items = vec![custom];
+        let mut rng = StdRng::seed_from_u64(11);
+
+        apply_random_colors(&mut items, config, &mut rng, |_| None);
+
+        assert_eq!(items[0].params.background, "#01020388");
     }
 }

@@ -9,18 +9,22 @@ import { LatestPreviewLoad, loadPreviewImage } from '@/lib/token/preview/imageLo
 import { AppFrontendRingProvider } from '@/lib/token/rings/RingTextureProvider'
 import { ringProviderKey } from '@/lib/token/rings/providerContext'
 import type { RingDescriptor, TokenParams } from '@/lib/token'
+import type { PreviewImageSource } from '@/lib/token/preview/imageLoader'
 import { useEditorStore } from '@/stores/editor'
 import { useTokenStore } from '@/stores/token'
 import { useTokenRingStore } from '@/stores/token-rings'
+import { useTokenBackgroundStore } from '@/stores/token-backgrounds'
 import { translate } from '@/i18n'
 
 const token = useTokenStore()
 const editor = useEditorStore()
 const rings = useTokenRingStore()
+const backgrounds = useTokenBackgroundStore()
 const container = ref<HTMLDivElement>()
 const loading = ref(false)
 const errorMessage = ref('')
 const ringWarning = ref('')
+const backgroundWarning = ref('')
 const viewportZoom = ref(1)
 const loads = new LatestPreviewLoad()
 const ringProvider = inject(
@@ -31,6 +35,8 @@ const ringProvider = inject(
 let renderer: PixiTokenRenderer | undefined
 let disposed = false
 let ringVersion = 0
+let backgroundVersion = 0
+const backgroundImages = new Map<string, PreviewImageSource>()
 let ringRefreshTimer: ReturnType<typeof setTimeout> | undefined
 
 configurePreview(appConfiguration.token.preview)
@@ -50,6 +56,11 @@ const params = computed<TokenParams | undefined>(() => {
     : undefined
   const ringAsset = ringAssetId ? editor.resolveAsset(ringAssetId) : undefined
   const ring = rings.descriptor(item.style.ringStyle)?.customConfig
+  const background = backgrounds.descriptor(item.style.backgroundStyle)?.customConfig
+  const backgroundAsset = item.style.backgroundStyle.startsWith('asset:')
+    ? editor.resolveAsset(item.style.backgroundStyle.slice('asset:'.length))
+    : undefined
+  const missingBackground = item.style.backgroundStyle.startsWith('asset:') && !backgroundAsset?.tokenBackground
   return {
     size: appConfiguration.token.defaults.designSize,
     ...item.style,
@@ -61,11 +72,52 @@ const params = computed<TokenParams | undefined>(() => {
     ringImageOffsetX: ring?.imageOffsetX ?? 0,
     ringImageOffsetY: ring?.imageOffsetY ?? 0,
     ringAssetPath: ringAsset?.path,
+    backgroundStyle: missingBackground ? 'solid' : item.style.backgroundStyle,
+    backgroundImageOffsetX: background?.imageOffsetX ?? 0,
+    backgroundImageOffsetY: background?.imageOffsetY ?? 0,
+    backgroundAssetPath: backgroundAsset?.path,
   }
 })
 
 function descriptorForRing(id: string): RingDescriptor | undefined {
   return rings.descriptor(id)
+}
+
+async function refreshBackground(value?: TokenParams) {
+  if (!renderer || !value) return
+  const version = ++backgroundVersion
+  if (!value.backgroundStyle.startsWith('asset:') || !value.backgroundAssetPath) {
+    backgroundWarning.value = value.backgroundStyle.startsWith('asset:')
+      ? translate('TOKEN_BACKGROUND_UNAVAILABLE')
+      : ''
+    renderer.setBackgroundImage(null)
+    return
+  }
+  try {
+    const revision = backgrounds.descriptor(value.backgroundStyle)?.revision ?? 0
+    const cacheKey = `${value.backgroundStyle}:${revision}`
+    let image = backgroundImages.get(cacheKey)
+    if (!image) {
+      image = await loadPreviewImage(value.backgroundAssetPath, false)
+      backgroundImages.set(cacheKey, image)
+      while (backgroundImages.size > appConfiguration.token.backgrounds.frontendCacheEntries) {
+        backgroundImages.delete(backgroundImages.keys().next().value as string)
+      }
+    }
+    if (!disposed && version === backgroundVersion) {
+      backgroundWarning.value = ''
+      renderer.setBackgroundImage(image)
+    }
+  } catch (error) {
+    if (!disposed && version === backgroundVersion) {
+      backgroundWarning.value = translate('TOKEN_BACKGROUND_UNAVAILABLE')
+      renderer.setBackgroundImage(null)
+    }
+    void appendDebugLog('token', 'token-preview-background-failed', {
+      backgroundStyle: value.backgroundStyle,
+      error: String(error),
+    })
+  }
 }
 
 function changeViewportZoom(factor: number) {
@@ -164,6 +216,8 @@ watch(params, (value) => {
 }, { deep: true })
 watch(() => [params.value?.ringStyle, params.value?.ringInnerRadius, params.value?.ringOuterRadius,
   rings.descriptor(params.value?.ringStyle || '')?.revision], scheduleRingRefresh)
+watch(() => [params.value?.backgroundStyle,
+  backgrounds.descriptor(params.value?.backgroundStyle || '')?.revision], () => void refreshBackground(params.value))
 
 onMounted(async () => {
   await nextTick()
@@ -186,7 +240,7 @@ onMounted(async () => {
     await instance.mount(container.value)
     if (disposed) return instance.destroy()
     if (params.value) instance.update(params.value)
-    await Promise.all([refreshImage(sourcePath.value), refreshRing(params.value)])
+    await Promise.all([refreshImage(sourcePath.value), refreshRing(params.value), refreshBackground(params.value)])
   } catch (error) {
     errorMessage.value = translate('TOKEN_PREVIEW_INITIALIZATION_FAILED')
     void appendDebugLog('token', 'token-preview-init-failed', { error: String(error) })
@@ -198,6 +252,7 @@ onUnmounted(() => {
   disposed = true
   loads.invalidate()
   ringVersion += 1
+  backgroundVersion += 1
   clearTimeout(ringRefreshTimer)
   renderer?.destroy()
 })
@@ -219,8 +274,8 @@ defineExpose({
     <div v-if="errorMessage" class="absolute inset-x-4 top-4 rounded-md border border-destructive/40 bg-background/95 p-3 text-xs text-destructive shadow-sm">
       {{ errorMessage }}
     </div>
-    <div v-else-if="ringWarning" class="absolute inset-x-4 top-4 rounded-md border border-border bg-background/95 p-3 text-xs text-muted-foreground shadow-sm">
-      {{ ringWarning }}
+    <div v-else-if="ringWarning || backgroundWarning" class="absolute inset-x-4 top-4 rounded-md border border-border bg-background/95 p-3 text-xs text-muted-foreground shadow-sm">
+      {{ ringWarning || backgroundWarning }}
     </div>
   </div>
 </template>

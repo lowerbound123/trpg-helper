@@ -17,7 +17,9 @@ use crate::services::path_service::{
     remove_file_if_exists, write_debug_log,
 };
 use crate::services::preview_service::write_webp_thumbnail;
-use crate::types::{ImportResult, LibraryIndex, LibraryRecord, TokenRingConfig};
+use crate::types::{
+    ImportResult, LibraryIndex, LibraryRecord, TokenBackgroundConfig, TokenRingConfig,
+};
 
 pub(crate) struct BatchImportInput<'a> {
     pub(crate) client_id: String,
@@ -58,12 +60,17 @@ pub(crate) fn ensure_library(app: &AppHandle) -> Result<(), AppError> {
     let path = index_path(app)?;
     if !path.exists() {
         let mut index = LibraryIndex::default();
-        index.asset_folders = vec!["rings".to_string(), "token-tmp".to_string()];
+        index.asset_folders = vec![
+            "rings".to_string(),
+            "token-backgrounds".to_string(),
+            "token-tmp".to_string(),
+        ];
         fs::write(path, serde_json::to_vec_pretty(&index)?)?;
     } else {
         let mut index: LibraryIndex = serde_json::from_slice(&fs::read(&path)?)?;
         let previous = index.asset_folders.len();
         ensure_folder(&mut index.asset_folders, "rings");
+        ensure_folder(&mut index.asset_folders, "token-backgrounds");
         ensure_folder(&mut index.asset_folders, "token-tmp");
         if index.asset_folders.len() != previous {
             fs::write(path, serde_json::to_vec_pretty(&index)?)?;
@@ -295,6 +302,16 @@ pub(crate) fn import_records_batch(
                         } else {
                             None
                         },
+                        token_background: if bucket == "assets" && folder == "token-backgrounds" {
+                            Some(TokenBackgroundConfig {
+                                revision: 1,
+                                design_size: 512.0,
+                                image_offset_x: 0.0,
+                                image_offset_y: 0.0,
+                            })
+                        } else {
+                            None
+                        },
                     },
                     data: file.data,
                 });
@@ -452,6 +469,16 @@ pub(crate) fn import_record(
                 image_offset_x: 0.0,
                 image_offset_y: 0.0,
                 legacy: false,
+            })
+        } else {
+            None
+        },
+        token_background: if bucket == "assets" && folder == "token-backgrounds" {
+            Some(TokenBackgroundConfig {
+                revision: 1,
+                design_size: 512.0,
+                image_offset_x: 0.0,
+                image_offset_y: 0.0,
             })
         } else {
             None

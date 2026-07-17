@@ -7,21 +7,29 @@ import BooleanSettingField from '@/components/controls/BooleanSettingField.vue'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { appConfiguration } from '@/lib/configuration'
-import type { CustomRingConfig, TokenVisualStyle } from '@/lib/token'
+import type { CustomBackgroundConfig, CustomRingConfig, TokenVisualStyle } from '@/lib/token'
 import { useTokenStore } from '@/stores/token'
 import { useTokenRingStore } from '@/stores/token-rings'
+import { useTokenBackgroundStore } from '@/stores/token-backgrounds'
 import TokenColorPicker from './TokenColorPicker.vue'
 import TokenRingSelector from './TokenRingSelector.vue'
+import TokenBackgroundSelector from './TokenBackgroundSelector.vue'
 import { translate } from '@/i18n'
 
 const token = useTokenStore()
 const rings = useTokenRingStore()
+const backgrounds = useTokenBackgroundStore()
 const style = computed(() => token.selectedItem?.style)
 const ringDraft = ref<CustomRingConfig>()
 const geometryOpen = ref(false)
+const backgroundGeometryOpen = ref(false)
 const selectedRingId = computed(() => style.value?.ringStyle.startsWith('asset:') ? style.value.ringStyle : undefined)
 const selectedCustomRing = computed(() => selectedRingId.value ? rings.descriptor(selectedRingId.value) : undefined)
 let ringEditBefore: CustomRingConfig | undefined
+const selectedBackgroundId = computed(() => style.value?.backgroundStyle.startsWith('asset:') ? style.value.backgroundStyle : undefined)
+const selectedCustomBackground = computed(() => selectedBackgroundId.value ? backgrounds.descriptor(selectedBackgroundId.value) : undefined)
+const backgroundDraft = ref<CustomBackgroundConfig>()
+let backgroundEditBefore: CustomBackgroundConfig | undefined
 
 function update<K extends keyof TokenVisualStyle>(key: K, value: TokenVisualStyle[K]) {
   token.updateVisualStyle(key, value)
@@ -54,10 +62,42 @@ async function commitRingGeometry() {
   }
 }
 
+function beginBackgroundEdit() {
+  if (backgroundEditBefore || !selectedCustomBackground.value?.customConfig) return
+  backgroundEditBefore = { ...selectedCustomBackground.value.customConfig }
+}
+
+function previewBackground<K extends keyof CustomBackgroundConfig>(key: K, value: CustomBackgroundConfig[K]) {
+  if (!backgroundDraft.value || !selectedBackgroundId.value) return
+  beginBackgroundEdit()
+  backgroundDraft.value[key] = value
+  backgrounds.previewConfig(selectedBackgroundId.value, backgroundDraft.value)
+}
+
+async function commitBackgroundGeometry() {
+  if (!backgroundEditBefore || !backgroundDraft.value || !selectedBackgroundId.value) return
+  const before = backgroundEditBefore
+  const after = { ...backgroundDraft.value }
+  backgroundEditBefore = undefined
+  try {
+    const committed = await backgrounds.commitConfig(selectedBackgroundId.value, after)
+    backgroundDraft.value = { ...committed }
+    token.recordBackgroundConfig(selectedBackgroundId.value, before, after)
+  } catch {
+    backgroundDraft.value = { ...before }
+  }
+}
+
 watch(() => [selectedRingId.value, selectedCustomRing.value?.revision] as const, () => {
   const asset = selectedCustomRing.value
   ringEditBefore = undefined
   ringDraft.value = asset?.customConfig ? { ...asset.customConfig } : undefined
+}, { immediate: true })
+watch(() => [selectedBackgroundId.value, selectedCustomBackground.value?.revision] as const, () => {
+  backgroundEditBefore = undefined
+  backgroundDraft.value = selectedCustomBackground.value?.customConfig
+    ? { ...selectedCustomBackground.value.customConfig }
+    : undefined
 }, { immediate: true })
 </script>
 
@@ -89,7 +129,19 @@ watch(() => [selectedRingId.value, selectedCustomRing.value?.revision] as const,
         </Collapsible>
 
         <TokenColorPicker :label="$t('TOKEN_RING')" :model-value="style.ringColor" @edit-start="token.beginEdit()" @update:model-value="update('ringColor', $event)" @commit="token.commitEdit()" />
-        <TokenColorPicker :label="$t('TOKEN_BACKGROUND')" :model-value="style.background" @edit-start="token.beginEdit()" @update:model-value="update('background', $event)" @commit="token.commitEdit()" />
+        <NumericSliderField :label="$t('TOKEN_AVATAR_RADIUS')" :model-value="style.avatarRadius" :min="0" :max="appConfiguration.token.defaults.designSize / 2" unit="px" @edit-start="token.beginEdit()" @update:model-value="update('avatarRadius', $event)" @commit="token.commitEdit()" />
+        <TokenColorPicker v-if="style.backgroundStyle === 'solid'" :label="$t('TOKEN_BACKGROUND')" :model-value="style.background" @edit-start="token.beginEdit()" @update:model-value="update('background', $event)" @commit="token.commitEdit()" />
+        <TokenBackgroundSelector />
+        <Collapsible v-if="backgroundDraft && selectedCustomBackground" v-model:open="backgroundGeometryOpen" class="rounded-md border border-border">
+          <CollapsibleTrigger data-testid="custom-background-geometry-trigger" class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium hover:bg-muted/60">
+            <span>{{ $t('TOKEN_CUSTOM_BACKGROUND_POSITION') }} <span class="text-muted-foreground">v{{ selectedCustomBackground.revision }}</span></span>
+            <ChevronDown class="size-4 transition-transform" :class="backgroundGeometryOpen ? 'rotate-180' : ''" />
+          </CollapsibleTrigger>
+          <CollapsibleContent class="space-y-2 border-t border-border p-2">
+            <NumericSliderField :label="$t('TOKEN_BACKGROUND_OFFSET_X')" :model-value="backgroundDraft.imageOffsetX" :min="appConfiguration.token.backgrounds.offsetMin" :max="appConfiguration.token.backgrounds.offsetMax" unit="px" @edit-start="beginBackgroundEdit" @update:model-value="previewBackground('imageOffsetX', $event)" @commit="commitBackgroundGeometry" />
+            <NumericSliderField :label="$t('TOKEN_BACKGROUND_OFFSET_Y')" :model-value="backgroundDraft.imageOffsetY" :min="appConfiguration.token.backgrounds.offsetMin" :max="appConfiguration.token.backgrounds.offsetMax" unit="px" @edit-start="beginBackgroundEdit" @update:model-value="previewBackground('imageOffsetY', $event)" @commit="commitBackgroundGeometry" />
+          </CollapsibleContent>
+        </Collapsible>
         <TokenRingSelector />
 
         <div class="space-y-2 rounded-md border border-border p-3">

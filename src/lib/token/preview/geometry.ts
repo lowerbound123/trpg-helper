@@ -87,8 +87,8 @@ function calculateDisplaySize(
   refSize: number,
 ): { width: number; height: number } {
   const aspect = imageSize.width / Math.max(imageSize.height, 1)
-  const innerDiameter = params.ringInnerRadius * 2
-  const baseShortSide = (refSize * innerDiameter) / Math.max(params.size, 1)
+  const outerDiameter = params.ringOuterRadius * 2
+  const baseShortSide = (refSize * outerDiameter) / Math.max(params.size, 1)
   const requestedShortSide = Math.max(1, Math.round((baseShortSide * params.scale) / 100))
 
   if (aspect >= 1) {
@@ -105,11 +105,37 @@ function calculateDisplaySize(
 }
 
 function calculateOffsetPixels(params: TokenParams, refSize: number): { x: number; y: number } {
-  const innerDiameter = params.ringInnerRadius * 2
+  const outerDiameter = params.ringOuterRadius * 2
   const scale = refSize / Math.max(params.size, 1)
   return {
-    x: (params.offsetX / 100) * innerDiameter * scale,
-    y: (params.offsetY / 100) * innerDiameter * scale,
+    x: (params.offsetX / 100) * outerDiameter * scale,
+    y: (params.offsetY / 100) * outerDiameter * scale,
+  }
+}
+
+export interface BackgroundLayout extends AvatarLayout {
+  radius: number
+}
+
+export function calculateBackgroundLayout(
+  params: Pick<TokenParams, 'size' | 'ringOuterRadius' | 'backgroundImageOffsetX' | 'backgroundImageOffsetY'>,
+  source: ImageSize,
+  canvasSize: number,
+  refSize: number,
+): BackgroundLayout {
+  const projection = refSize / Math.max(params.size, 1)
+  const radius = Math.max(0, params.ringOuterRadius - 1) * projection
+  const diameter = radius * 2
+  const cover = Math.max(diameter / Math.max(source.width, 1), diameter / Math.max(source.height, 1))
+  const width = source.width * cover
+  const height = source.height * cover
+  const center = canvasSize / 2
+  return {
+    width,
+    height,
+    x: center - width / 2 + params.backgroundImageOffsetX * projection,
+    y: center - height / 2 + params.backgroundImageOffsetY * projection,
+    radius,
   }
 }
 
@@ -342,12 +368,12 @@ export function offsetFromDragDelta(
   deltaY: number,
   refSize: number,
 ): { offsetX: number; offsetY: number } {
-  const logicalInnerDiameter = params.ringInnerRadius * 2 * (refSize / Math.max(params.size, 1))
-  if (logicalInnerDiameter <= 0) {
+  const logicalOuterDiameter = params.ringOuterRadius * 2 * (refSize / Math.max(params.size, 1))
+  if (logicalOuterDiameter <= 0) {
     return { offsetX: params.offsetX, offsetY: params.offsetY }
   }
 
-  const factor = 100 / logicalInnerDiameter
+  const factor = 100 / logicalOuterDiameter
   return {
     offsetX: clamp(params.offsetX + deltaX * factor, -100, 100),
     offsetY: clamp(params.offsetY + deltaY * factor, -100, 100),

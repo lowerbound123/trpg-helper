@@ -9,8 +9,10 @@ import {
 } from '@/lib/backend'
 import {
   createDefaultTokenExportSettings, createDefaultTokenVisualStyle,
+  normalizeTokenVisualStyle,
   TOKEN_EXPORT_SETTING_KEYS, TOKEN_VISUAL_STYLE_KEYS,
   type CustomRingConfig, type TokenExportSettings, type TokenProjectDocument,
+  type CustomBackgroundConfig,
   type TokenProjectItem, type TokenProjectSummary, type TokenVisualStyle,
 } from '@/lib/token'
 import { appConfiguration } from '@/lib/configuration'
@@ -29,6 +31,7 @@ type HistoryAction =
   | { kind: 'export'; before: TokenExportSettings; after: TokenExportSettings }
   | { kind: 'items'; before: ItemsState; after: ItemsState }
   | { kind: 'ringConfig'; ringId: string; before: CustomRingConfig; after: CustomRingConfig }
+  | { kind: 'backgroundConfig'; backgroundId: string; before: CustomBackgroundConfig; after: CustomBackgroundConfig }
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -147,7 +150,7 @@ export const useTokenStore = defineStore('token-projects', () => {
     }
   }
 
-  function applySynchronousAction(action: Exclude<HistoryAction, { kind: 'ringConfig' }>, direction: 'before' | 'after') {
+  function applySynchronousAction(action: Extract<HistoryAction, { kind: 'style' | 'export' | 'items' }>, direction: 'before' | 'after') {
     if (!document.value) return
     if (action.kind === 'items') return applyItemsState(action[direction])
     if (action.kind === 'export') {
@@ -176,11 +179,28 @@ export const useTokenStore = defineStore('token-projects', () => {
     }
   }
 
+  async function applyBackgroundAction(action: Extract<HistoryAction, { kind: 'backgroundConfig' }>, direction: 'before' | 'after', delta: number) {
+    historyBusy.value = true
+    try {
+      const { useTokenBackgroundStore } = await import('./token-backgrounds')
+      const backgrounds = useTokenBackgroundStore()
+      if (!backgrounds.descriptor(action.backgroundId)?.customConfig) throw new Error('Custom background does not exist')
+      await backgrounds.commitConfig(action.backgroundId, action[direction])
+      historyIndex.value += delta
+      dirty.value = true
+    } catch {
+      status.value = translate('TOKEN_BACKGROUND_UNDO_FAILED')
+    } finally {
+      historyBusy.value = false
+    }
+  }
+
   function undo() {
     commitEdit()
     const action = history.value[historyIndex.value]
     if (!action || historyBusy.value) return
     if (action.kind === 'ringConfig') return void applyRingAction(action, 'before', -1)
+    if (action.kind === 'backgroundConfig') return void applyBackgroundAction(action, 'before', -1)
     applySynchronousAction(action, 'before')
     historyIndex.value -= 1
     dirty.value = true
@@ -191,6 +211,7 @@ export const useTokenStore = defineStore('token-projects', () => {
     const action = history.value[historyIndex.value + 1]
     if (!action || historyBusy.value) return
     if (action.kind === 'ringConfig') return void applyRingAction(action, 'after', 1)
+    if (action.kind === 'backgroundConfig') return void applyBackgroundAction(action, 'after', 1)
     applySynchronousAction(action, 'after')
     historyIndex.value += 1
     dirty.value = true
@@ -198,6 +219,10 @@ export const useTokenStore = defineStore('token-projects', () => {
 
   function recordRingConfig(ringId: string, before: CustomRingConfig, after: CustomRingConfig) {
     if (!equal(before, after)) pushAction({ kind: 'ringConfig', ringId, before: clone(before), after: clone(after) })
+  }
+
+  function recordBackgroundConfig(backgroundId: string, before: CustomBackgroundConfig, after: CustomBackgroundConfig) {
+    if (!equal(before, after)) pushAction({ kind: 'backgroundConfig', backgroundId, before: clone(before), after: clone(after) })
   }
 
   async function refreshProjects() {
@@ -245,7 +270,17 @@ export const useTokenStore = defineStore('token-projects', () => {
     pushItems(before)
   }
   function loadPayload(next: TokenProjectDocument, sources: Record<string, string>) {
-    document.value = clone(next)
+    const normalized = clone(next)
+    normalized.items = normalized.items.map((item) => {
+      const customRing = item.style.ringStyle?.startsWith('asset:')
+        ? useTokenRingStore().descriptor(item.style.ringStyle)?.customConfig
+        : undefined
+      return {
+        ...item,
+        style: normalizeTokenVisualStyle(item.style, customRing?.innerRadius ?? item.style.ringInnerRadius),
+      }
+    })
+    document.value = normalized
     resolvedSources.value = { ...sources }
     selectedItemId.value = next.items[0]?.id
     checkedItemIds.value = next.items.map((item) => item.id)
@@ -268,7 +303,12 @@ export const useTokenStore = defineStore('token-projects', () => {
     const checked = [...checkedItemIds.value]
     document.value.updatedAt = new Date().toISOString()
     const payload = await saveTokenProject(document.value.id, document.value)
-    document.value = clone(payload.document)
+    const normalized = clone(payload.document)
+    normalized.items = normalized.items.map((item) => ({
+      ...item,
+      style: normalizeTokenVisualStyle(item.style, item.style.ringInnerRadius),
+    }))
+    document.value = normalized
     resolvedSources.value = { ...payload.resolvedSources }
     selectedItemId.value = selected
     checkedItemIds.value = checked
@@ -336,6 +376,17 @@ export const useTokenStore = defineStore('token-projects', () => {
     if (changes.length) pushAction({ kind: 'style', changes })
     return changes.length
   }
+  function replaceMissingBackgroundReferences(availableBackgroundStyles: ReadonlySet<string>) {
+    const changes: StyleChange[] = []
+    for (const item of items.value) {
+      if (!item.style.backgroundStyle.startsWith('asset:') || availableBackgroundStyles.has(item.style.backgroundStyle)) continue
+      const before = clone(item.style)
+      item.style.backgroundStyle = 'solid'
+      changes.push({ itemId: item.id, before, after: clone(item.style) })
+    }
+    if (changes.length) pushAction({ kind: 'style', changes })
+    return changes.length
+  }
   async function deleteEntries(entries: { ids: string[]; folders: string[] }) {
     folders.value = await deleteTokenProjectEntries(entries)
     await refreshProjects()
@@ -345,9 +396,9 @@ export const useTokenStore = defineStore('token-projects', () => {
     projects, folders, document, resolvedSources, selectedItemId, checkedItemIds, status, dirty,
     items, selectedItem, canUndo, canRedo, historyBusy, refreshProjects, addFolder, createFromAssets,
     addAssets, removeItem, open, save, renameCurrentProject, close, updateVisualStyle,
-    updateExportSetting, beginEdit, commitEdit, undo, redo, recordRingConfig,
+    updateExportSetting, beginEdit, commitEdit, undo, redo, recordRingConfig, recordBackgroundConfig,
     applyCurrentStyleToChecked, toggleAllChecked, clearItems, resetSelectedStyle,
-    replaceMissingRingReferences, deleteEntries, visualStyleKeys: TOKEN_VISUAL_STYLE_KEYS,
+    replaceMissingRingReferences, replaceMissingBackgroundReferences, deleteEntries, visualStyleKeys: TOKEN_VISUAL_STYLE_KEYS,
     exportSettingKeys: TOKEN_EXPORT_SETTING_KEYS,
   }
 })

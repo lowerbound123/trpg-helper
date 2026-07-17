@@ -678,7 +678,7 @@ handout-generator/
 
 后端共暴露 **56 个 Tauri 命令**，全部返回 `Result<T, String>`。前端通过 `@tauri-apps/api` 的 `invoke("command_name", args?, options?)` 调用。常规命令使用 JSON 参数；Handout 大导出使用 raw bytes body，Token 批量导出使用 Channel 推送进度。
 
-### 库管理（11）
+### 库管理
 
 | 命令 | 用途 |
 |---|---|
@@ -693,6 +693,7 @@ handout-generator/
 | `import_asset` | 导入素材图（生成缩略图） |
 | `import_font` | 导入字体（提取 font_family） |
 | `update_token_ring_config` | 使用 expected revision 更新 Asset 自定义环几何 |
+| `update_token_background_config` | 使用 expected revision 更新 Asset 自定义背景位移 |
 | `segment_asset_foreground` | 单文件兼容入口，内部转发到批量分割链路 |
 | `segment_assets_foreground` | 批量接收 `assetId + sourcePath`，按配置并发分割，通过 Channel 返回下载/探测/逐项处理/写入进度，最后单次提交 Library index |
 
@@ -912,13 +913,13 @@ Token 项目默认命名为 `未命名项目-YYYYMMDD-HHmmss`，创建后立即�
 
 `TokenProjectDocument` 保存项目项的独立 `TokenVisualStyle` 和共享 `TokenExportSettings`。每个项目项优先使用稳定 `assetId` 解析当前 Assets；创建/保存时 Rust 将源图复制到项目 `sources/` 并写入 `fallbackSource`。Asset 被移动不影响引用，Asset 被删除后仍可通过项目副本打开、预览和导出；两处均缺失的项保留在文档中，批量导出会为其生成明确失败结果，而不是静默跳过。
 
-Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编辑器导入外部文件/文件夹时先进入 `token-tmp`；自定义环进入 `rings`。`LibraryRecord.tokenRing` 保存 revision、设计尺寸、内外径、素材缩放和偏移，更新使用 expected revision 防止旧提交覆盖新设置。
+Assets 初始化会确保逻辑目录 `rings`、`token-backgrounds` 和 `token-tmp` 存在。Token 编辑器导入外部文件/文件夹时先进入 `token-tmp`；自定义环进入 `rings`，自定义背景进入 `token-backgrounds`。`LibraryRecord.tokenRing` 保存 revision、设计尺寸、内外径、素材缩放和偏移；`LibraryRecord.tokenBackground` 保存 revision、设计尺寸及 X/Y 位移，两者均使用 expected revision 防止旧提交覆盖新设置。
 
 ### 12.3 三栏编辑器
 
 - 左栏 `Items / Assets`：Items 提供外部图片/文件夹导入、拖放、全选/取消、样式批量应用、清空和紧凑项列表；文件选择统一走 64 MiB 分批 raw IPC，Tauri 原生文件/目录拖放在 Rust 侧递归收集图片并通过单批索引事务导入。列表优先使用 Library thumbnail，项目 fallback source 使用 64 项运行时小图缓存。Assets 是完整 VueFinder，支持上传、目录、移动、重命名、删除、搜索、多选，并可右键递归加入文件/目录。
-- 中栏：长期持有的 `PixiTokenRenderer`，支持头像拖动、滚轮缩放、响应式取景、出框参考线、快速切图 freshness token、纹理释放和完整 dispose。Asset/项目 fallback/自定义环通过 Tauri asset protocol URL 加载，不请求 plugin-fs 读取 capability；加载错误可见且写入 `logs/token.log`。
-- 右栏 `参数 / 导出`：头像缩放/偏移、背景、环样式/颜色/半径/拉伸、分割角度与高度、自定义环几何，以及 PNG/JPEG/WebP/JXL 参数和导出范围。
+- 中栏：长期持有的 `PixiTokenRenderer`，支持头像拖动、滚轮缩放、响应式取景、出框参考线、快速切图 freshness token、纹理释放和完整 dispose。Asset/项目 fallback/自定义环/自定义背景通过 Tauri asset protocol URL 加载，不请求 plugin-fs 读取 capability；加载错误可见且写入 `logs/token.log`。
+- 右栏 `参数 / 导出`：头像缩放/偏移/独立裁切半径、纯色或自定义背景、环样式/颜色/半径/拉伸、分割角度与高度、自定义环几何，以及 PNG/JPEG/WebP/JXL 参数和导出范围。
 
 三栏首行分别承载“返回与可编辑项目名”、“实时预览与视口缩放”、“撤销/重做/保存”，不再叠加整宽项目横条。下划线标签、列表密度、选择态和控制面板顺序与独立 Token Generator 保持一致，同时继续使用集成应用的 shadcn-vue 中性主题。左侧 Assets 通过 `TokenEditorContext` 注入已解析的 plain VueFinder driver、features 和 context menu，不能把嵌套 `ComputedRef` 直接传给 VueFinder；资源浏览器及其 explorer 使用完整高度和独立滚动区。
 
@@ -936,6 +937,10 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 
 自定义环六项几何在滑块拖动时只更新 runtime preview，松手后以 expected revision 提交并进入撤销历史；`designSize` 不再对用户开放。非标准旧设计尺寸会按当前配置同比迁移半径和位移。前端和 Rust 均先裁切透明边界，保证带透明留白的环在预览与导出中位置一致；自定义环保留原始 RGB，仅乘环颜色 alpha。环 Asset 缺失时预览和导出均回退 solid，并写入 `logs/token.log`。
 
+头像的 `scale` 与 `offsetX/offsetY` 始终以圆环外径为参考，圆环内径只约束环带。`avatarRadius` 是独立圆形裁切参数：普通模式裁切整个头像，出框模式允许侧不裁切、受限侧继续裁切并由前层环覆盖。纯色及自定义背景统一裁切到 `max(ringOuterRadius - 1, 0)`；自定义背景保持完整源图透明边界，按 Cover 铺满后只应用共享的设计空间 X/Y 位移，不提供缩放参数。
+
+背景选择器与自定义背景位移面板均为独立 Collapsible。`useTokenBackgroundStore` 负责 descriptor、runtime preview、revision commit、导入、删除和缺失回退；纹理按 Asset revision 缓存。旧项目缺少 `avatarRadius` 时以有效环内径迁移，缺少 `backgroundStyle` 时迁移为 `solid`，原有 scale/offset 数值保持不变。
+
 ### 12.5 Rust 批量导出与共享编码
 
 `generate_token_batch` 使用 Tauri `Channel<ExportProgressEvent>` 报告 preparing、decoding、rendering、compositing、encoding。每项冻结独立视觉参数与共享导出参数，单项失败不会终止后续项，重复文件名按配置避让。`token/encoding.rs` 现仅负责将 `TokenParams` 适配到 `services/image_encoding.rs`，Token 和 Handout 不再各自维护编码器实现。
@@ -949,11 +954,11 @@ Assets 初始化会确保逻辑目录 `rings` 和 `token-tmp` 存在。Token 编
 
 ### 12.6 当前验证基线
 
-- `pnpm exec vitest run`：63 个测试文件、247 项测试。
+- `pnpm exec vitest run`：64 个测试文件、253 项测试。
 - `pnpm run typecheck`：通过。
 - `pnpm run build`：通过，无构建 warning。
 - VueFinder 包含预打包的 CodeMirror 模块，必须保持为单一 vendor chunk；禁止通过 `maxSize` 强制拆分，否则会形成循环初始化并导致打包应用启动白屏。`chunkSizeWarningLimit=850` 仅覆盖该已知 812 kB 第三方 chunk，其他更大 chunk 仍会报警。
-- `cargo test --manifest-path src-tauri/Cargo.toml`：82 项 Rust 测试通过，另有 1 项真实 BiRefNet smoke test 按需运行；覆盖项目源图副本、Token/Handout/AI/i18n 配置、几何、内置/自定义环、前景 mask Alpha 合成、模型注册与下载、持久化校验缓存、单一 CoreML manifest、设备选择、惰性后端错误恢复与平台资源映射、四种编码器、HGE1 envelope、中文文件名和重名避让。
+- `cargo test --manifest-path src-tauri/Cargo.toml`：87 项 Rust 测试通过，另有 1 项真实 BiRefNet smoke test 按需运行；覆盖项目源图副本、Token/Handout/AI/i18n 配置、头像与背景几何、内置/自定义环、自定义背景 Cover/Alpha、前景 mask Alpha 合成、模型注册与下载、持久化校验缓存、单一 CoreML manifest、设备选择、惰性后端错误恢复与平台资源映射、四种编码器、HGE1 envelope、中文文件名和重名避让。
 
 ### 12.7 前景分割资源与运行时
 

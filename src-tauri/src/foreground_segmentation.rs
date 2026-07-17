@@ -375,6 +375,7 @@ impl ForegroundSegmentationService {
                 created_at: now,
                 updated_at: now,
                 token_ring: None,
+                token_background: None,
             };
             created_paths.push((output_path, thumbnail_path));
             index.assets.push(record.clone());

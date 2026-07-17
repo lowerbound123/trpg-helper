@@ -42,6 +42,7 @@ const defaults: TokenParams = {
   ...createDefaultTokenVisualStyle(),
   ...createDefaultTokenExportSettings(),
   ringImageScaleX: 100, ringImageScaleY: 100, ringImageOffsetX: 0, ringImageOffsetY: 0,
+  backgroundImageOffsetX: 0, backgroundImageOffsetY: 0,
 }
 const handlers = () => ({ onOffsetChange: vi.fn(), onOffsetCommit: vi.fn(), onScaleChange: vi.fn() })
 
@@ -67,6 +68,7 @@ describe('PixiTokenRenderer', () => {
     expect(scene.avatarRestrictedInner.parent).toBe(scene.avatarRestrictedOuter)
     expect(scene.avatarRestrictedHalfMask.parent).toBe(scene.avatarRestrictedOuter)
     expect(scene.ringBackSprite.parent).toBe(scene.ringBackBandContainer)
+    expect(scene.backgroundSprite.mask).toBe(scene.backgroundMask)
     scene.root.destroy({ children: true })
   })
 

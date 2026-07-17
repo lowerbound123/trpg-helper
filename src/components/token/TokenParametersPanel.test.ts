@@ -12,10 +12,11 @@ import { useEditorStore } from '@/stores/editor'
 import { useTokenRingStore } from '@/stores/token-rings'
 import TokenParametersPanel from './TokenParametersPanel.vue'
 
-const backend = vi.hoisted(() => ({ updateTokenRingConfig: vi.fn() }))
+const backend = vi.hoisted(() => ({ updateTokenRingConfig: vi.fn(), updateTokenBackgroundConfig: vi.fn() }))
 vi.mock('@/lib/backend', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/backend')>(),
   updateTokenRingConfig: backend.updateTokenRingConfig,
+  updateTokenBackgroundConfig: backend.updateTokenBackgroundConfig,
 }))
 
 function documentFixture(): TokenProjectDocument {
@@ -53,6 +54,7 @@ describe('TokenParametersPanel', () => {
           NumericSliderField: true,
           TokenColorPicker: true,
           TokenRingSelector: true,
+          TokenBackgroundSelector: true,
         },
       },
     })
@@ -89,7 +91,7 @@ describe('TokenParametersPanel', () => {
     })
 
     expect(wrapper.text()).toContain(translate('TOKEN_CUSTOM_RING_GEOMETRY'))
-    expect(wrapper.findAll('.numeric-field')).toHaveLength(3)
+    expect(wrapper.findAll('.numeric-field')).toHaveLength(4)
 
     await wrapper.get('[data-testid="custom-ring-geometry-trigger"]').trigger('click')
     const labels = wrapper.findAll('.numeric-field').map((node) => node.text())
@@ -118,6 +120,35 @@ describe('TokenParametersPanel', () => {
     const labels = wrapper.findAll('.numeric-field').map((node) => node.text())
     expect(labels).not.toContain(translate('TOKEN_RING_SCALE_X'))
     expect(labels).not.toContain(translate('TOKEN_RING_SCALE_Y'))
+  })
+
+  it('shows only offset controls for a custom background', async () => {
+    const token = useTokenStore()
+    const editor = useEditorStore()
+    token.document = documentFixture()
+    token.selectedItemId = 'item-1'
+    token.selectedItem!.style.backgroundStyle = 'asset:background-1'
+    editor.library.assets = [{
+      id: 'background-1', name: 'background.png', fileName: 'background.png', path: '/tmp/background.png',
+      mediaType: 'image/png', tags: [], folder: 'token-backgrounds', createdAt: '', updatedAt: '',
+      tokenBackground: { revision: 1, designSize: 512, imageOffsetX: 0, imageOffsetY: 0 },
+    }]
+    const wrapper = mount(TokenParametersPanel, {
+      global: {
+        stubs: {
+          NumericSliderField: { props: ['label'], template: '<div class="numeric-field">{{ label }}</div>' },
+          TokenColorPicker: true,
+          TokenRingSelector: true,
+          TokenBackgroundSelector: true,
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="custom-background-geometry-trigger"]').trigger('click')
+    const labels = wrapper.findAll('.numeric-field').map((node) => node.text())
+    expect(labels).toContain(translate('TOKEN_BACKGROUND_OFFSET_X'))
+    expect(labels).toContain(translate('TOKEN_BACKGROUND_OFFSET_Y'))
+    expect(labels).not.toContain(translate('TOKEN_RING_SCALE_X'))
   })
 
   it('keeps the live ring preview draft until commit', async () => {

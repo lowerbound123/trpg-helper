@@ -23,6 +23,7 @@ config_struct!(AppConfiguration {
     layout: LayoutConfig,
     files: FilesConfig,
     rings: RingsConfig,
+    backgrounds: BackgroundsConfig,
     history: HistoryConfig,
     notifications: NotificationsConfig,
     diagnostics: DiagnosticsConfig,
@@ -48,7 +49,9 @@ config_struct!(TokenDefaults {
     scale: f32,
     offset_x: f32,
     offset_y: f32,
+    avatar_radius: i32,
     background_color: String,
+    background_style: String,
     ring_inner_radius: i32,
     ring_outer_radius: i32,
     ring_color: String,
@@ -175,6 +178,14 @@ config_struct!(RingsConfig {
     max_source_dimension: u32,
     custom_scale_min: f32,
     custom_scale_max: f32
+});
+config_struct!(BackgroundsConfig {
+    thumbnail_size: u32,
+    frontend_cache_entries: usize,
+    max_upload_bytes: u64,
+    max_source_dimension: u32,
+    offset_min: f32,
+    offset_max: f32
 });
 config_struct!(HistoryConfig {
     maximum_entries: usize
@@ -343,6 +354,9 @@ impl AppConfiguration {
             return Err("Token 参数范围无效".into());
         }
         if d.design_size == 0
+            || d.avatar_radius < 0
+            || d.avatar_radius > (d.design_size / 2) as i32
+            || d.background_style != "solid"
             || d.ring_inner_radius < 0
             || d.ring_inner_radius >= d.ring_outer_radius
             || d.ring_outer_radius > (d.design_size / 2) as i32
@@ -503,6 +517,11 @@ impl AppConfiguration {
             || self.rings.max_source_dimension == 0
             || self.rings.custom_scale_min <= 0.0
             || self.rings.custom_scale_min > self.rings.custom_scale_max
+            || self.backgrounds.thumbnail_size == 0
+            || self.backgrounds.frontend_cache_entries == 0
+            || self.backgrounds.max_upload_bytes == 0
+            || self.backgrounds.max_source_dimension == 0
+            || self.backgrounds.offset_min > self.backgrounds.offset_max
             || self.history.maximum_entries == 0
             || self.notifications.toast_duration_ms == 0
             || self.export.naming.collision_start < 2
@@ -670,6 +689,7 @@ pub fn parse_handout_configuration(source: &str) -> Result<AppConfiguration, Str
     value.insert("layout".into(), required("layout")?);
     value.insert("files".into(), required("files")?);
     value.insert("rings".into(), required("rings")?);
+    value.insert("backgrounds".into(), required("backgrounds")?);
     value.insert("history".into(), required("history")?);
     value.insert("notifications".into(), required("notifications")?);
 
@@ -832,6 +852,8 @@ mod tests {
         assert_eq!(c.application.locale, "auto");
         assert_eq!(c.token.defaults.design_size, 512);
         assert_eq!(c.token.defaults.ring_inner_radius, 225);
+        assert_eq!(c.token.defaults.avatar_radius, 225);
+        assert_eq!(c.backgrounds.offset_min, -512.0);
         assert_eq!(c.token.defaults.ring_outer_radius, 250);
         assert_eq!(c.export.defaults.size, 512);
         assert!(!c.export.defaults.jxl_lossless);
